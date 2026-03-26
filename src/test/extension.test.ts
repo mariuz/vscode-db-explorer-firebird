@@ -67,3 +67,67 @@ suite("SQL Splitter", function () {
         assert.strictEqual(result[0], "SELECT 'it''s' FROM T");
     });
 });
+
+suite("Schema Context Builder", function () {
+    // Import inline to avoid pulling in vscode module in pure-node test runner
+    const { buildSchemaContext } = require('../copilot/schema-context');
+
+    test("returns empty string for undefined schema", function () {
+        assert.strictEqual(buildSchemaContext(undefined), '');
+    });
+
+    test("returns empty string for schema with no tables", function () {
+        assert.strictEqual(buildSchemaContext({ reservedKeywords: true, tables: [] }), '');
+    });
+
+    test("formats single table with typed fields", function () {
+        const schema = {
+            reservedKeywords: true,
+            tables: [
+                {
+                    name: 'CUSTOMERS',
+                    fields: [
+                        { name: 'ID', type: 'INTEGER' },
+                        { name: 'NAME', type: 'VARCHAR(50)' },
+                    ],
+                },
+            ],
+        };
+        assert.strictEqual(buildSchemaContext(schema), 'CUSTOMERS(ID INTEGER, NAME VARCHAR(50))');
+    });
+
+    test("formats multiple tables on separate lines", function () {
+        const schema = {
+            reservedKeywords: true,
+            tables: [
+                { name: 'A', fields: [{ name: 'X', type: 'INTEGER' }] },
+                { name: 'B', fields: [{ name: 'Y', type: 'VARCHAR(10)' }] },
+            ],
+        };
+        const result = buildSchemaContext(schema);
+        const lines = result.split('\n');
+        assert.strictEqual(lines.length, 2);
+        assert.strictEqual(lines[0], 'A(X INTEGER)');
+        assert.strictEqual(lines[1], 'B(Y VARCHAR(10))');
+    });
+
+    test("handles fields without type", function () {
+        const schema = {
+            reservedKeywords: false,
+            tables: [
+                { name: 'T', fields: [{ name: 'COL1' }] },
+            ],
+        };
+        assert.strictEqual(buildSchemaContext(schema), 'T(COL1)');
+    });
+
+    test("handles table with no fields", function () {
+        const schema = {
+            reservedKeywords: true,
+            tables: [
+                { name: 'EMPTY_TBL', fields: [] },
+            ],
+        };
+        assert.strictEqual(buildSchemaContext(schema), 'EMPTY_TBL()');
+    });
+});

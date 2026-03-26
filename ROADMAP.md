@@ -18,9 +18,9 @@ This document outlines the planned features and improvements for the **DB Explor
 
 ## AI-Powered Enhancements
 
-- [ ] GitHub Copilot integration for Firebird SQL — contextual AI suggestions tailored to the connected database
-- [ ] Natural-language query generation — describe what you want in plain English, get Firebird SQL
-- [ ] AI-assisted query optimization and explain plan analysis
+- [x] GitHub Copilot integration for Firebird SQL — contextual AI suggestions tailored to the connected database
+- [x] Natural-language query generation — describe what you want in plain English, get Firebird SQL
+- [x] AI-assisted query optimization and explain plan analysis
 - [ ] AI-assisted schema design from sample data
 
 ## Query Execution and Results

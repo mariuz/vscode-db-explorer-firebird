@@ -14,7 +14,9 @@
     "RDBMS",
     "FDB",
     "GDB",
-    "SQL"
+    "SQL",
+    "Copilot",
+    "AI"
   ],
   "bugs": {
     "url": "https://github.com/ninoDeme/vscode-db-explorer-firebird/issues"
@@ -496,6 +498,29 @@
         "language": "sql",
         "path": "./snippets/firebird.code-snippets"
       }
+    ],
+    "chatParticipants": [
+      {
+        "id": "firebird-db-explorer.firebird",
+        "fullName": "Firebird SQL Assistant",
+        "name": "firebird",
+        "description": "AI assistant for Firebird SQL databases — generate queries, optimise SQL, and get explanations",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "query",
+            "description": "Generate Firebird SQL from a natural-language description"
+          },
+          {
+            "name": "optimize",
+            "description": "Suggest optimisations for a SQL query"
+          },
+          {
+            "name": "explain",
+            "description": "Explain what a SQL query does in plain English"
+          }
+        ]
+      }
     ]
   },
   "activationEvents": [
@@ -526,8 +551,11 @@
     "typescript": "^4.0.3"
   },
   "engines": {
-    "vscode": "^1.32.0"
+    "vscode": "^1.93.0"
   },
+  "extensionDependencies": [
+    "github.copilot-chat"
+  ],
   "icon": "resources/img/icon.png",
   "galleryBanner": {
     "color": "#f1c40f",

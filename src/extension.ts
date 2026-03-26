@@ -19,6 +19,7 @@ import {SqlLinter} from "./shared/sql-linter";
 import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
 import {fetchSchemaSnapshot, diffSchemas, renderDiffReport} from "./schema-diff/schema-diff";
 import {QueryHistoryProvider, QueryHistoryItem} from "./query-history/query-history-provider";
+import {registerCopilotChatParticipant} from "./copilot/copilot-chat-participant";
 
 
 export function activate(context: ExtensionContext) {
@@ -57,6 +58,9 @@ export function activate(context: ExtensionContext) {
 
   /* Query history */
   const queryHistoryProvider = new QueryHistoryProvider(context);
+
+  /* Copilot Chat participant (@firebird) */
+  registerCopilotChatParticipant(context, firebirdDatabaseWords);
 
   context.subscriptions.push(
     window.registerTreeDataProvider(Constants.FirebirdExplorerViewId, firebirdTreeDataProvider),
