@@ -14,6 +14,10 @@ import QueryResultsView from "./result-view";
 import MockData from "./mock-data/mock-data";
 import LanguageServer from "./language-server";
 import * as cp from 'node:child_process';
+import {formatSQL} from "./shared/sql-formatter";
+import {SqlLinter} from "./shared/sql-linter";
+import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
+import {fetchSchemaSnapshot, diffSchemas, renderDiffReport} from "./schema-diff/schema-diff";
 
 
 export function activate(context: ExtensionContext) {
@@ -42,11 +46,22 @@ export function activate(context: ExtensionContext) {
   const firebirdMockData = new MockData(context.extensionPath);
   const firebirdQueryResults = new QueryResultsView(context.extensionPath);
 
+  /* SQL linter */
+  const sqlLinter = new SqlLinter();
+  sqlLinter.setSchemaProvider(() => firebirdDatabaseWords.getSchema());
+  sqlLinter.activate(context);
+
+  /* Bookmarks */
+  const bookmarkProvider = new BookmarkProvider(context);
+
   context.subscriptions.push(
     window.registerTreeDataProvider(Constants.FirebirdExplorerViewId, firebirdTreeDataProvider),
+    window.registerTreeDataProvider("firebird-bookmarks", bookmarkProvider),
     firebirdMockData,
     firebirdQueryResults,
-    firebirdLanguageServer
+    firebirdLanguageServer,
+    sqlLinter,
+    bookmarkProvider
   );
 
   firebirdLanguageServer.setSchemaHandler(_doc => {
@@ -298,6 +313,158 @@ export function activate(context: ExtensionContext) {
           }
         });
       }
+    })
+  );
+
+  /* COMMAND: format SQL document */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.formatSql", async () => {
+      const editor = window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'sql') {
+        logger.showError("No SQL document is active.");
+        return;
+      }
+      const document = editor.document;
+      const text = document.getText();
+      const formatted = formatSQL(text);
+      if (formatted === text) {
+        logger.showInfo("SQL document is already formatted.");
+        return;
+      }
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length)
+      );
+      await editor.edit(editBuilder => {
+        editBuilder.replace(fullRange, formatted);
+      });
+    })
+  );
+
+  /* COMMAND: schema diff — compare two saved connections */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.schemaDiff", async () => {
+      const connections = context.globalState.get<{ [key: string]: import('./interfaces').ConnectionOptions }>(Constants.ConectionsKey);
+      if (!connections || Object.keys(connections).length < 1) {
+        logger.showError("Please add at least one database connection to use Schema Diff.");
+        return;
+      }
+
+      const allConns = Object.values(connections);
+      const items = allConns.map(c => ({
+        label: c.embedded ? `[embedded] ${c.database}` : `${c.host}: ${c.database}`,
+        detail: c.id,
+        conn: c,
+      }));
+
+      const sourcePick = await window.showQuickPick(items, { placeHolder: "Select SOURCE database" });
+      if (!sourcePick) { return; }
+
+      const targetItems = items.filter(i => i.detail !== sourcePick.detail);
+      if (targetItems.length === 0) {
+        logger.showError("You need at least two database connections for Schema Diff.");
+        return;
+      }
+      const targetPick = await window.showQuickPick(targetItems, { placeHolder: "Select TARGET database" });
+      if (!targetPick) { return; }
+
+      const maxTables = config.maxTablesCount;
+
+      try {
+        await window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "Comparing schemas…", cancellable: false },
+          async () => {
+            const [sourceConn, targetConn] = await Promise.all([
+              import('./shared/credential-store').then(m => m.CredentialStore.getPassword(sourcePick.conn.id)),
+              import('./shared/credential-store').then(m => m.CredentialStore.getPassword(targetPick.conn.id)),
+            ]);
+            const src = { ...sourcePick.conn, password: sourceConn ?? "" };
+            const tgt = { ...targetPick.conn, password: targetConn ?? "" };
+
+            const [sourceSnapshot, targetSnapshot] = await Promise.all([
+              fetchSchemaSnapshot(src, maxTables),
+              fetchSchemaSnapshot(tgt, maxTables),
+            ]);
+
+            const diff = diffSchemas(sourceSnapshot, targetSnapshot);
+            const report = renderDiffReport(diff, sourcePick.label, targetPick.label);
+
+            const doc = await workspace.openTextDocument({ content: report, language: "plaintext" });
+            await window.showTextDocument(doc, vscode.ViewColumn.Beside);
+          }
+        );
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError("Schema Diff failed. Check logs for details.", ["Show Logs"]).then(sel => {
+          if (sel === "Show Logs") { logger.showOutput(); }
+        });
+      }
+    })
+  );
+
+  /* COMMAND: add bookmark */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.add", async () => {
+      const editor = window.activeTextEditor;
+      let sql = "";
+      if (editor && editor.document.languageId === 'sql') {
+        const sel = editor.selection;
+        sql = sel.isEmpty ? editor.document.getText() : editor.document.getText(sel);
+      }
+      if (!sql.trim()) {
+        logger.showError("No SQL content to bookmark. Open or select a SQL query first.");
+        return;
+      }
+      const name = await window.showInputBox({
+        prompt: "Enter a name for this bookmark",
+        placeHolder: "e.g. List active customers",
+        validateInput: v => (v && v.trim() ? undefined : "Please enter a bookmark name."),
+      });
+      if (!name) { return; }
+      await bookmarkProvider.add(name.trim(), sql);
+      logger.showInfo(`Bookmark '${name.trim()}' saved.`);
+    })
+  );
+
+  /* COMMAND: open bookmark in editor */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.open", async (item: BookmarkItem) => {
+      if (!item?.bookmark?.sql) { return; }
+      await Driver.createSQLTextDocument(item.bookmark.sql);
+    })
+  );
+
+  /* COMMAND: delete bookmark */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.delete", async (item: BookmarkItem) => {
+      if (!item?.bookmark) { return; }
+      const confirm = await window.showWarningMessage(
+        `Delete bookmark '${item.bookmark.name}'?`, { modal: true }, "Delete"
+      );
+      if (confirm === "Delete") {
+        await bookmarkProvider.delete(item.bookmark.id);
+      }
+    })
+  );
+
+  /* COMMAND: rename bookmark */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.rename", async (item: BookmarkItem) => {
+      if (!item?.bookmark) { return; }
+      const newName = await window.showInputBox({
+        prompt: "Enter new bookmark name",
+        value: item.bookmark.name,
+        validateInput: v => (v && v.trim() ? undefined : "Please enter a name."),
+      });
+      if (!newName) { return; }
+      await bookmarkProvider.rename(item.bookmark.id, newName.trim());
+    })
+  );
+
+  /* COMMAND: refresh bookmarks view */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.refresh", () => {
+      bookmarkProvider.refresh();
     })
   );
 }

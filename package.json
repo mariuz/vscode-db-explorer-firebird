@@ -143,6 +143,47 @@
         "command": "firebird.selectAllViewRecords",
         "title": "Select All Records",
         "category": "Firebird"
+      },
+      {
+        "command": "firebird.formatSql",
+        "title": "Format SQL Document",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.schemaDiff",
+        "title": "Schema Diff",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.bookmarks.add",
+        "title": "Add Bookmark",
+        "category": "Firebird",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "firebird.bookmarks.open",
+        "title": "Open Bookmark in Editor",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.bookmarks.delete",
+        "title": "Delete Bookmark",
+        "category": "Firebird",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "firebird.bookmarks.rename",
+        "title": "Rename Bookmark",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.bookmarks.refresh",
+        "title": "Refresh Bookmarks",
+        "category": "Firebird",
+        "icon": {
+          "light": "resources/icons/light/refresh.svg",
+          "dark": "resources/icons/dark/refresh.svg"
+        }
       }
     ],
     "configuration": {
@@ -196,6 +237,26 @@
           ],
           "default": "10",
           "description": "Number of records per page to show in results view."
+        },
+        "firebird.linting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable SQL linting for Firebird SQL documents."
+        },
+        "firebird.linting.selectStarWarning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warn when SELECT * is used."
+        },
+        "firebird.linting.missingWhereWarning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warn when UPDATE or DELETE statements are missing a WHERE clause."
+        },
+        "firebird.linting.validateTableNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate table names against the active database schema."
         }
       }
     },
@@ -204,12 +265,32 @@
         "command": "firebird.runQuery",
         "key": "ctrl+alt+q",
         "when": "editorLangId == sql"
+      },
+      {
+        "command": "firebird.formatSql",
+        "key": "ctrl+alt+f",
+        "when": "editorLangId == sql"
+      },
+      {
+        "command": "firebird.bookmarks.add",
+        "key": "ctrl+alt+b",
+        "when": "editorLangId == sql"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "firebird.runQuery",
+          "when": "editorLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "firebird.formatSql",
+          "when": "editorLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "firebird.bookmarks.add",
           "when": "editorLangId == sql",
           "group": "navigation"
         }
@@ -229,6 +310,16 @@
           "command": "firebird.explorer.refresh",
           "when": "view == firebird-explorer",
           "group": "navigation@3"
+        },
+        {
+          "command": "firebird.bookmarks.add",
+          "when": "view == firebird-bookmarks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "firebird.bookmarks.refresh",
+          "when": "view == firebird-bookmarks",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -256,6 +347,11 @@
           "command": "firebird.removeDatabase",
           "when": "view == firebird-explorer && viewItem == database",
           "group": "second@0"
+        },
+        {
+          "command": "firebird.schemaDiff",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "second@1"
         },
         {
           "command": "firebird.mockData",
@@ -286,6 +382,21 @@
           "command": "firebird.selectAllViewRecords",
           "when": "view == firebird-explorer && viewItem == view",
           "group": "firebird@0"
+        },
+        {
+          "command": "firebird.bookmarks.open",
+          "when": "view == firebird-bookmarks && viewItem == bookmark",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.bookmarks.rename",
+          "when": "view == firebird-bookmarks && viewItem == bookmark",
+          "group": "firebird@1"
+        },
+        {
+          "command": "firebird.bookmarks.delete",
+          "when": "view == firebird-bookmarks && viewItem == bookmark",
+          "group": "firebird@2"
         }
       ]
     },
@@ -294,6 +405,10 @@
         {
           "id": "firebird-explorer",
           "name": "DB Explorer"
+        },
+        {
+          "id": "firebird-bookmarks",
+          "name": "SQL Bookmarks"
         }
       ]
     },
