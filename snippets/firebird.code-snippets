@@ -220,7 +220,7 @@
   "CREATE INDEX": {
     "prefix": ["fbcreateindex", "CREATE INDEX"],
     "body": [
-      "CREATE ${1|INDEX,UNIQUE INDEX,ASC INDEX,DESC INDEX|} ${2:index_name}",
+      "CREATE ${1|INDEX,UNIQUE INDEX,UNIQUE ASCENDING INDEX,UNIQUE DESCENDING INDEX,ASCENDING INDEX,DESCENDING INDEX|} ${2:index_name}",
       "ON ${3:table_name} (${4:column_name});$0"
     ],
     "description": "Firebird CREATE INDEX statement"
