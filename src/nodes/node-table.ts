@@ -90,6 +90,34 @@ export class NodeTable implements FirebirdTree {
       });
   }
 
+  public async alterTable() {
+    logger.info("Scaffold: Alter Table");
+
+    const connection = await Driver.client.createConnection(this.dbDetails);
+    const fields = await Driver.client.queryPromise<any>(connection, tableInfoQuery(this.table.trim()));
+    const lines: string[] = fields.map(f => {
+      const name = f.FIELD_NAME ? f.FIELD_NAME.trim() : "column_name";
+      const type = f.FIELD_TYPE ? f.FIELD_TYPE.trim() : "VARCHAR";
+      const len = f.FIELD_LENGTH ? `(${f.FIELD_LENGTH})` : "";
+      const notNull = f.NOT_NULL ? " NOT NULL" : "";
+      return `  /* ${name} ${type}${len}${notNull} */`;
+    });
+
+    const scaffold = [
+      `/* ALTER TABLE scaffold for ${this.table.trim()} */`,
+      `/* Existing columns:`,
+      ...lines,
+      `*/`,
+      ``,
+      `ALTER TABLE ${this.table.trim()}`,
+      `  ADD column_name VARCHAR(100);`,
+      `  /* ALTER column_name TYPE INTEGER; */`,
+      `  /* DROP column_name; */`,
+    ].join("\n");
+
+    Driver.createSQLTextDocument(scaffold);
+  }
+
   public async generateMockData(firebirdMockData: MockData, config: Options) {
     const fields = [];
     const apiKey = config.mockarooApiKey;

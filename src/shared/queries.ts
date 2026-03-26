@@ -227,3 +227,65 @@ export function getDomainsQuery(): string {
              AND (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
         ORDER BY 1;`; 
 }
+
+export function getProcedureBodyQuery(procedureName: string): string {
+  return `SELECT TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
+                 CAST(RDB$PROCEDURE_SOURCE AS VARCHAR(32000)) AS PROCEDURE_SOURCE
+            FROM RDB$PROCEDURES
+           WHERE TRIM(RDB$PROCEDURE_NAME) = '${procedureName}';`;
+}
+
+export function getTriggerBodyQuery(triggerName: string): string {
+  return `SELECT TRIM(RDB$TRIGGER_NAME) AS TRIGGER_NAME,
+                 TRIM(RDB$RELATION_NAME) AS TABLE_NAME,
+                 RDB$TRIGGER_TYPE AS TRIGGER_TYPE,
+                 CAST(RDB$TRIGGER_SOURCE AS VARCHAR(32000)) AS TRIGGER_SOURCE
+            FROM RDB$TRIGGERS
+           WHERE TRIM(RDB$TRIGGER_NAME) = '${triggerName}';`;
+}
+
+export function getViewDefinitionQuery(viewName: string): string {
+  return `SELECT TRIM(RDB$RELATION_NAME) AS VIEW_NAME,
+                 CAST(RDB$VIEW_SOURCE AS VARCHAR(32000)) AS VIEW_SOURCE
+            FROM RDB$RELATIONS
+           WHERE TRIM(RDB$RELATION_NAME) = '${viewName}';`;
+}
+
+export function dropProcedureQuery(procedureName: string): string {
+  return `DROP PROCEDURE ${procedureName};`;
+}
+
+export function dropTriggerQuery(triggerName: string): string {
+  return `DROP TRIGGER ${triggerName};`;
+}
+
+export function dropViewQuery(viewName: string): string {
+  return `DROP VIEW ${viewName};`;
+}
+
+export function dropGeneratorQuery(generatorName: string): string {
+  return `DROP SEQUENCE ${generatorName};`;
+}
+
+export function dropDomainQuery(domainName: string): string {
+  return `DROP DOMAIN ${domainName};`;
+}
+
+export function setGeneratorValueQuery(generatorName: string, value: number): string {
+  return `SET GENERATOR ${generatorName} TO ${value};`;
+}
+
+export const monitorConnectionsQuery: string = `
+  SELECT mon.MON$ATTACHMENT_ID AS ATTACHMENT_ID,
+         mon.MON$USER AS USER_NAME,
+         mon.MON$REMOTE_ADDRESS AS REMOTE_ADDRESS,
+         mon.MON$REMOTE_PROCESS AS CLIENT_PROCESS,
+         mon.MON$TIMESTAMP AS CONNECTED_AT,
+         stat.MON$PAGE_READS AS PAGE_READS,
+         stat.MON$PAGE_WRITES AS PAGE_WRITES,
+         stat.MON$PAGE_FETCHES AS PAGE_FETCHES
+    FROM MON$ATTACHMENTS mon
+    LEFT JOIN MON$IO_STATS stat ON stat.MON$STAT_ID = mon.MON$STAT_ID
+                               AND stat.MON$STAT_GROUP = 1
+   WHERE mon.MON$ATTACHMENT_ID <> CURRENT_CONNECTION
+   ORDER BY mon.MON$TIMESTAMP;`;

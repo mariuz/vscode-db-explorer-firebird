@@ -1,7 +1,7 @@
-import {ExtensionContext, TreeItem, TreeItemCollapsibleState} from "vscode";
+import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands} from "vscode";
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
-import {procedureParametersQuery} from "../shared/queries";
+import {procedureParametersQuery, getProcedureBodyQuery, dropProcedureQuery} from "../shared/queries";
 import {Driver} from "../shared/driver";
 import {NodeInfo} from "./node-info";
 import {logger} from "../logger/logger";
@@ -32,6 +32,36 @@ export class NodeProcedure implements FirebirdTree {
       logger.error(err);
       return [new NodeInfo(String(err))];
     }
+  }
+
+  public async editProcedure() {
+    logger.info("Edit Procedure: open source for editing");
+    try {
+      const connection = await Driver.client.createConnection(this.dbDetails);
+      const rows = await Driver.client.queryPromise<any>(connection, getProcedureBodyQuery(this.procedureName.trim()));
+      const source = rows[0]?.PROCEDURE_SOURCE ?? "";
+      const scaffold = source
+        ? `ALTER PROCEDURE ${this.procedureName.trim()}\n${source.trim()}`
+        : `ALTER PROCEDURE ${this.procedureName.trim()}\nAS\nBEGIN\n  /* procedure body */\nEND`;
+      Driver.createSQLTextDocument(scaffold);
+    } catch (err) {
+      logger.error(err);
+      logger.showError(`Failed to fetch procedure source: ${err}`);
+    }
+  }
+
+  public async dropProcedure() {
+    logger.info("Drop Procedure");
+    Driver.runQuery(dropProcedureQuery(this.procedureName.trim()), this.dbDetails)
+      .then(results => {
+        logger.info(results[0].message);
+        logger.showInfo(results[0].message);
+        commands.executeCommand("firebird.explorer.refresh");
+      })
+      .catch(err => {
+        logger.error(err);
+        logger.showError(`Failed to drop procedure: ${err}`);
+      });
   }
 }
 

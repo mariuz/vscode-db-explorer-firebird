@@ -143,6 +143,76 @@
         "command": "firebird.selectAllViewRecords",
         "title": "Select All Records",
         "category": "Firebird"
+      },
+      {
+        "command": "firebird.table.alterTable",
+        "title": "Alter Table",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.table.createTable",
+        "title": "Create Table",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.procedure.editProcedure",
+        "title": "Edit Procedure",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.procedure.dropProcedure",
+        "title": "Drop Procedure",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.trigger.editTrigger",
+        "title": "Edit Trigger",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.trigger.dropTrigger",
+        "title": "Drop Trigger",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.view.editView",
+        "title": "Edit View",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.view.dropView",
+        "title": "Drop View",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.generator.setValue",
+        "title": "Set Generator Value",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.generator.dropGenerator",
+        "title": "Drop Generator",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.domain.dropDomain",
+        "title": "Drop Domain",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.database.monitorDatabase",
+        "title": "Monitor Database",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.database.backupDatabase",
+        "title": "Backup Database",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.database.restoreDatabase",
+        "title": "Restore Database",
+        "category": "Firebird"
       }
     ],
     "configuration": {
@@ -285,6 +355,76 @@
         {
           "command": "firebird.selectAllViewRecords",
           "when": "view == firebird-explorer && viewItem == view",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.view.editView",
+          "when": "view == firebird-explorer && viewItem == view",
+          "group": "firebird@1"
+        },
+        {
+          "command": "firebird.view.dropView",
+          "when": "view == firebird-explorer && viewItem == view",
+          "group": "other@0"
+        },
+        {
+          "command": "firebird.table.alterTable",
+          "when": "view == firebird-explorer && viewItem == table",
+          "group": "firebird@3"
+        },
+        {
+          "command": "firebird.procedure.editProcedure",
+          "when": "view == firebird-explorer && viewItem == procedure",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.procedure.dropProcedure",
+          "when": "view == firebird-explorer && viewItem == procedure",
+          "group": "other@0"
+        },
+        {
+          "command": "firebird.trigger.editTrigger",
+          "when": "view == firebird-explorer && viewItem == trigger",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.trigger.dropTrigger",
+          "when": "view == firebird-explorer && viewItem == trigger",
+          "group": "other@0"
+        },
+        {
+          "command": "firebird.generator.setValue",
+          "when": "view == firebird-explorer && viewItem == generator",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.generator.dropGenerator",
+          "when": "view == firebird-explorer && viewItem == generator",
+          "group": "other@0"
+        },
+        {
+          "command": "firebird.domain.dropDomain",
+          "when": "view == firebird-explorer && viewItem == domain",
+          "group": "other@0"
+        },
+        {
+          "command": "firebird.database.monitorDatabase",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "first@3"
+        },
+        {
+          "command": "firebird.database.backupDatabase",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "manage@0"
+        },
+        {
+          "command": "firebird.database.restoreDatabase",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "manage@1"
+        },
+        {
+          "command": "firebird.table.createTable",
+          "when": "view == firebird-explorer && viewItem == folder.tables",
           "group": "firebird@0"
         }
       ]
