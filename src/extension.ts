@@ -18,6 +18,7 @@ import {formatSQL} from "./shared/sql-formatter";
 import {SqlLinter} from "./shared/sql-linter";
 import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
 import {fetchSchemaSnapshot, diffSchemas, renderDiffReport} from "./schema-diff/schema-diff";
+import {QueryHistoryProvider, QueryHistoryItem} from "./query-history/query-history-provider";
 
 
 export function activate(context: ExtensionContext) {
@@ -54,14 +55,19 @@ export function activate(context: ExtensionContext) {
   /* Bookmarks */
   const bookmarkProvider = new BookmarkProvider(context);
 
+  /* Query history */
+  const queryHistoryProvider = new QueryHistoryProvider(context);
+
   context.subscriptions.push(
     window.registerTreeDataProvider(Constants.FirebirdExplorerViewId, firebirdTreeDataProvider),
     window.registerTreeDataProvider("firebird-bookmarks", bookmarkProvider),
+    window.registerTreeDataProvider("firebird-query-history", queryHistoryProvider),
     firebirdMockData,
     firebirdQueryResults,
     firebirdLanguageServer,
     sqlLinter,
-    bookmarkProvider
+    bookmarkProvider,
+    queryHistoryProvider
   );
 
   firebirdLanguageServer.setSchemaHandler(_doc => {
@@ -159,17 +165,29 @@ export function activate(context: ExtensionContext) {
     })
   );
 
-  /* COMMAND: run document query */
+  /* COMMAND: run document query (batch-aware) */
   context.subscriptions.push(
     commands.registerCommand("firebird.runQuery", () => {
-      Driver.runQuery()
-        .then(res => {
-          if (res[0] && "message" in res[0]) {
-            logger.info(res[0].message);
-            logger.showInfo(res[0].message);
+      Driver.runBatch()
+        .then(batchResults => {
+          // Record in session history (one entry per statement)
+          batchResults.forEach(r => {
+            queryHistoryProvider.add({
+              sql: r.sql,
+              rowCount: r.rows?.length,
+              durationMs: r.durationMs,
+              error: r.error,
+            }).catch(err => logger.error(err));
+          });
+
+          // If every result is a DDL/DML message (no row data), show notification
+          const allMessages = batchResults.every(r => !r.rows && !r.error);
+          if (allMessages && batchResults.length === 1 && batchResults[0].message) {
+            logger.info(batchResults[0].message);
+            logger.showInfo(batchResults[0].message);
             commands.executeCommand("firebird.explorer.refresh");
           } else {
-            firebirdQueryResults.display(res, config.recordsPerPage);
+            firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage);
           }
         })
         .catch(error => {
@@ -465,6 +483,88 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand("firebird.bookmarks.refresh", () => {
       bookmarkProvider.refresh();
+    })
+  );
+
+  /* COMMAND: show explain plan for active SQL */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.explainPlan", async () => {
+      try {
+        const plan = await Driver.getQueryPlan();
+        const doc = await workspace.openTextDocument({ content: plan, language: "plaintext" });
+        await window.showTextDocument(doc, vscode.ViewColumn.Beside);
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        if (err?.notify) {
+          logger.showError(err.message, err.options || []).then(sel => {
+            if (sel === "New SQL Document") { commands.executeCommand("firebird.explorer.newSqlDocument"); }
+            if (sel === "Set Active Database") { commands.executeCommand("firebird.chooseActive"); }
+          });
+        } else {
+          logger.showError("Could not generate explain plan. Check logs for details.", ["Show Logs"]).then(sel => {
+            if (sel === "Show Logs") { logger.showOutput(); }
+          });
+        }
+      }
+    })
+  );
+
+  /* COMMAND: open a history entry in the editor */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.history.open", async (item: QueryHistoryItem) => {
+      if (!item?.entry?.sql) { return; }
+      await Driver.createSQLTextDocument(item.entry.sql);
+    })
+  );
+
+  /* COMMAND: run a history entry directly */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.history.run", async (item: QueryHistoryItem) => {
+      if (!item?.entry?.sql) { return; }
+      Driver.runBatch(item.entry.sql)
+        .then(batchResults => {
+          batchResults.forEach(r => {
+            queryHistoryProvider.add({ sql: r.sql, rowCount: r.rows?.length, durationMs: r.durationMs, error: r.error }).catch(() => {});
+          });
+          const allMessages = batchResults.every(r => !r.rows && !r.error);
+          if (allMessages && batchResults.length === 1 && batchResults[0].message) {
+            logger.showInfo(batchResults[0].message);
+            commands.executeCommand("firebird.explorer.refresh");
+          } else {
+            firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage);
+          }
+        })
+        .catch(err => {
+          logger.error(err?.message ?? err);
+          logger.showError("Query failed. Check logs for details.", ["Show Logs"]).then(sel => {
+            if (sel === "Show Logs") { logger.showOutput(); }
+          });
+        });
+    })
+  );
+
+  /* COMMAND: delete a single history entry */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.history.delete", async (item: QueryHistoryItem) => {
+      if (!item?.entry) { return; }
+      await queryHistoryProvider.delete(item.entry.id);
+    })
+  );
+
+  /* COMMAND: clear all history */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.history.clear", async () => {
+      const confirm = await window.showWarningMessage("Clear all query history?", { modal: true }, "Clear");
+      if (confirm === "Clear") {
+        await queryHistoryProvider.clear();
+      }
+    })
+  );
+
+  /* COMMAND: refresh history view */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.history.refresh", () => {
+      queryHistoryProvider.refresh();
     })
   );
 }

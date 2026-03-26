@@ -184,6 +184,41 @@
           "light": "resources/icons/light/refresh.svg",
           "dark": "resources/icons/dark/refresh.svg"
         }
+      },
+      {
+        "command": "firebird.explainPlan",
+        "title": "Explain Query Plan",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.history.open",
+        "title": "Open in Editor",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.history.run",
+        "title": "Run Query",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.history.delete",
+        "title": "Delete Entry",
+        "category": "Firebird",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "firebird.history.clear",
+        "title": "Clear All History",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.history.refresh",
+        "title": "Refresh History",
+        "category": "Firebird",
+        "icon": {
+          "light": "resources/icons/light/refresh.svg",
+          "dark": "resources/icons/dark/refresh.svg"
+        }
       }
     ],
     "configuration": {
@@ -275,6 +310,12 @@
         "command": "firebird.bookmarks.add",
         "key": "ctrl+alt+b",
         "when": "editorLangId == sql"
+      },
+      {
+        "command": "firebird.explainPlan",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus && editorLangId == sql"
       }
     ],
     "menus": {
@@ -320,6 +361,16 @@
           "command": "firebird.bookmarks.refresh",
           "when": "view == firebird-bookmarks",
           "group": "navigation@2"
+        },
+        {
+          "command": "firebird.history.clear",
+          "when": "view == firebird-query-history",
+          "group": "navigation"
+        },
+        {
+          "command": "firebird.history.refresh",
+          "when": "view == firebird-query-history",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -397,6 +448,21 @@
           "command": "firebird.bookmarks.delete",
           "when": "view == firebird-bookmarks && viewItem == bookmark",
           "group": "firebird@2"
+        },
+        {
+          "command": "firebird.history.open",
+          "when": "view == firebird-query-history && viewItem == historyEntry",
+          "group": "inline"
+        },
+        {
+          "command": "firebird.history.run",
+          "when": "view == firebird-query-history && viewItem == historyEntry",
+          "group": "1_history"
+        },
+        {
+          "command": "firebird.history.delete",
+          "when": "view == firebird-query-history && viewItem == historyEntry",
+          "group": "2_history"
         }
       ]
     },
@@ -409,6 +475,10 @@
         {
           "id": "firebird-bookmarks",
           "name": "SQL Bookmarks"
+        },
+        {
+          "id": "firebird-query-history",
+          "name": "Query History"
         }
       ]
     },
@@ -436,11 +506,9 @@
     "node-firebird-driver": "^3.1.0",
     "node-firebird-driver-native": "^3.1.0",
     "node-firebird-native-api": "^3.0.0",
-
     "bindings": "^1.5.0",
     "node-addon-api": "^5.0.0",
     "node-gyp": "^9.3.0",
-    
     "uuid": "^8.3.2"
   },
   "devDependencies": {
