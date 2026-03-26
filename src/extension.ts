@@ -1,7 +1,7 @@
 import {ExtensionContext, window, commands, workspace} from "vscode";
 import {Constants, getOptions} from "./config";
 import {FirebirdTreeDataProvider} from "./firebirdTreeDataProvider";
-import {NodeHost, NodeDatabase, NodeTable, NodeField} from "./nodes";
+import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView} from "./nodes";
 import {Options, FirebirdTree} from "./interfaces";
 import {connectionPicker} from "./shared/connection-picker";
 import {Driver} from "./shared/driver";
@@ -236,6 +236,15 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand("firebird.selectFieldRecords", (fieldNode: NodeField) => {
       fieldNode.selectAllSingleFieldRecords().then(result => {
+        firebirdQueryResults.display(result, config.recordsPerPage);
+      });
+    })
+  );
+
+  /* COMMAND view node: select all view records */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.selectAllViewRecords", (viewNode: NodeView) => {
+      viewNode.selectAllRecords().then(result => {
         firebirdQueryResults.display(result, config.recordsPerPage);
       });
     })

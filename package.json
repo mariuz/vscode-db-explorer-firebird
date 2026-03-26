@@ -138,6 +138,11 @@
         "command": "firebird.showLogs",
         "title": "Show Extension Logs",
         "category": "Firebird"
+      },
+      {
+        "command": "firebird.selectAllViewRecords",
+        "title": "Select All Records",
+        "category": "Firebird"
       }
     ],
     "configuration": {
@@ -275,6 +280,11 @@
         {
           "command": "firebird.selectFieldRecords",
           "when": "view == firebird-explorer && viewItem == field",
+          "group": "firebird@0"
+        },
+        {
+          "command": "firebird.selectAllViewRecords",
+          "when": "view == firebird-explorer && viewItem == view",
           "group": "firebird@0"
         }
       ]
