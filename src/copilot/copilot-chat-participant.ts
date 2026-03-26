@@ -9,7 +9,7 @@ const PARTICIPANT_ID = 'firebird-db-explorer.firebird';
 function systemPrompt(schemaBlock: string): string {
     const base =
         'You are a Firebird SQL database expert assistant integrated into VS Code. ' +
-        'You help users write, understand, and optimise Firebird SQL queries. ' +
+        'You help users write, understand, and optimize Firebird SQL queries. ' +
         'Always use Firebird SQL dialect and syntax. ' +
         'When generating SQL, output it inside a fenced ```sql code block.';
     if (schemaBlock) {
@@ -110,16 +110,16 @@ async function handleOptimize(
 ): Promise<vscode.ChatResult> {
     const sql = request.prompt.trim() || getActiveEditorSql();
     if (!sql) {
-        stream.markdown('Please provide a SQL query to optimise, or open one in the editor.');
+        stream.markdown('Please provide a SQL query to optimize, or open one in the editor.');
         return {};
     }
 
-    stream.progress('Analysing query for optimisation…');
+    stream.progress('Analyzing query for optimization…');
     messages.push(
         vscode.LanguageModelChatMessage.User(
-            'Analyse the following Firebird SQL query and suggest optimisations. ' +
+            'Analyze the following Firebird SQL query and suggest optimizations. ' +
             'Consider indexing, query structure, and Firebird-specific best practices. ' +
-            'Present the optimised query in a fenced ```sql code block and explain the changes.\n\n' +
+            'Present the optimized query in a fenced ```sql code block and explain the changes.\n\n' +
             '```sql\n' + sql + '\n```'
         )
     );
@@ -169,7 +169,7 @@ async function handleDefault(
         stream.markdown(
             'Hi! I\'m the **Firebird SQL** assistant. You can ask me anything about Firebird databases, or use one of the slash commands:\n\n' +
             '- `/query` — Generate SQL from a natural-language description\n' +
-            '- `/optimize` — Get optimisation suggestions for a SQL query\n' +
+            '- `/optimize` — Get optimization suggestions for a SQL query\n' +
             '- `/explain` — Explain what a SQL query does\n'
         );
         return {};

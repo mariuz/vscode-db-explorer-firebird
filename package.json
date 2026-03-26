@@ -513,7 +513,7 @@
           },
           {
             "name": "optimize",
-            "description": "Suggest optimisations for a SQL query"
+            "description": "Suggest optimizations for a SQL query"
           },
           {
             "name": "explain",
