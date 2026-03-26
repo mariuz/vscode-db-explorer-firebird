@@ -305,7 +305,13 @@
           "icon": "resources/firebird-explorer-icon2.svg"
         }
       ]
-    }
+    },
+    "snippets": [
+      {
+        "language": "sql",
+        "path": "./snippets/firebird.code-snippets"
+      }
+    ]
   },
   "activationEvents": [
     "onLanguage:sql"

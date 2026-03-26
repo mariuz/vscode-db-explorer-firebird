@@ -1,0 +1,475 @@
+{
+  "SELECT Statement": {
+    "prefix": ["fbselect", "SELECT FROM"],
+    "body": [
+      "SELECT ${1:columns}",
+      "FROM ${2:table_name}",
+      "WHERE ${3:condition};$0"
+    ],
+    "description": "Firebird SELECT statement with WHERE clause"
+  },
+  "SELECT with JOIN": {
+    "prefix": ["fbjoin", "SELECT JOIN"],
+    "body": [
+      "SELECT ${1:columns}",
+      "FROM ${2:table1} ${3:t1}",
+      "${4|INNER,LEFT,RIGHT,FULL|} JOIN ${5:table2} ${6:t2} ON ${3}.${7:column1} = ${6}.${8:column2}",
+      "WHERE ${9:condition};$0"
+    ],
+    "description": "Firebird SELECT with JOIN clause"
+  },
+  "SELECT FIRST SKIP": {
+    "prefix": ["fbfirst", "SELECT FIRST"],
+    "body": [
+      "SELECT FIRST ${1:10} SKIP ${2:0}",
+      "  ${3:columns}",
+      "FROM ${4:table_name}",
+      "WHERE ${5:condition};$0"
+    ],
+    "description": "Firebird SELECT with FIRST/SKIP pagination"
+  },
+  "INSERT INTO": {
+    "prefix": ["fbinsert", "INSERT INTO"],
+    "body": [
+      "INSERT INTO ${1:table_name} (${2:columns})",
+      "VALUES (${3:values});$0"
+    ],
+    "description": "Firebird INSERT INTO statement"
+  },
+  "INSERT INTO RETURNING": {
+    "prefix": ["fbinsertret", "INSERT RETURNING"],
+    "body": [
+      "INSERT INTO ${1:table_name} (${2:columns})",
+      "VALUES (${3:values})",
+      "RETURNING ${4:id};$0"
+    ],
+    "description": "Firebird INSERT with RETURNING clause"
+  },
+  "UPDATE SET": {
+    "prefix": ["fbupdate", "UPDATE SET"],
+    "body": [
+      "UPDATE ${1:table_name}",
+      "SET ${2:column} = ${3:value}",
+      "WHERE ${4:condition};$0"
+    ],
+    "description": "Firebird UPDATE statement"
+  },
+  "DELETE FROM": {
+    "prefix": ["fbdelete", "DELETE FROM"],
+    "body": [
+      "DELETE FROM ${1:table_name}",
+      "WHERE ${2:condition};$0"
+    ],
+    "description": "Firebird DELETE statement"
+  },
+  "CREATE TABLE": {
+    "prefix": ["fbcreatetable", "CREATE TABLE"],
+    "body": [
+      "CREATE TABLE ${1:table_name} (",
+      "  ${2:id} INTEGER NOT NULL,",
+      "  ${3:column_name} ${4|VARCHAR(255),INTEGER,BIGINT,SMALLINT,FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP,BLOB,CHAR(1),BOOLEAN|},",
+      "  CONSTRAINT PK_${1} PRIMARY KEY (${2})",
+      ");$0"
+    ],
+    "description": "Firebird CREATE TABLE statement"
+  },
+  "CREATE TABLE with Generator": {
+    "prefix": ["fbcreatetablegen"],
+    "body": [
+      "CREATE TABLE ${1:table_name} (",
+      "  ${2:id} INTEGER NOT NULL,",
+      "  ${3:column_name} ${4|VARCHAR(255),INTEGER,BIGINT,SMALLINT,FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP,BLOB|},",
+      "  CONSTRAINT PK_${1} PRIMARY KEY (${2})",
+      ");",
+      "",
+      "CREATE GENERATOR GEN_${1}_${2};",
+      "",
+      "SET TERM ^ ;",
+      "CREATE TRIGGER ${1}_BI FOR ${1}",
+      "ACTIVE BEFORE INSERT POSITION 0",
+      "AS",
+      "BEGIN",
+      "  IF (NEW.${2} IS NULL) THEN",
+      "    NEW.${2} = GEN_ID(GEN_${1}_${2}, 1);",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE TABLE with auto-increment generator and trigger"
+  },
+  "CREATE VIEW": {
+    "prefix": ["fbcreateview", "CREATE VIEW"],
+    "body": [
+      "CREATE VIEW ${1:view_name} (${2:columns})",
+      "AS",
+      "SELECT ${3:columns}",
+      "FROM ${4:table_name}",
+      "WHERE ${5:condition};$0"
+    ],
+    "description": "Firebird CREATE VIEW statement"
+  },
+  "CREATE OR ALTER VIEW": {
+    "prefix": ["fbalterview"],
+    "body": [
+      "CREATE OR ALTER VIEW ${1:view_name} (${2:columns})",
+      "AS",
+      "SELECT ${3:columns}",
+      "FROM ${4:table_name}",
+      "WHERE ${5:condition};$0"
+    ],
+    "description": "Firebird CREATE OR ALTER VIEW statement"
+  },
+  "CREATE PROCEDURE": {
+    "prefix": ["fbcreateproc", "CREATE PROCEDURE"],
+    "body": [
+      "SET TERM ^ ;",
+      "CREATE PROCEDURE ${1:procedure_name} (${2:param_name} ${3:param_type})",
+      "RETURNS (${4:out_param} ${5:out_type})",
+      "AS",
+      "${6:  DECLARE VARIABLE v_temp INTEGER;}",
+      "BEGIN",
+      "  ${7:/* procedure body */}",
+      "  SUSPEND;",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE PROCEDURE with input/output parameters"
+  },
+  "CREATE OR ALTER PROCEDURE": {
+    "prefix": ["fbalterproc"],
+    "body": [
+      "SET TERM ^ ;",
+      "CREATE OR ALTER PROCEDURE ${1:procedure_name} (${2:param_name} ${3:param_type})",
+      "RETURNS (${4:out_param} ${5:out_type})",
+      "AS",
+      "${6:  DECLARE VARIABLE v_temp INTEGER;}",
+      "BEGIN",
+      "  ${7:/* procedure body */}",
+      "  SUSPEND;",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE OR ALTER PROCEDURE"
+  },
+  "CREATE TRIGGER BEFORE INSERT": {
+    "prefix": ["fbcreatetrigbi", "CREATE TRIGGER BEFORE INSERT"],
+    "body": [
+      "SET TERM ^ ;",
+      "CREATE TRIGGER ${1:trigger_name} FOR ${2:table_name}",
+      "ACTIVE BEFORE INSERT POSITION 0",
+      "AS",
+      "BEGIN",
+      "  ${3:/* trigger body */}",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE TRIGGER (BEFORE INSERT)"
+  },
+  "CREATE TRIGGER BEFORE UPDATE": {
+    "prefix": ["fbcreatetrigbu", "CREATE TRIGGER BEFORE UPDATE"],
+    "body": [
+      "SET TERM ^ ;",
+      "CREATE TRIGGER ${1:trigger_name} FOR ${2:table_name}",
+      "ACTIVE BEFORE UPDATE POSITION 0",
+      "AS",
+      "BEGIN",
+      "  ${3:/* trigger body */}",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE TRIGGER (BEFORE UPDATE)"
+  },
+  "CREATE TRIGGER AFTER INSERT": {
+    "prefix": ["fbcreatetrigai"],
+    "body": [
+      "SET TERM ^ ;",
+      "CREATE TRIGGER ${1:trigger_name} FOR ${2:table_name}",
+      "ACTIVE AFTER INSERT POSITION 0",
+      "AS",
+      "BEGIN",
+      "  ${3:/* trigger body */}",
+      "END^",
+      "SET TERM ; ^$0"
+    ],
+    "description": "Firebird CREATE TRIGGER (AFTER INSERT)"
+  },
+  "CREATE GENERATOR / SEQUENCE": {
+    "prefix": ["fbcreategenerator", "CREATE GENERATOR", "CREATE SEQUENCE"],
+    "body": [
+      "CREATE GENERATOR ${1:generator_name};",
+      "SET GENERATOR ${1} TO ${2:0};$0"
+    ],
+    "description": "Firebird CREATE GENERATOR (sequence)"
+  },
+  "CREATE DOMAIN": {
+    "prefix": ["fbcreatedomain", "CREATE DOMAIN"],
+    "body": [
+      "CREATE DOMAIN ${1:domain_name} AS ${2|VARCHAR(255),INTEGER,BIGINT,SMALLINT,FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP|}",
+      "  ${3:DEFAULT ${4:value}}",
+      "  ${5:NOT NULL}",
+      "  ${6:CHECK (VALUE ${7:> 0})};$0"
+    ],
+    "description": "Firebird CREATE DOMAIN statement"
+  },
+  "CREATE EXCEPTION": {
+    "prefix": ["fbcreateexception", "CREATE EXCEPTION"],
+    "body": [
+      "CREATE EXCEPTION ${1:exception_name} '${2:Exception message}';$0"
+    ],
+    "description": "Firebird CREATE EXCEPTION statement"
+  },
+  "CREATE INDEX": {
+    "prefix": ["fbcreateindex", "CREATE INDEX"],
+    "body": [
+      "CREATE ${1|INDEX,UNIQUE INDEX,UNIQUE ASCENDING INDEX,UNIQUE DESCENDING INDEX,ASCENDING INDEX,DESCENDING INDEX|} ${2:index_name}",
+      "ON ${3:table_name} (${4:column_name});$0"
+    ],
+    "description": "Firebird CREATE INDEX statement"
+  },
+  "ALTER TABLE ADD COLUMN": {
+    "prefix": ["fbaltertableadd"],
+    "body": [
+      "ALTER TABLE ${1:table_name}",
+      "ADD ${2:column_name} ${3|VARCHAR(255),INTEGER,BIGINT,SMALLINT,FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP,BLOB|};$0"
+    ],
+    "description": "Firebird ALTER TABLE ADD COLUMN"
+  },
+  "ALTER TABLE ADD FOREIGN KEY": {
+    "prefix": ["fbaltertablefk"],
+    "body": [
+      "ALTER TABLE ${1:table_name}",
+      "ADD CONSTRAINT FK_${1}_${3:ref_table}",
+      "FOREIGN KEY (${2:column_name})",
+      "REFERENCES ${3} (${4:ref_column});$0"
+    ],
+    "description": "Firebird ALTER TABLE ADD FOREIGN KEY"
+  },
+  "EXECUTE BLOCK": {
+    "prefix": ["fbexecblock", "EXECUTE BLOCK"],
+    "body": [
+      "EXECUTE BLOCK",
+      "AS",
+      "  DECLARE VARIABLE ${1:v_name} ${2:INTEGER};",
+      "BEGIN",
+      "  ${3:/* block body */}",
+      "END"
+    ],
+    "description": "Firebird EXECUTE BLOCK (anonymous PSQL block)"
+  },
+  "EXECUTE BLOCK with Parameters": {
+    "prefix": ["fbexecblockparams"],
+    "body": [
+      "EXECUTE BLOCK (${1:p_param} ${2:INTEGER} = :${1})",
+      "RETURNS (${3:o_result} ${4:VARCHAR(255)})",
+      "AS",
+      "  DECLARE VARIABLE ${5:v_temp} ${6:INTEGER};",
+      "BEGIN",
+      "  ${7:/* block body */}",
+      "  SUSPEND;",
+      "END"
+    ],
+    "description": "Firebird EXECUTE BLOCK with input/output parameters"
+  },
+  "IF THEN ELSE": {
+    "prefix": ["fbif", "IF THEN"],
+    "body": [
+      "IF (${1:condition}) THEN",
+      "BEGIN",
+      "  ${2:/* true branch */}",
+      "END",
+      "ELSE",
+      "BEGIN",
+      "  ${3:/* false branch */}",
+      "END$0"
+    ],
+    "description": "Firebird PSQL IF...THEN...ELSE block"
+  },
+  "WHILE DO": {
+    "prefix": ["fbwhile", "WHILE DO"],
+    "body": [
+      "WHILE (${1:condition}) DO",
+      "BEGIN",
+      "  ${2:/* loop body */}",
+      "END$0"
+    ],
+    "description": "Firebird PSQL WHILE...DO loop"
+  },
+  "FOR SELECT DO": {
+    "prefix": ["fbforselect", "FOR SELECT DO"],
+    "body": [
+      "FOR SELECT ${1:columns}",
+      "  FROM ${2:table_name}",
+      "  WHERE ${3:condition}",
+      "  INTO ${4::variable}",
+      "DO",
+      "BEGIN",
+      "  ${5:/* loop body */}",
+      "  SUSPEND;",
+      "END$0"
+    ],
+    "description": "Firebird PSQL FOR SELECT...INTO...DO loop"
+  },
+  "BEGIN END Block": {
+    "prefix": ["fbbegin", "BEGIN END"],
+    "body": [
+      "BEGIN",
+      "  $0",
+      "END"
+    ],
+    "description": "Firebird PSQL BEGIN...END block"
+  },
+  "DECLARE VARIABLE": {
+    "prefix": ["fbdeclare", "DECLARE VARIABLE"],
+    "body": [
+      "DECLARE VARIABLE ${1:v_name} ${2|INTEGER,BIGINT,SMALLINT,VARCHAR(255),CHAR(1),FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP,BLOB|};$0"
+    ],
+    "description": "Firebird PSQL DECLARE VARIABLE"
+  },
+  "WHEN ANY DO Exception Handler": {
+    "prefix": ["fbwhenany", "WHEN ANY DO"],
+    "body": [
+      "WHEN ANY DO",
+      "BEGIN",
+      "  ${1:/* error handling */}",
+      "END$0"
+    ],
+    "description": "Firebird PSQL WHEN ANY DO exception handler"
+  },
+  "WHEN EXCEPTION DO": {
+    "prefix": ["fbwhenexception"],
+    "body": [
+      "WHEN EXCEPTION ${1:exception_name} DO",
+      "BEGIN",
+      "  ${2:/* error handling */}",
+      "END$0"
+    ],
+    "description": "Firebird PSQL WHEN EXCEPTION handler"
+  },
+  "IN AUTONOMOUS TRANSACTION": {
+    "prefix": ["fbautonomous", "IN AUTONOMOUS TRANSACTION"],
+    "body": [
+      "IN AUTONOMOUS TRANSACTION DO",
+      "BEGIN",
+      "  ${1:/* autonomous transaction body */}",
+      "END$0"
+    ],
+    "description": "Firebird PSQL IN AUTONOMOUS TRANSACTION block"
+  },
+  "EXECUTE PROCEDURE": {
+    "prefix": ["fbexecproc", "EXECUTE PROCEDURE"],
+    "body": [
+      "EXECUTE PROCEDURE ${1:procedure_name}(${2:parameters});$0"
+    ],
+    "description": "Firebird EXECUTE PROCEDURE call"
+  },
+  "MERGE INTO": {
+    "prefix": ["fbmerge", "MERGE INTO"],
+    "body": [
+      "MERGE INTO ${1:target_table} t",
+      "USING ${2:source_table} s",
+      "ON t.${3:id} = s.${3}",
+      "WHEN MATCHED THEN",
+      "  UPDATE SET t.${4:column} = s.${4}",
+      "WHEN NOT MATCHED THEN",
+      "  INSERT (${5:columns}) VALUES (${6:values});$0"
+    ],
+    "description": "Firebird MERGE INTO statement"
+  },
+  "WITH CTE": {
+    "prefix": ["fbwith", "WITH CTE"],
+    "body": [
+      "WITH ${1:cte_name} AS (",
+      "  SELECT ${2:columns}",
+      "  FROM ${3:table_name}",
+      "  WHERE ${4:condition}",
+      ")",
+      "SELECT ${5:*}",
+      "FROM ${1};$0"
+    ],
+    "description": "Firebird Common Table Expression (WITH clause)"
+  },
+  "WITH RECURSIVE CTE": {
+    "prefix": ["fbwithrecursive", "WITH RECURSIVE"],
+    "body": [
+      "WITH RECURSIVE ${1:cte_name} AS (",
+      "  SELECT ${2:columns}",
+      "  FROM ${3:table_name}",
+      "  WHERE ${4:anchor_condition}",
+      "  UNION ALL",
+      "  SELECT ${5:columns}",
+      "  FROM ${3}",
+      "  JOIN ${1} ON ${6:recursive_condition}",
+      ")",
+      "SELECT * FROM ${1};$0"
+    ],
+    "description": "Firebird recursive Common Table Expression"
+  },
+  "GRANT Privileges": {
+    "prefix": ["fbgrant"],
+    "body": [
+      "GRANT ${1|ALL,SELECT,INSERT,UPDATE,DELETE,EXECUTE,REFERENCES|} ON ${2:object_name} TO ${3:user_or_role};$0"
+    ],
+    "description": "Firebird GRANT privileges statement"
+  },
+  "REVOKE Privileges": {
+    "prefix": ["fbrevoke"],
+    "body": [
+      "REVOKE ${1|ALL,SELECT,INSERT,UPDATE,DELETE,EXECUTE,REFERENCES|} ON ${2:object_name} FROM ${3:user_or_role};$0"
+    ],
+    "description": "Firebird REVOKE privileges statement"
+  },
+  "SET TERM": {
+    "prefix": ["fbsetterm", "SET TERM"],
+    "body": [
+      "SET TERM ${1:^} ;",
+      "${0}",
+      "SET TERM ; ${1}"
+    ],
+    "description": "Firebird SET TERM for changing statement terminator"
+  },
+  "CASE WHEN": {
+    "prefix": ["fbcase", "CASE WHEN"],
+    "body": [
+      "CASE",
+      "  WHEN ${1:condition} THEN ${2:result}",
+      "  WHEN ${3:condition2} THEN ${4:result2}",
+      "  ELSE ${5:default_result}",
+      "END$0"
+    ],
+    "description": "Firebird CASE WHEN expression"
+  },
+  "COALESCE": {
+    "prefix": ["fbcoalesce"],
+    "body": [
+      "COALESCE(${1:value1}, ${2:value2})$0"
+    ],
+    "description": "Firebird COALESCE function — returns first non-NULL value"
+  },
+  "IIF": {
+    "prefix": ["fbiif"],
+    "body": [
+      "IIF(${1:condition}, ${2:true_value}, ${3:false_value})$0"
+    ],
+    "description": "Firebird IIF function — inline IF expression"
+  },
+  "GEN_ID": {
+    "prefix": ["fbgenid"],
+    "body": [
+      "GEN_ID(${1:generator_name}, ${2:1})$0"
+    ],
+    "description": "Firebird GEN_ID — get next value from generator"
+  },
+  "CAST": {
+    "prefix": ["fbcast"],
+    "body": [
+      "CAST(${1:expression} AS ${2|VARCHAR(255),INTEGER,BIGINT,SMALLINT,FLOAT,DOUBLE PRECISION,DECIMAL(18\\,2),DATE,TIME,TIMESTAMP|})$0"
+    ],
+    "description": "Firebird CAST expression"
+  },
+  "EXTRACT": {
+    "prefix": ["fbextract"],
+    "body": [
+      "EXTRACT(${1|YEAR,MONTH,DAY,HOUR,MINUTE,SECOND,MILLISECOND,WEEK,WEEKDAY,YEARDAY|} FROM ${2:datetime_value})$0"
+    ],
+    "description": "Firebird EXTRACT date/time part"
+  }
+}

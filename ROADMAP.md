@@ -11,10 +11,10 @@ This document outlines the planned features and improvements for the **DB Explor
 
 ## Intelligent IntelliSense Improvements
 
-- [ ] Context-aware code completion that understands the current database schema in real time
-- [ ] Auto-complete for stored procedure and trigger names and parameters
+- [x] Context-aware code completion that understands the current database schema in real time
+- [x] Auto-complete for stored procedure and trigger names and parameters
 - [ ] Syntax highlighting improvements for Firebird-specific SQL dialect (PSQL blocks, `EXECUTE BLOCK`, etc.)
-- [ ] Snippet support for common Firebird DDL/DML patterns (e.g., `CREATE TABLE`, `CREATE PROCEDURE`, `CREATE TRIGGER`)
+- [x] Snippet support for common Firebird DDL/DML patterns (e.g., `CREATE TABLE`, `CREATE PROCEDURE`, `CREATE TRIGGER`)
 
 ## AI-Powered Enhancements
 
