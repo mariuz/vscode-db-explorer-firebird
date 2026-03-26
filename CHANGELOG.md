@@ -2,6 +2,17 @@
 
 All notable changes to the "vscode-db-explorer-firebird" extension will be documented in this file.
 
+## 0.1.8 - 2026-03-26
+
+### Added
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — comprehensive contributing guide covering development setup, coding style, commit conventions, and PR process
+- [docs/getting-started.md](docs/getting-started.md) — step-by-step tutorial for first-time users (install, connect, explore, query, export)
+- [docs/connection-setup.md](docs/connection-setup.md) — detailed connection configuration reference including native driver and WireCrypt setup
+- [docs/sql-snippets.md](docs/sql-snippets.md) — full reference for all 45 Firebird SQL snippets with examples and quick-reference table
+- Improved [README.md](README.md) with structured settings table, documentation index, and links to new guides
+- Marked **Documentation and Community** roadmap items as completed in [ROADMAP.md](ROADMAP.md)
+
 ## 0.1.7 - 2026-03-26
 
 ### Added

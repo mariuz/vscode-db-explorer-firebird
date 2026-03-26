@@ -58,9 +58,9 @@ This document outlines the planned features and improvements for the **DB Explor
 
 ## Documentation and Community
 
-- [ ] Improved extension documentation and wiki
-- [ ] Sample databases and tutorials for getting started
-- [ ] Contributing guide for community contributors
+- [x] Improved extension documentation and wiki
+- [x] Sample databases and tutorials for getting started
+- [x] Contributing guide for community contributors
 
 ---
 
