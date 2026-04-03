@@ -40,7 +40,8 @@
     "install-native": "npm run --prefix node_modules/node-firebird-native-api/ gyp:configure && npm run --prefix node_modules/node-firebird-native-api/ gyp:build",
     "compile": "npm run -S esbuild-build",
     "watch": "npm run -S esbuild-base -- --sourcemap --watch",
-    "tsc-watch": "tsc -watch -p ./"
+    "tsc-watch": "tsc -watch -p ./",
+    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha 'out/test/**/*.test.js'"
   },
   "contributes": {
     "commands": [
@@ -215,6 +216,8 @@
         "command": "firebird.database.restoreDatabase",
         "title": "Restore Database",
         "category": "Firebird"
+      },
+      {
         "command": "firebird.formatSql",
         "title": "Format SQL Document",
         "category": "Firebird"
@@ -573,6 +576,8 @@
           "command": "firebird.table.createTable",
           "when": "view == firebird-explorer && viewItem == folder.tables",
           "group": "firebird@0"
+        },
+        {
           "command": "firebird.bookmarks.open",
           "when": "view == firebird-bookmarks && viewItem == bookmark",
           "group": "firebird@0"
@@ -663,17 +668,17 @@
     "onLanguage:sql"
   ],
   "dependencies": {
+    "bindings": "^1.5.0",
+    "node-addon-api": "^5.0.0",
     "node-firebird": "^0.9.8",
     "node-firebird-driver": "^3.1.0",
     "node-firebird-driver-native": "^3.1.0",
     "node-firebird-native-api": "^3.0.0",
-    "bindings": "^1.5.0",
-    "node-addon-api": "^5.0.0",
     "node-gyp": "^9.3.0",
     "uuid": "^8.3.2"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.1",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^14.11.2",
     "@types/uuid": "^8.3.0",
     "@types/vscode": "^1.32.0",
@@ -683,7 +688,9 @@
     "copy-folder-util": "^1.1.1",
     "esbuild": "^0.17.8",
     "eslint": "^8.34.0",
+    "mocha": "^11.7.5",
     "rimraf": "5.0.1",
+    "ts-node": "^10.9.2",
     "typescript": "^4.0.3"
   },
   "engines": {
