@@ -44,20 +44,20 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Wait for Firebird to be ready
         run: |
           echo "Waiting for Firebird to accept connections..."
           for i in $(seq 1 30); do
-            if nc -z localhost 3050; then
+            if bash -c 'cat < /dev/null > /dev/tcp/localhost/3050' 2>/dev/null; then
               echo "Firebird is ready."
               break
             fi
             echo "Attempt $i: not ready yet, retrying in 3s..."
             sleep 3
           done
-          nc -z localhost 3050 || (echo "Firebird did not become ready in time" && exit 1)
+          bash -c 'cat < /dev/null > /dev/tcp/localhost/3050' 2>/dev/null || (echo "Firebird did not become ready in time" && exit 1)
 
       - name: Seed test database
         run: node scripts/seed-test-db.js
