@@ -18,7 +18,7 @@ const Firebird = require('node-firebird');
 const options = {
   host:     process.env.FIREBIRD_HOST     || 'localhost',
   port:     Number(process.env.FIREBIRD_PORT || '3050'),
-  database: process.env.FIREBIRD_DATABASE || '/firebird/data/test.fdb',
+  database: process.env.FIREBIRD_DATABASE || '/var/lib/firebird/data/test.fdb',
   user:     process.env.FIREBIRD_USER     || 'sysdba',
   password: process.env.FIREBIRD_PASSWORD || 'masterkey',
 };

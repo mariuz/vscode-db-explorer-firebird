@@ -8,23 +8,17 @@ on:
 
 jobs:
   e2e-tests:
-    name: E2E Tests (Firebird ${{ matrix.firebird-version }})
+    name: E2E Tests (Firebird 5)
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
-    strategy:
-      matrix:
-        firebird-version: ["4.0", "5.0"]
-
     services:
       firebird:
-        image: jacobalberty/firebird:${{ matrix.firebird-version }}
+        image: firebirdsql/firebird:5
         env:
-          ISC_PASSWORD: masterkey
+          FIREBIRD_ROOT_PASSWORD: masterkey
           FIREBIRD_DATABASE: test.fdb
-          FIREBIRD_USER: sysdba
-          FIREBIRD_PASSWORD: masterkey
         ports:
           - 3050:3050
         options: >-
@@ -36,7 +30,7 @@ jobs:
     env:
       FIREBIRD_HOST: localhost
       FIREBIRD_PORT: 3050
-      FIREBIRD_DATABASE: /firebird/data/test.fdb
+      FIREBIRD_DATABASE: /var/lib/firebird/data/test.fdb
       FIREBIRD_USER: sysdba
       FIREBIRD_PASSWORD: masterkey
 
@@ -44,10 +38,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -71,7 +65,7 @@ jobs:
         env:
           FIREBIRD_HOST: localhost
           FIREBIRD_PORT: 3050
-          FIREBIRD_DATABASE: /firebird/data/test.fdb
+          FIREBIRD_DATABASE: /var/lib/firebird/data/test.fdb
           FIREBIRD_USER: sysdba
           FIREBIRD_PASSWORD: masterkey
 
@@ -83,6 +77,6 @@ jobs:
         env:
           FIREBIRD_HOST: localhost
           FIREBIRD_PORT: 3050
-          FIREBIRD_DATABASE: /firebird/data/test.fdb
+          FIREBIRD_DATABASE: /var/lib/firebird/data/test.fdb
           FIREBIRD_USER: sysdba
           FIREBIRD_PASSWORD: masterkey

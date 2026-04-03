@@ -8,23 +8,19 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit Tests (Node ${{ matrix.node-version }})
+    name: Unit Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
-    strategy:
-      matrix:
-        node-version: ["18", "20"]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ matrix.node-version }}
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
