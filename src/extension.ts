@@ -1,7 +1,7 @@
 import {ExtensionContext, window, commands, workspace} from "vscode";
 import {Constants, getOptions} from "./config";
 import {FirebirdTreeDataProvider} from "./firebirdTreeDataProvider";
-import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView} from "./nodes";
+import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain} from "./nodes";
 import {Options, FirebirdTree} from "./interfaces";
 import {connectionPicker} from "./shared/connection-picker";
 import {Driver} from "./shared/driver";
@@ -11,6 +11,7 @@ import {CredentialStore} from "./shared/credential-store";
 import {logger} from "./logger/logger";
 import {KeywordsDb} from "./language-server/db-words.provider";
 import QueryResultsView from "./result-view";
+import {TableDesigner} from "./table-designer";
 import MockData from "./mock-data/mock-data";
 import LanguageServer from "./language-server";
 import * as cp from 'node:child_process';
@@ -47,6 +48,7 @@ export function activate(context: ExtensionContext) {
   const firebirdTreeDataProvider = new FirebirdTreeDataProvider(context);
   const firebirdMockData = new MockData(context.extensionPath);
   const firebirdQueryResults = new QueryResultsView(context.extensionPath);
+  const firebirdTableDesigner = new TableDesigner(context.extensionPath);
 
   /* SQL linter */
   const sqlLinter = new SqlLinter();
@@ -68,6 +70,8 @@ export function activate(context: ExtensionContext) {
     window.registerTreeDataProvider("firebird-query-history", queryHistoryProvider),
     firebirdMockData,
     firebirdQueryResults,
+    firebirdTableDesigner,
+    firebirdLanguageServer
     firebirdLanguageServer,
     sqlLinter,
     bookmarkProvider,
@@ -290,6 +294,126 @@ export function activate(context: ExtensionContext) {
       viewNode.selectAllRecords().then(result => {
         firebirdQueryResults.display(result, config.recordsPerPage);
       });
+    })
+  );
+
+  /* DDL: alter table scaffold */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.table.alterTable", (tableNode: NodeTable) => {
+      tableNode.alterTable().catch(err => logger.error(err));
+    })
+  );
+
+  /* DDL: open visual table designer */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.table.createTable", () => {
+      firebirdTableDesigner.open(Global.activeConnection);
+    })
+  );
+
+  /* DDL: edit procedure source */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.procedure.editProcedure", (procNode: NodeProcedure) => {
+      procNode.editProcedure().catch(err => logger.error(err));
+    })
+  );
+
+  /* DDL: drop procedure */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.procedure.dropProcedure", async (procNode: NodeProcedure) => {
+      const answer = await vscode.window.showInformationMessage("Do you really want to drop this procedure?", "Yes", "No");
+      if (answer === "Yes") {
+        procNode.dropProcedure();
+      }
+    })
+  );
+
+  /* DDL: edit trigger source */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.trigger.editTrigger", (triggerNode: NodeTrigger) => {
+      triggerNode.editTrigger().catch(err => logger.error(err));
+    })
+  );
+
+  /* DDL: drop trigger */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.trigger.dropTrigger", async (triggerNode: NodeTrigger) => {
+      const answer = await vscode.window.showInformationMessage("Do you really want to drop this trigger?", "Yes", "No");
+      if (answer === "Yes") {
+        triggerNode.dropTrigger();
+      }
+    })
+  );
+
+  /* DDL: edit view definition */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.view.editView", (viewNode: NodeView) => {
+      viewNode.editView().catch(err => logger.error(err));
+    })
+  );
+
+  /* DDL: drop view */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.view.dropView", async (viewNode: NodeView) => {
+      const answer = await vscode.window.showInformationMessage("Do you really want to drop this view?", "Yes", "No");
+      if (answer === "Yes") {
+        viewNode.dropView();
+      }
+    })
+  );
+
+  /* DDL: set generator value */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.generator.setValue", (genNode: NodeGenerator) => {
+      genNode.setGeneratorValue().catch(err => logger.error(err));
+    })
+  );
+
+  /* DDL: drop generator */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.generator.dropGenerator", async (genNode: NodeGenerator) => {
+      const answer = await vscode.window.showInformationMessage("Do you really want to drop this generator/sequence?", "Yes", "No");
+      if (answer === "Yes") {
+        genNode.dropGenerator();
+      }
+    })
+  );
+
+  /* DDL: drop domain */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.domain.dropDomain", async (domainNode: NodeDomain) => {
+      const answer = await vscode.window.showInformationMessage("Do you really want to drop this domain?", "Yes", "No");
+      if (answer === "Yes") {
+        domainNode.dropDomain();
+      }
+    })
+  );
+
+  /* DB: monitor active connections */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.monitorDatabase", (databaseNode: NodeDatabase) => {
+      databaseNode.monitorDatabase().then(result => {
+        firebirdQueryResults.display(result, config.recordsPerPage);
+      }).catch(err => {
+        logger.error(err.message ?? err);
+        logger.showError("Monitor query failed. Check logs for details.", ["Show Log Output"]).then(sel => {
+          if (sel === "Show Log Output") { logger.showOutput(); }
+        });
+      });
+    })
+  );
+
+  /* DB: backup database */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.backupDatabase", (databaseNode: NodeDatabase) => {
+      databaseNode.backupDatabase().catch(err => logger.error(err));
+    })
+  );
+
+  /* DB: restore database */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.restoreDatabase", (databaseNode: NodeDatabase) => {
+      databaseNode.restoreDatabase().catch(err => logger.error(err));
     })
   );
 

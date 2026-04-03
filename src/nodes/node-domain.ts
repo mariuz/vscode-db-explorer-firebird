@@ -1,9 +1,12 @@
-import {ExtensionContext, TreeItem, TreeItemCollapsibleState} from "vscode";
+import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands} from "vscode";
 import {join} from "path";
-import {FirebirdTree} from "../interfaces";
+import {ConnectionOptions, FirebirdTree} from "../interfaces";
+import {dropDomainQuery} from "../shared/queries";
+import {Driver} from "../shared/driver";
+import {logger} from "../logger/logger";
 
 export class NodeDomain implements FirebirdTree {
-  constructor(private readonly domain: any) {}
+  constructor(private readonly domain: any, private readonly dbDetails?: ConnectionOptions) {}
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     const name = this.domain.DOMAIN_NAME ? this.domain.DOMAIN_NAME.trim() : "";
@@ -24,5 +27,21 @@ export class NodeDomain implements FirebirdTree {
 
   public getChildren(): FirebirdTree[] {
     return [];
+  }
+
+  public async dropDomain() {
+    if (!this.dbDetails) { return; }
+    const name = this.domain.DOMAIN_NAME ? this.domain.DOMAIN_NAME.trim() : "";
+    logger.info("Drop Domain");
+    Driver.runQuery(dropDomainQuery(name), this.dbDetails)
+      .then(results => {
+        logger.info(results[0].message);
+        logger.showInfo(results[0].message);
+        commands.executeCommand("firebird.explorer.refresh");
+      })
+      .catch(err => {
+        logger.error(err);
+        logger.showError(`Failed to drop domain: ${err}`);
+      });
   }
 }

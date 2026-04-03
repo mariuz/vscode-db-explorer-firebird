@@ -1,9 +1,12 @@
-import {ExtensionContext, TreeItem, TreeItemCollapsibleState} from "vscode";
+import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands} from "vscode";
 import {join} from "path";
-import {FirebirdTree} from "../interfaces";
+import {ConnectionOptions, FirebirdTree} from "../interfaces";
+import {getTriggerBodyQuery, dropTriggerQuery} from "../shared/queries";
+import {Driver} from "../shared/driver";
+import {logger} from "../logger/logger";
 
 export class NodeTrigger implements FirebirdTree {
-  constructor(private readonly trigger: any) {}
+  constructor(private readonly trigger: any, private readonly dbDetails?: ConnectionOptions) {}
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     const name = this.trigger.TRIGGER_NAME ? this.trigger.TRIGGER_NAME.trim() : "";
@@ -24,6 +27,40 @@ export class NodeTrigger implements FirebirdTree {
 
   public getChildren(): FirebirdTree[] {
     return [];
+  }
+
+  public async editTrigger() {
+    if (!this.dbDetails) { return; }
+    const name = this.trigger.TRIGGER_NAME ? this.trigger.TRIGGER_NAME.trim() : "";
+    logger.info("Edit Trigger: open source for editing");
+    try {
+      const connection = await Driver.client.createConnection(this.dbDetails);
+      const rows = await Driver.client.queryPromise<any>(connection, getTriggerBodyQuery(name));
+      const source = rows[0]?.TRIGGER_SOURCE ?? "";
+      const scaffold = source
+        ? `ALTER TRIGGER ${name}\n${source.trim()}`
+        : `ALTER TRIGGER ${name}\nACTIVE BEFORE INSERT ON /* table_name */\nAS\nBEGIN\n  /* trigger body */\nEND`;
+      Driver.createSQLTextDocument(scaffold);
+    } catch (err) {
+      logger.error(err);
+      logger.showError(`Failed to fetch trigger source: ${err}`);
+    }
+  }
+
+  public async dropTrigger() {
+    if (!this.dbDetails) { return; }
+    const name = this.trigger.TRIGGER_NAME ? this.trigger.TRIGGER_NAME.trim() : "";
+    logger.info("Drop Trigger");
+    Driver.runQuery(dropTriggerQuery(name), this.dbDetails)
+      .then(results => {
+        logger.info(results[0].message);
+        logger.showInfo(results[0].message);
+        commands.executeCommand("firebird.explorer.refresh");
+      })
+      .catch(err => {
+        logger.error(err);
+        logger.showError(`Failed to drop trigger: ${err}`);
+      });
   }
 
   private parseTriggerType(type: number): string {

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebird Table Designer</title>
+  <style>
+    body {
+      font-family: var(--vscode-font-family, sans-serif);
+      font-size: var(--vscode-font-size, 13px);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+      padding: 16px;
+      margin: 0;
+    }
+    h2 { margin-top: 0; }
+    label { display: block; margin-bottom: 4px; font-weight: 600; }
+    input[type="text"], select {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, #555);
+      padding: 4px 6px;
+      font-size: inherit;
+      border-radius: 2px;
+    }
+    input[type="text"] { width: 100%; box-sizing: border-box; }
+    .table-name-row { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+    th { text-align: left; padding: 6px 8px; background: var(--vscode-editor-lineHighlightBackground, #333); border-bottom: 1px solid var(--vscode-input-border, #555); }
+    td { padding: 4px 8px; border-bottom: 1px solid var(--vscode-input-border, #333); vertical-align: middle; }
+    td input[type="text"], td select { width: 100%; }
+    td input[type="checkbox"] { width: auto; cursor: pointer; }
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: inherit;
+      border-radius: 2px;
+      margin-right: 8px;
+    }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground, #444);
+      color: var(--vscode-button-secondaryForeground, #ccc);
+    }
+    button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground, #555); }
+    button.danger { background: #c0392b; color: #fff; }
+    button.danger:hover { background: #e74c3c; }
+    .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    #ddl-output {
+      margin-top: 16px;
+      background: var(--vscode-textCodeBlock-background, #1e1e1e);
+      color: var(--vscode-editor-foreground);
+      padding: 12px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: var(--vscode-editor-font-size, 12px);
+      white-space: pre;
+      border-radius: 4px;
+      display: none;
+    }
+    .remove-col { background: transparent; color: var(--vscode-errorForeground, #f44); border: none; cursor: pointer; padding: 2px 6px; font-size: 16px; }
+    .remove-col:hover { color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <h2>Create Table</h2>
+
+  <div class="table-name-row">
+    <label for="tableName">Table Name</label>
+    <input type="text" id="tableName" placeholder="MY_TABLE" />
+  </div>
+
+  <label>Columns</label>
+  <table id="columnsTable">
+    <thead>
+      <tr>
+        <th>Column Name</th>
+        <th>Data Type</th>
+        <th>Size</th>
+        <th>Not Null</th>
+        <th>Primary Key</th>
+        <th>Default</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="columnsBody">
+    </tbody>
+  </table>
+
+  <button class="secondary" id="addColumnBtn">+ Add Column</button>
+
+  <div class="actions">
+    <button id="generateBtn">Generate DDL in Editor</button>
+    <button id="executeBtn">Execute DDL</button>
+  </div>
+
+  <pre id="ddl-output"></pre>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    const types = ['VARCHAR','CHAR','INTEGER','SMALLINT','INT64','FLOAT','DOUBLE','DATE','TIME','TIMESTAMP','BLOB','BOOLEAN'];
+
+    function escAttr(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function addRow(name, type, size, notNull, pk, dflt) {
+      const tbody = document.getElementById('columnsBody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="col-name" value="${escAttr(name)}" placeholder="COLUMN_NAME"></td>
+        <td>
+          <select class="col-type">
+            ${types.map(t => `<option value="${escAttr(t)}"${t===(type||'VARCHAR')?' selected':''}>${escAttr(t)}</option>`).join('')}
+          </select>
+        </td>
+        <td><input type="text" class="col-size" value="${escAttr(size)}" placeholder="e.g. 100"></td>
+        <td style="text-align:center"><input type="checkbox" class="col-notnull"${notNull?' checked':''}></td>
+        <td style="text-align:center"><input type="checkbox" class="col-pk"${pk?' checked':''}></td>
+        <td><input type="text" class="col-default" value="${escAttr(dflt)}" placeholder="default value"></td>
+        <td><button class="remove-col" title="Remove column">&times;</button></td>
+      `;
+      tr.querySelector('.remove-col').addEventListener('click', () => tr.remove());
+      tbody.appendChild(tr);
+    }
+
+    document.getElementById('addColumnBtn').addEventListener('click', () => addRow('', 'VARCHAR', '', false, false, ''));
+
+    // Add a default first column
+    addRow('ID', 'INTEGER', '', true, true, '');
+
+    function buildDDL() {
+      const tableName = document.getElementById('tableName').value.trim().toUpperCase() || 'NEW_TABLE';
+      const rows = document.querySelectorAll('#columnsBody tr');
+      const pkCols = [];
+      const colDefs = [];
+
+      rows.forEach(row => {
+        const name = row.querySelector('.col-name').value.trim().toUpperCase();
+        if (!name) return;
+        const type = row.querySelector('.col-type').value;
+        const size = row.querySelector('.col-size').value.trim();
+        const notNull = row.querySelector('.col-notnull').checked;
+        const pk = row.querySelector('.col-pk').checked;
+        const dflt = row.querySelector('.col-default').value.trim();
+
+        let colDef = `  ${name} ${type}`;
+        if (size && ['VARCHAR','CHAR','CSTRING'].includes(type)) colDef += `(${size})`;
+        if (dflt) colDef += ` DEFAULT ${dflt}`;
+        if (notNull) colDef += ' NOT NULL';
+        colDefs.push(colDef);
+        if (pk) pkCols.push(name);
+      });
+
+      if (pkCols.length > 0) {
+        colDefs.push(`  PRIMARY KEY (${pkCols.join(', ')})`);
+      }
+
+      return `CREATE TABLE ${tableName} (\n${colDefs.join(',\n')}\n);`;
+    }
+
+    document.getElementById('generateBtn').addEventListener('click', () => {
+      const ddl = buildDDL();
+      document.getElementById('ddl-output').style.display = 'block';
+      document.getElementById('ddl-output').textContent = ddl;
+      vscode.postMessage({ command: 'openInEditor', ddl });
+    });
+
+    document.getElementById('executeBtn').addEventListener('click', () => {
+      const ddl = buildDDL();
+      document.getElementById('ddl-output').style.display = 'block';
+      document.getElementById('ddl-output').textContent = ddl;
+      vscode.postMessage({ command: 'executeDDL', ddl });
+    });
+
+    window.addEventListener('message', event => {
+      const msg = event.data;
+      if (msg.command === 'result') {
+        document.getElementById('ddl-output').style.display = 'block';
+        document.getElementById('ddl-output').textContent =
+          (document.getElementById('ddl-output').textContent || '') + '\n-- ' + msg.data.text;
+      }
+    });
+  </script>
+</body>
+</html>

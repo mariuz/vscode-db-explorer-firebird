@@ -1,7 +1,7 @@
-import {ExtensionContext, TreeItem, TreeItemCollapsibleState} from "vscode";
+import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands} from "vscode";
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
-import {viewColumnsQuery, selectAllRecordsQuery} from "../shared/queries";
+import {viewColumnsQuery, selectAllRecordsQuery, getViewDefinitionQuery, dropViewQuery} from "../shared/queries";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {NodeInfo} from "./node-info";
@@ -43,6 +43,36 @@ export class NodeView implements FirebirdTree {
       .then(result => result)
       .catch(err => {
         logger.error(err);
+      });
+  }
+
+  public async editView() {
+    logger.info("Edit View: open definition for editing");
+    try {
+      const connection = await Driver.client.createConnection(this.dbDetails);
+      const rows = await Driver.client.queryPromise<any>(connection, getViewDefinitionQuery(this.viewName.trim()));
+      const source = rows[0]?.VIEW_SOURCE ?? "";
+      const scaffold = source
+        ? `ALTER VIEW ${this.viewName.trim()} AS\n${source.trim()}`
+        : `ALTER VIEW ${this.viewName.trim()} AS\nSELECT /* column_list */ FROM /* table_name */`;
+      Driver.createSQLTextDocument(scaffold);
+    } catch (err) {
+      logger.error(err);
+      logger.showError(`Failed to fetch view definition: ${err}`);
+    }
+  }
+
+  public async dropView() {
+    logger.info("Drop View");
+    Driver.runQuery(dropViewQuery(this.viewName.trim()), this.dbDetails)
+      .then(results => {
+        logger.info(results[0].message);
+        logger.showInfo(results[0].message);
+        commands.executeCommand("firebird.explorer.refresh");
+      })
+      .catch(err => {
+        logger.error(err);
+        logger.showError(`Failed to drop view: ${err}`);
       });
   }
 }
