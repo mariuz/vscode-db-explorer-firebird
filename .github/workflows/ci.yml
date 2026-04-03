@@ -10,6 +10,8 @@ jobs:
   unit-tests:
     name: Unit Tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     strategy:
       matrix:

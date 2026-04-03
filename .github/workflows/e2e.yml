@@ -10,6 +10,8 @@ jobs:
   e2e-tests:
     name: E2E Tests (Firebird ${{ matrix.firebird-version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     strategy:
       matrix:
