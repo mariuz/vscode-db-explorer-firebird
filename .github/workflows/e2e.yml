@@ -19,6 +19,7 @@ jobs:
         env:
           FIREBIRD_ROOT_PASSWORD: masterkey
           FIREBIRD_DATABASE: test.fdb
+          FIREBIRD_CONF_WireCrypt: Disabled
         ports:
           - 3050:3050
         options: >-

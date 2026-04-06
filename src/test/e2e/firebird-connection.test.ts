@@ -22,11 +22,13 @@ import * as Firebird from 'node-firebird';
 
 function getOptions(): Firebird.Options {
   return {
-    host:     process.env.FIREBIRD_HOST     ?? 'localhost',
-    port:     Number(process.env.FIREBIRD_PORT ?? '3050'),
-    database: process.env.FIREBIRD_DATABASE ?? '/var/lib/firebird/data/test.fdb',
-    user:     process.env.FIREBIRD_USER     ?? 'sysdba',
-    password: process.env.FIREBIRD_PASSWORD ?? 'masterkey',
+    host:      process.env.FIREBIRD_HOST     ?? 'localhost',
+    port:      Number(process.env.FIREBIRD_PORT ?? '3050'),
+    database:  process.env.FIREBIRD_DATABASE ?? '/var/lib/firebird/data/test.fdb',
+    user:      process.env.FIREBIRD_USER     ?? 'sysdba',
+    password:  process.env.FIREBIRD_PASSWORD ?? 'masterkey',
+    // Firebird 5 defaults to WireCrypt=Enabled; disable for CI test connections
+    wireCrypt: Firebird.WIRE_CRYPT_DISABLE,
   };
 }
 
