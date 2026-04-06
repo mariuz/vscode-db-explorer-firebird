@@ -87,7 +87,7 @@ export function formatSQL(sql: string): string {
     if (!trimmed || trimmed === '*') {
       return `SELECT ${trimmed}\nFROM`;
     }
-    const columns = trimmed.split(',').map(c => `    ${c.trim()}`).join(',\n');
+    const columns = trimmed.split(',').map((c: string) => `    ${c.trim()}`).join(',\n');
     return `SELECT\n${columns}\nFROM`;
   });
 

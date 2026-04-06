@@ -9,7 +9,8 @@
     "rootDir": "src",
     "skipLibCheck": true,
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "types": ["node", "mocha"]
   },
   "include": [
     "src/shared/sql-splitter.ts",

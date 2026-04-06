@@ -28,6 +28,7 @@ export class Global {
 
   public static async setActiveConnectionById(context: ExtensionContext, id: string): Promise<void> {
     const connections = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey);
+    if (!connections) { return; }
     if (Object.keys(connections).indexOf(id) > -1) {
       const conn = { ...connections[id] };
       /* populate password from SecretStorage so queries work immediately */
@@ -59,7 +60,7 @@ export class Global {
   }
 
   private static getStatusBarItemText(activeConnection: ConnectionOptions): string {
-    const dbName = activeConnection.database.split("\\").pop().split("/").pop();
+    const dbName = (activeConnection.database.split("\\").pop() ?? activeConnection.database).split("/").pop() ?? activeConnection.database;
     if (activeConnection.embedded) {
       return `FIREBIRD: $(file-directory) [embedded] $(database) ${dbName}`;
     }
@@ -67,7 +68,7 @@ export class Global {
   }
 
   private static getStatusBarTooltipText(activeConnection: ConnectionOptions): string {
-    const dbName = activeConnection.database.split("\\").pop().split("/").pop();
+    const dbName = (activeConnection.database.split("\\").pop() ?? activeConnection.database).split("/").pop() ?? activeConnection.database;
     if (activeConnection.embedded) {
       return `FIREBIRD: Using embedded database ${dbName}`;
     }
@@ -75,7 +76,7 @@ export class Global {
   }
 
   private static getActiveDbNotifText(newActiveConnection: ConnectionOptions): string {
-    const dbName = newActiveConnection.database.split("\\").pop().split("/").pop();
+    const dbName = (newActiveConnection.database.split("\\").pop() ?? newActiveConnection.database).split("/").pop() ?? newActiveConnection.database;
     if (newActiveConnection.embedded) {
       return `Active connection: [embedded] ${dbName}`;
     }
