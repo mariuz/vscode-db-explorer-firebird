@@ -38,7 +38,7 @@ export class Driver {
     return window.showTextDocument(textDocument, ViewColumn.One);
   }
 
-  public static constructResponse(sql: string): string {
+  public static constructResponse(sql: string): string | null {
     const string = sql.toLowerCase();
     if (string.indexOf("create") > -1) {
       return "Create";
@@ -118,11 +118,12 @@ export class Driver {
       if (result !== undefined) {
         //convert blob
         result.forEach(resultRow => {
-          Object.keys(resultRow).forEach(field => {
-            if (resultRow[field] instanceof Function) {
-              resultRow[field]((_err, _name, e) => {
-                e.on("data", chunk => {
-                  resultRow[field] = chunk;
+          const row = resultRow as Record<string, any>;
+          Object.keys(row).forEach(field => {
+            if (row[field] instanceof Function) {
+              row[field]((_err: any, _name: any, e: any) => {
+                e.on("data", (chunk: any) => {
+                  row[field] = chunk;
                 });
               });
             }
@@ -203,10 +204,11 @@ export class Driver {
           if (rows !== undefined) {
             // Convert blobs
             rows.forEach(row => {
-              Object.keys(row).forEach(field => {
-                if (row[field] instanceof Function) {
-                  row[field]((_err: any, _name: any, e: any) => {
-                    e.on("data", (chunk: any) => { row[field] = chunk; });
+              const r = row as Record<string, any>;
+              Object.keys(r).forEach(field => {
+                if (r[field] instanceof Function) {
+                  r[field]((_err: any, _name: any, e: any) => {
+                    e.on("data", (chunk: any) => { r[field] = chunk; });
                   });
                 }
               });
@@ -306,7 +308,7 @@ function toNodeFirebirdOptions(connectionOptions: ConnectionOptions): Firebird.O
     database: connectionOptions.database,
     user: connectionOptions.user,
     password: connectionOptions.password ?? "",
-    role: connectionOptions.role
+    role: connectionOptions.role ?? undefined
   };
 
   if (!connectionOptions.embedded) {
@@ -371,7 +373,7 @@ export class NativeClient implements ClientI<Attachment> {
       throw new Error("Invalid Connection");
     }
     const trans = await connection.startTransaction();
-    let res: ResultSet;
+    let res: ResultSet | undefined;
     try {
       res = await connection.executeQuery(trans, sql);
       const result = await res.fetchAsObject<T>();
@@ -400,13 +402,13 @@ export class NativeClient implements ClientI<Attachment> {
       const {createNativeClient, getDefaultLibraryFilename} = await import('node-firebird-driver-native');
       client = createNativeClient(getDefaultLibraryFilename());  
     } catch (e) {
-      throw new Error("Unable to initialize native driver: " + (e?.message ?? e));
+      throw new Error("Unable to initialize native driver: " + ((e as any)?.message ?? e));
     }
 
     return await client.connect(connectionStr, {
       username: connectionOptions.user,
       password: connectionOptions.password ?? "",
-      role: connectionOptions.role
+      role: connectionOptions.role ?? undefined
     });
 
   }
@@ -428,7 +430,7 @@ export class NativeClient implements ClientI<Attachment> {
     try {
       const trans = await connection.startTransaction();
       try {
-        const stmt = await connection.prepare(trans, sql);
+        const stmt = await connection.prepare(trans, sql) as any;
         const plan = await stmt.getPlan(false);
         await stmt.free();
         await trans.rollback();

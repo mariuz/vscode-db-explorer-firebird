@@ -69,7 +69,7 @@ class Logger {
   }
 
   private log(msg: string, level: Level) {
-    this.setLogLevel(workspace.getConfiguration().get("firebird.logLevel"));
+    this.setLogLevel(workspace.getConfiguration().get("firebird.logLevel") ?? this.logLevel);
     const time = new Date().toLocaleTimeString();
     msg = `[${time}][${Constants.Id}][${level}] ${msg}`;
     switch (level) {
