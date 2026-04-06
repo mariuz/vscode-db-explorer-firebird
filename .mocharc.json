@@ -1,5 +1,4 @@
 {
-  "require": ["./out/test/setup.js"],
   "timeout": 10000,
   "ui": "tdd"
 }

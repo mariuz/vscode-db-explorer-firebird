@@ -8,16 +8,25 @@
     "sourceMap": true,
     "rootDir": "src",
     "skipLibCheck": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "types": ["node", "mocha"]
   },
   "include": [
     "src/shared/sql-splitter.ts",
     "src/shared/sql-formatter.ts",
     "src/shared/sql-linter.ts",
+    "src/shared/driver.ts",
+    "src/shared/global.ts",
+    "src/shared/utils.ts",
+    "src/shared/credential-store.ts",
+    "src/logger/logger.ts",
     "src/schema-diff/schema-diff.ts",
     "src/bookmarks/bookmark-provider.ts",
     "src/query-history/query-history-provider.ts",
     "src/copilot/schema-context.ts",
+    "src/language-server/completionProvider.ts",
+    "src/language-server/firebird-reserved.ts",
     "src/interfaces/**/*.ts",
     "src/test/**/*.ts"
   ],

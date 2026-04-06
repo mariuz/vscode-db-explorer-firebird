@@ -41,7 +41,8 @@
     "compile": "npm run -S esbuild-build",
     "watch": "npm run -S esbuild-base -- --sourcemap --watch",
     "tsc-watch": "tsc -watch -p ./",
-    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha 'out/test/**/*.test.js'"
+    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha 'out/test/**/*.test.js' --exclude 'out/test/e2e/**'",
+    "test:e2e": "tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000"
   },
   "contributes": {
     "commands": [
@@ -670,7 +671,7 @@
   "dependencies": {
     "bindings": "^1.5.0",
     "node-addon-api": "^5.0.0",
-    "node-firebird": "^0.9.8",
+    "node-firebird": "^2.0.2",
     "node-firebird-driver": "^3.1.0",
     "node-firebird-driver-native": "^3.1.0",
     "node-firebird-native-api": "^3.0.0",

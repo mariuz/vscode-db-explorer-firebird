@@ -31,7 +31,7 @@ export class SqlLinter implements vscode.Disposable {
     );
 
     // Lint on change (with a short debounce)
-    let debounceTimer: NodeJS.Timeout | undefined;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     this.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument(event => {
         if (this.isSqlDoc(event.document)) {
@@ -193,7 +193,7 @@ export class SqlLinter implements vscode.Disposable {
     const diags: vscode.Diagnostic[] = [];
     let schema: Schema.Database;
     try {
-      schema = await this.schemaProvider();
+      schema = await this.schemaProvider!();
     } catch {
       return diags;
     }

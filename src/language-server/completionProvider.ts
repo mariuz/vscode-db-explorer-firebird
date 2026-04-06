@@ -8,8 +8,9 @@ interface SchemaProvider {
 
 /**
  * Determines the SQL context at the cursor position.
+ * Exported for unit testing.
  */
-enum SqlContext {
+export enum SqlContext {
   /** Inside a FROM or JOIN clause — suggest table names */
   FromClause,
   /** After CREATE/ALTER/DROP — suggest object types */
@@ -22,8 +23,9 @@ enum SqlContext {
 
 /**
  * Analyzes the document text up to the cursor to determine the current SQL context.
+ * Exported for unit testing.
  */
-function getSqlContext(textBeforeCursor: string): SqlContext {
+export function getSqlContext(textBeforeCursor: string): SqlContext {
   const normalized = textBeforeCursor.replace(/\s+/g, ' ').trimEnd().toUpperCase();
 
   // Check if inside a PSQL block (BEGIN...END, EXECUTE BLOCK, procedure/trigger body)

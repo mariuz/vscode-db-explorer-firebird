@@ -1,0 +1,32 @@
+name: CI – Unit Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile tests
+        run: tsc -p tsconfig.test.json --noEmitOnError false
+
+      - name: Run unit tests
+        run: ./node_modules/.bin/mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**'

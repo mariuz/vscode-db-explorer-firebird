@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2020",
+    "outDir": "out",
+    "lib": ["ES2019"],
+    "sourceMap": true,
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "types": ["node", "mocha"]
+  },
+  "include": [
+    "src/test/e2e/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}
