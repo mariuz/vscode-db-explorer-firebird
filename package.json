@@ -41,8 +41,9 @@
     "compile": "npm run -S esbuild-build",
     "watch": "npm run -S esbuild-base -- --sourcemap --watch",
     "tsc-watch": "tsc -watch -p ./",
-    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha 'out/test/**/*.test.js' --exclude 'out/test/e2e/**'",
-    "test:e2e": "tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000"
+    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
+    "test:e2e": "tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000",
+    "test:vscode-host": "npm run compile && tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test"
   },
   "contributes": {
     "commands": [
@@ -685,7 +686,8 @@
     "@types/vscode": "^1.32.0",
     "@typescript-eslint/eslint-plugin": "^5.52.0",
     "@typescript-eslint/parser": "^5.52.0",
-    "@vscode/test-electron": "^2.2.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "copy-folder-util": "^1.1.1",
     "esbuild": "^0.17.8",
     "eslint": "^8.34.0",

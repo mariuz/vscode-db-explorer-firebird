@@ -2,8 +2,14 @@ node_modules
 src/**/*.ts
 .vscode
 tsconfig.json
+tsconfig.test.json
+tsconfig.suite.json
+tsconfig.e2e.json
 .eslint*
+.mocharc.json
+.vscode-test.mjs
 images
+out/test
 !node_modules/node-firebird-native-api
 !node_modules/node-gyp
 !node_modules/node-addon-api
