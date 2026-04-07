@@ -9,7 +9,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-const EXTENSION_ID = 'ninoDeme.vscode-db-explorer-firebird-fork';
+const EXTENSION_ID = 'AdrianMariusPopa.vscode-firebird-studio';
 
 suite('Extension Host – activation', function () {
   this.timeout(30000);
