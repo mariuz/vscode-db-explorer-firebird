@@ -30,7 +30,7 @@
     "name": "Marius Popa Adrian",
     "url": "https://github.com/mariuz"
   },
-  "publisher": "mariuz",
+  "publisher": "AdrianMariusPopa",
   "main": "./out/extension.js",
   "scripts": {
     "tsc-compile": "tsc -p ./",
