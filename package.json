@@ -699,9 +699,6 @@
   "engines": {
     "vscode": "^1.93.0"
   },
-  "extensionDependencies": [
-    "github.copilot-chat"
-  ],
   "icon": "resources/img/icon.png",
   "galleryBanner": {
     "color": "#f1c40f",

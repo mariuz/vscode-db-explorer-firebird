@@ -61,8 +61,10 @@ export function activate(context: ExtensionContext) {
   /* Query history */
   const queryHistoryProvider = new QueryHistoryProvider(context);
 
-  /* Copilot Chat participant (@firebird) */
-  registerCopilotChatParticipant(context, firebirdDatabaseWords);
+  /* Copilot Chat participant (@firebird) – only when the Chat API is available */
+  if (typeof vscode.chat !== 'undefined') {
+    registerCopilotChatParticipant(context, firebirdDatabaseWords);
+  }
 
   context.subscriptions.push(
     window.registerTreeDataProvider(Constants.FirebirdExplorerViewId, firebirdTreeDataProvider),
@@ -71,7 +73,6 @@ export function activate(context: ExtensionContext) {
     firebirdMockData,
     firebirdQueryResults,
     firebirdTableDesigner,
-    firebirdLanguageServer
     firebirdLanguageServer,
     sqlLinter,
     bookmarkProvider,
