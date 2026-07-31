@@ -1,7 +1,7 @@
 {
   "name": "vscode-firebird-studio",
   "displayName": "Firebird Studio for VS Code",
-  "version": "0.1.98",
+  "version": "0.1.99",
   "description": "Firebird Studio — explore, query, and manage Firebird databases directly inside VS Code.",
   "categories": [
     "Programming Languages",

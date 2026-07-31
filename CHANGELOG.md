@@ -2,6 +2,12 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.99 - 2026-07-31
+
+### Added
+
+- **Data API specs can now leave columns out.** Generating a spec no longer means exposing every column of every table you include — a table can be scoped to specific columns, or have columns excluded, so a `PASSWORD_HASH` or internal audit column stays out of the generated REST surface. **Generate Data API Spec with Copilot...** understands this too ("expose users read-only but not the password hash"). Two rules keep the result usable: hiding a primary-key column drops that table's by-id routes (the URL needs it), and hiding a mandatory column that has no default makes the table read-only, since a create could never satisfy it. Completes phase 5 of `docs/roadmap/data-api-builder.md`.
+
 ## 0.1.98 - 2026-07-31
 
 ### Added

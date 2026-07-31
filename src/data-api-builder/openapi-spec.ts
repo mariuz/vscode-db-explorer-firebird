@@ -14,7 +14,64 @@
 
 import { SchemaGraph, SchemaTable, SchemaColumn } from "../schema-designer/schema-graph";
 
-export type TableAccess = "full" | "read-only";
+export type TableAccessLevel = "full" | "read-only";
+
+/**
+ * Column-level scoping (docs/roadmap/data-api-builder.md, phase 5). `tableAccess` used to be a bare
+ * access level per table; it now also accepts this object so a table can be exposed without every
+ * one of its columns — the case the feature most obviously serves is a table that has a
+ * `PASSWORD_HASH`, `SALARY`, or internal audit column you don't want in a public REST surface.
+ *
+ * `includeColumns` wins over `excludeColumns` when both are given (an allow-list is the more
+ * explicit statement of intent). Names are matched case-insensitively, and a name that matches no
+ * real column is ignored — the same "validate against ground truth, don't trust the input" rule
+ * `parseTableAccessResponse()` already applies to table names.
+ */
+export interface TableAccessSpec {
+  access: TableAccessLevel;
+  includeColumns?: string[];
+  excludeColumns?: string[];
+}
+
+/** The bare level is still accepted everywhere, so phase 3's callers are unchanged. */
+export type TableAccess = TableAccessLevel | TableAccessSpec;
+
+/** Widens the bare-level form to the object form, so the rest of this module handles one shape. */
+export function normalizeTableAccess(access: TableAccess | undefined): TableAccessSpec {
+  if (access === undefined) { return { access: "full" }; }
+  return typeof access === "string" ? { access } : access;
+}
+
+/**
+ * The columns of `table` this spec exposes. An empty result means the table shouldn't appear in the
+ * spec at all — an entity with no columns is not a useful thing to generate routes for.
+ */
+export function visibleColumns(table: SchemaTable, spec: TableAccessSpec): SchemaColumn[] {
+  const include = spec.includeColumns?.map(name => name.toUpperCase());
+  const exclude = spec.excludeColumns?.map(name => name.toUpperCase());
+  if (include && include.length > 0) {
+    return table.columns.filter(col => include.includes(col.name.toUpperCase()));
+  }
+  if (exclude && exclude.length > 0) {
+    return table.columns.filter(col => !exclude.includes(col.name.toUpperCase()));
+  }
+  return table.columns;
+}
+
+/**
+ * The access level actually generated, which can be narrower than the one asked for.
+ *
+ * **A write needs every mandatory column to be writable.** If a hidden column is `NOT NULL` and has
+ * no default, a generated `POST` body could never satisfy it and every create would fail at the
+ * server — so the table is downgraded to read-only rather than emitting routes that cannot work.
+ * A hidden `NOT NULL` column *with* a default is fine: the database fills it in.
+ */
+export function effectiveAccess(table: SchemaTable, spec: TableAccessSpec): TableAccessLevel {
+  if (spec.access === "read-only") { return "read-only"; }
+  const visible = new Set(visibleColumns(table, spec).map(col => col.name));
+  const unsatisfiable = table.columns.some(col => !visible.has(col.name) && col.notNull && !col.dflt);
+  return unsatisfiable ? "read-only" : "full";
+}
 
 export interface OpenApiSpecOptions {
   title?: string;
@@ -67,10 +124,10 @@ export function jsonSchemaForColumn(column: SchemaColumn): Record<string, any> {
   return schema;
 }
 
-function buildTableSchema(table: SchemaTable): Record<string, any> {
+function buildTableSchema(columns: SchemaColumn[]): Record<string, any> {
   const properties: Record<string, any> = {};
   const required: string[] = [];
-  table.columns.forEach(col => {
+  columns.forEach(col => {
     properties[col.name] = jsonSchemaForColumn(col);
     if (col.notNull) {
       required.push(col.name);
@@ -83,17 +140,17 @@ function buildTableSchema(table: SchemaTable): Record<string, any> {
   return schema;
 }
 
-function primaryKeyColumns(table: SchemaTable): SchemaColumn[] {
-  return table.columns.filter(c => c.isPrimaryKey);
+function primaryKeyColumns(columns: SchemaColumn[]): SchemaColumn[] {
+  return columns.filter(c => c.isPrimaryKey);
 }
 
 /** e.g. "orders/{id}" or "order_items/{order_id}/{line_no}" for a composite key. */
-function itemPathSuffix(table: SchemaTable): string {
-  return primaryKeyColumns(table).map(c => `{${c.name}}`).join("/");
+function itemPathSuffix(columns: SchemaColumn[]): string {
+  return primaryKeyColumns(columns).map(c => `{${c.name}}`).join("/");
 }
 
 /** access "read-only" omits POST/PUT/DELETE — only the GET (list, and get-by-PK if there is one) operations are generated. */
-function buildTablePaths(table: SchemaTable, access: TableAccess = "full"): Record<string, any> {
+function buildTablePaths(table: SchemaTable, columns: SchemaColumn[], access: TableAccessLevel = "full"): Record<string, any> {
   const schemaRef = { $ref: `#/components/schemas/${table.name}` };
   const listPath = `/${table.name.toLowerCase()}`;
   const listOperations: Record<string, any> = {
@@ -115,9 +172,12 @@ function buildTablePaths(table: SchemaTable, access: TableAccess = "full"): Reco
   }
   const paths: Record<string, any> = { [listPath]: listOperations };
 
-  const pkColumns = primaryKeyColumns(table);
-  if (pkColumns.length > 0) {
-    const itemPath = `${listPath}/${itemPathSuffix(table)}`;
+  // By-primary-key routes need every PK column exposed: the path template is built from them, so a
+  // hidden PK column would produce a route nobody could address. The list/create routes stay.
+  const pkColumns = primaryKeyColumns(columns);
+  const allPkVisible = pkColumns.length === primaryKeyColumns(table.columns).length;
+  if (pkColumns.length > 0 && allPkVisible) {
+    const itemPath = `${listPath}/${itemPathSuffix(columns)}`;
     const itemOperations: Record<string, any> = {
       parameters: pkColumns.map(col => ({ name: col.name, in: "path", required: true, schema: jsonSchemaForColumn(col) })),
       get: {
@@ -158,9 +218,13 @@ export function buildOpenApiSpec(graph: SchemaGraph, options: OpenApiSpecOptions
     : graph.tables;
 
   tables.forEach(table => {
-    const access = options.tableAccess?.[table.name] ?? "full";
-    schemas[table.name] = buildTableSchema(table);
-    Object.assign(paths, buildTablePaths(table, access));
+    const spec = normalizeTableAccess(options.tableAccess?.[table.name]);
+    const columns = visibleColumns(table, spec);
+    if (columns.length === 0) {
+      return; // every column filtered out — nothing meaningful to generate for this table
+    }
+    schemas[table.name] = buildTableSchema(columns);
+    Object.assign(paths, buildTablePaths(table, columns, effectiveAccess(table, spec)));
   });
 
   return {

@@ -3,7 +3,7 @@ import { ConnectionOptions } from "../interfaces";
 import { Driver } from "../shared/driver";
 import { getSchemaColumnsQuery, getForeignKeysQuery } from "../shared/queries";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, SchemaGraph } from "../schema-designer/schema-graph";
-import { buildOpenApiSpec, TableAccess } from "./openapi-spec";
+import { buildOpenApiSpec, TableAccess, TableAccessLevel } from "./openapi-spec";
 import { extractJson } from "../copilot/json-extraction";
 import { logger } from "../logger/logger";
 import { getDatabaseFileName } from "../shared/utils";
@@ -55,7 +55,7 @@ export async function runDataApiSpecGeneratorWithCopilot(connectionOptions: Conn
     return;
   }
 
-  const tableNames = graph.tables.map(t => t.name);
+  const scopingTables: ScopingTable[] = graph.tables.map(t => ({ name: t.name, columns: t.columns.map(c => c.name) }));
   const cts = new vscode.CancellationTokenSource();
   let tableAccess: Record<string, TableAccess>;
   try {
@@ -63,13 +63,13 @@ export async function runDataApiSpecGeneratorWithCopilot(connectionOptions: Conn
       { location: vscode.ProgressLocation.Notification, title: "Asking Copilot which tables to expose…", cancellable: true },
       async (_progress, token) => {
         token.onCancellationRequested(() => cts.cancel());
-        const messages = [vscode.LanguageModelChatMessage.User(copilotScopingPrompt(tableNames, instruction))];
+        const messages = [vscode.LanguageModelChatMessage.User(copilotScopingPrompt(scopingTables, instruction))];
         const response = await model.sendRequest(messages, {}, cts.token);
         let text = "";
         for await (const fragment of response.text) {
           text += fragment;
         }
-        return parseTableAccessResponse(text, tableNames);
+        return parseTableAccessResponse(text, scopingTables);
       }
     );
   } catch (err: any) {
@@ -136,20 +136,25 @@ async function openSpecDocument(spec: Record<string, any>): Promise<void> {
 }
 
 /** Exported for testing. */
-export function copilotScopingPrompt(tableNames: string[], instruction: string): string {
+export function copilotScopingPrompt(tables: ScopingTable[], instruction: string): string {
   return [
     "You are helping scope a Data API specification (OpenAPI 3.0) generated for a Firebird database.",
-    "The user will describe, in plain English, which tables to expose and with what access level.",
+    "The user will describe, in plain English, which tables to expose, with what access level, and",
+    "optionally which columns to leave out.",
     "",
-    `Available tables: ${tableNames.join(", ")}`,
+    "Available tables and their columns:",
+    ...tables.map(table => `- ${table.name}: ${table.columns.join(", ")}`),
     "",
     `User's request: ${instruction}`,
     "",
     "Decide which of the available tables above should be exposed, and for each, whether it should have",
     "\"full\" access (list/create/get/update/delete) or \"read-only\" access (list/get only).",
-    "Only ever use table names from the \"Available tables\" list above, exactly as spelled there.",
-    "Respond with ONLY a JSON object of this exact shape, no other text, no markdown fence:",
-    '{"tables":{"TABLE_NAME":"full"}}',
+    "Only ever use table and column names from the list above, exactly as spelled there.",
+    "Respond with ONLY a JSON object, no other text, no markdown fence. Each table maps either to an",
+    "access level string, or to an object when columns should be restricted:",
+    '{"tables":{"CUSTOMERS":"full","USERS":{"access":"read-only","excludeColumns":["PASSWORD_HASH"]}}}',
+    "Use excludeColumns for a few columns to hide (secrets, password hashes, internal audit columns),",
+    "or includeColumns to list the only columns to expose. Omit both to expose every column.",
     "Omit any table that should not be exposed at all — do not include every table by default.",
   ].join("\n");
 }
@@ -160,7 +165,7 @@ export function copilotScopingPrompt(tableNames: string[], instruction: string):
  * existing rule for Copilot-produced structured edits (see schema-designer's applyCopilotEdit()):
  * the model's own claims aren't taken at face value against ground truth the extension already has.
  */
-export function parseTableAccessResponse(rawText: string, tableNames: string[]): Record<string, TableAccess> {
+export function parseTableAccessResponse(rawText: string, tables: ScopingTable[]): Record<string, TableAccess> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(extractJson(rawText));
@@ -168,19 +173,56 @@ export function parseTableAccessResponse(rawText: string, tableNames: string[]):
     throw new Error(`Copilot didn't return valid JSON. Raw response:\n${rawText.slice(0, 500)}`);
   }
 
-  const tables = (parsed as { tables?: unknown })?.tables;
-  if (typeof tables !== "object" || tables === null) {
+  const responseTables = (parsed as { tables?: unknown })?.tables;
+  if (typeof responseTables !== "object" || responseTables === null) {
     throw new Error(`Copilot's response didn't have the expected {"tables": {...}} shape. Raw response:\n${rawText.slice(0, 500)}`);
   }
 
-  const knownByUppercase = new Map(tableNames.map(name => [name.toUpperCase(), name]));
+  const knownByUppercase = new Map(tables.map(table => [table.name.toUpperCase(), table]));
   const result: Record<string, TableAccess> = {};
-  for (const [name, access] of Object.entries(tables as Record<string, unknown>)) {
-    const realName = knownByUppercase.get(name.toUpperCase());
-    if (!realName) {
+  for (const [name, access] of Object.entries(responseTables as Record<string, unknown>)) {
+    const realTable = knownByUppercase.get(name.toUpperCase());
+    if (!realTable) {
       continue; // hallucinated/misspelled table name — drop it rather than generate a broken $ref
     }
-    result[realName] = access === "read-only" ? "read-only" : "full";
+    result[realTable.name] = parseAccessValue(access, realTable);
   }
   return result;
+}
+
+/** A table's real name and column names, the ground truth a Copilot response is validated against. */
+export interface ScopingTable {
+  name: string;
+  columns: string[];
+}
+
+/**
+ * One table's entry from the model's response. Accepts both the bare access-level string and phase
+ * 5's object form. Column names are validated against the table's real ones exactly as table names
+ * are — an unknown column is dropped rather than emitted into a spec that references a column the
+ * database doesn't have.
+ */
+function parseAccessValue(value: unknown, table: ScopingTable): TableAccess {
+  if (typeof value === "string" || value === null || typeof value !== "object") {
+    return value === "read-only" ? "read-only" : "full";
+  }
+
+  const entry = value as { access?: unknown; includeColumns?: unknown; excludeColumns?: unknown };
+  const access: TableAccessLevel = entry.access === "read-only" ? "read-only" : "full";
+  const realByUppercase = new Map(table.columns.map(column => [column.toUpperCase(), column]));
+  const validate = (names: unknown): string[] | undefined => {
+    if (!Array.isArray(names)) { return undefined; }
+    const real = names
+      .filter((name): name is string => typeof name === "string")
+      .map(name => realByUppercase.get(name.toUpperCase()))
+      .filter((name): name is string => name !== undefined);
+    return real.length > 0 ? real : undefined;
+  };
+
+  const includeColumns = validate(entry.includeColumns);
+  const excludeColumns = validate(entry.excludeColumns);
+  if (!includeColumns && !excludeColumns) {
+    return access; // nothing column-scoped survived validation — the bare level is the whole answer
+  }
+  return { access, includeColumns, excludeColumns };
 }

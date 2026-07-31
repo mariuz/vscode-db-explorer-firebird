@@ -16,6 +16,9 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { runDataApiSpecGenerator } from '../../data-api-builder';
+import { buildOpenApiSpec } from '../../data-api-builder/openapi-spec';
+import { buildSchemaGraph, SchemaGraph } from '../../schema-designer/schema-graph';
+import { getSchemaColumnsQuery, getForeignKeysQuery } from '../../shared/queries';
 import { Driver, NodeClient } from '../../shared/driver';
 import { getTestConnectionOptions } from './firebird-test-env';
 
@@ -69,5 +72,57 @@ suite('Data API Builder – real Firebird integration (extension host)', functio
     const collection = spec.paths['/products'];
     assert.ok(collection.get, 'expected GET /products');
     assert.ok(collection.post, 'expected POST /products (full access, not scoped read-only)');
+  });
+});
+
+suite('Data API Builder – column scoping against a real schema (phase 5)', function () {
+  this.timeout(20000);
+
+  suiteSetup(function () {
+    Driver.client = new NodeClient();
+  });
+
+  /** The same fetch runDataApiSpecGenerator() does, so this filters a genuinely real schema graph. */
+  async function realGraph(): Promise<SchemaGraph> {
+    const conn = getTestConnectionOptions();
+    const [columns, foreignKeys] = await Driver.runBatch(
+      `${getSchemaColumnsQuery()};\n${getForeignKeysQuery()};`,
+      conn
+    );
+    return buildSchemaGraph((columns.rows ?? []) as any, (foreignKeys.rows ?? []) as any);
+  }
+
+  test('a real column can be excluded from a real table\'s generated schema', async function () {
+    const graph = await realGraph();
+    const products = graph.tables.find(t => t.name === 'PRODUCTS');
+    assert.ok(products, `PRODUCTS not found in the live schema (${graph.tables.map(t => t.name).join(', ')})`);
+
+    const victim = products!.columns.find(c => !c.isPrimaryKey);
+    assert.ok(victim, 'PRODUCTS should have at least one non-primary-key column');
+
+    const spec = buildOpenApiSpec(graph, {
+      tableAccess: { PRODUCTS: { access: 'read-only', excludeColumns: [victim!.name] } },
+    });
+
+    const properties = Object.keys(spec.components.schemas.PRODUCTS.properties);
+    assert.ok(!properties.includes(victim!.name), `${victim!.name} should have been excluded, got ${properties}`);
+    assert.strictEqual(properties.length, products!.columns.length - 1);
+    assert.ok(properties.length > 0, 'the other real columns should still be present');
+  });
+
+  test('excluding a real primary-key column drops the by-PK route for that real table', async function () {
+    const graph = await realGraph();
+    const products = graph.tables.find(t => t.name === 'PRODUCTS');
+    const pk = products?.columns.find(c => c.isPrimaryKey);
+    if (!pk) { this.skip(); }
+
+    const spec = buildOpenApiSpec(graph, {
+      tableAccess: { PRODUCTS: { access: 'read-only', excludeColumns: [pk!.name] } },
+    });
+    assert.ok('/products' in spec.paths, 'the list route should survive');
+    assert.ok(
+      !Object.keys(spec.paths).some(p => p.startsWith('/products/')),
+      `no by-PK route expected, got ${Object.keys(spec.paths).join(', ')}`
+    );
   });
 });
