@@ -40,6 +40,14 @@ suite('quoteIdentifierIfNeeded() (docs/roadmap/drag-identifier-into-editor.md, p
     assert.strictEqual(quoteIdentifierIfNeeded('WEIRD"NAME'), '"WEIRD""NAME"');
   });
 
+  test('reserved words absent from the completion list are still quoted', function () {
+    // firebird-reserved.ts is a completion list, not the reserved-word authority — these five are
+    // real reserved words with no entry there, and were previously inserted unquoted.
+    for (const word of ['OFFSET', 'ROW', 'BOOLEAN', 'OVER', 'WINDOW']) {
+      assert.strictEqual(quoteIdentifierIfNeeded(word), `"${word}"`);
+    }
+  });
+
   test('a name that is a reserved word substring (not an exact match) is not quoted', function () {
     // "ORDERS" is not the reserved word "ORDER"
     assert.strictEqual(quoteIdentifierIfNeeded('ORDERS'), 'ORDERS');

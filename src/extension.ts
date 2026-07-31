@@ -546,58 +546,72 @@ export function activate(context: ExtensionContext) {
     })
   );
 
-  /* COMMAND: run document query (batch-aware) */
-  context.subscriptions.push(
-    commands.registerCommand("firebird.runQuery", () => {
-      Driver.runBatch()
-        .then(batchResults => {
-          // Driver.runBatch() already logged each statement to session history
-          // via the historyLogger registered above.
+  /**
+   * Shared implementation behind both "Run Firebird Query" and "Run Statement Under Cursor":
+   * executes `sql` (or, when omitted, Driver.runBatch()'s own selection/whole-document default)
+   * and routes the results the same way for both — a lone DDL/DML statement becomes an info
+   * notification plus an explorer refresh, anything else goes to the results webview. Kept as one
+   * function so the two commands can't drift apart on the DDL/refresh handling or on the
+   * notify-vs-generic error branches, as they previously had.
+   */
+  const runSqlBatch = (sql?: string) => {
+    Driver.runBatch(sql)
+      .then(batchResults => {
+        // Driver.runBatch() already logged each statement to session history
+        // via the historyLogger registered above.
 
-          // If every result is a DDL/DML message (no row data), show notification
-          const allMessages = batchResults.every(r => !r.rows && !r.error);
-          if (allMessages && batchResults.length === 1 && batchResults[0].message) {
-            logger.info(batchResults[0].message);
-            logger.showInfo(batchResults[0].message);
-            commands.executeCommand("firebird.explorer.refresh");
-          } else {
-            firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage);
-          }
-        })
-        .catch(error => {
-          logger.error(error.message ?? error);
-          if (error.notify) {
-            logger.showError(error.message, error.options || []).then(selected => {
-              if (selected === "New SQL Document") {
-                commands.executeCommand("firebird.explorer.newSqlDocument");
-              }
-              if (selected === "Set Active Database") {
-                commands.executeCommand("firebird.chooseActive");
+        // If every result is a DDL/DML message (no row data), show notification
+        const allMessages = batchResults.every(r => !r.rows && !r.error);
+        if (allMessages && batchResults.length === 1 && batchResults[0].message) {
+          logger.info(batchResults[0].message);
+          logger.showInfo(batchResults[0].message);
+          commands.executeCommand("firebird.explorer.refresh");
+        } else {
+          firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage);
+        }
+      })
+      .catch(error => {
+        logger.error(error.message ?? error);
+        if (error.notify) {
+          logger.showError(error.message, error.options || []).then(selected => {
+            if (selected === "New SQL Document") {
+              commands.executeCommand("firebird.explorer.newSqlDocument");
+            }
+            if (selected === "Set Active Database") {
+              commands.executeCommand("firebird.chooseActive");
+            }
+          });
+        } else {
+          logger
+            .showError("Oops! Something went wrong. Check the log output for more details!", [
+              "Cancel",
+              "Show Log Output"
+            ])
+            .then(selected => {
+              if (selected === "Show Log Output") {
+                logger.showOutput();
               }
             });
-          } else {
-            logger
-              .showError("Oops! Something went wrong. Check the log output for more details!", [
-                "Cancel",
-                "Show Log Output"
-              ])
-              .then(selected => {
-                if (selected === "Show Log Output") {
-                  logger.showOutput();
-                }
-              });
-          }
-        });
-    })
+        }
+      });
+  };
+
+  /* COMMAND: run document query (batch-aware) */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.runQuery", () => runSqlBatch())
   );
 
   /**
    * "Run Statement Under Cursor" (docs/roadmap/run-statement-under-cursor.md) -- runs just the one
    * statement the cursor happens to be positioned inside, out of a multi-statement document,
    * without requiring a selection. Only attempts the cursor lookup when there's no selection (an
-   * actual highlighted selection is left to Driver.runQuery()'s own existing selection-aware
-   * default, unchanged); a cursor sitting in pure inter-statement whitespace also falls back to
-   * that same default (whole document) rather than erroring, per the roadmap doc's own phase 1.
+   * actual highlighted selection is left to the shared runner's existing selection-aware default,
+   * unchanged); a cursor sitting in pure inter-statement whitespace also falls back to that same
+   * default (whole document) rather than erroring, per the roadmap doc's own phase 1. That
+   * fallback goes through runSqlBatch() -- i.e. Driver.runBatch(), not Driver.runQuery() -- so a
+   * whole multi-statement document is split and run statement by statement exactly as "Run
+   * Firebird Query" does, rather than being sent to the server as one unsplit blob that fails at
+   * the first `;`.
    */
   context.subscriptions.push(
     commands.registerCommand("firebird.runCurrentStatement", () => {
@@ -615,25 +629,7 @@ export function activate(context: ExtensionContext) {
         sql = statement?.text;
       }
 
-      Driver.runQuery(sql)
-        .then(result => {
-          firebirdQueryResults.display(result, config.recordsPerPage);
-        })
-        .catch((err: any) => {
-          logger.error(err?.message ?? err);
-          if (err?.notify) {
-            logger.showError(err.message, err.options || []).then(selected => {
-              if (selected === "New SQL Document") {
-                commands.executeCommand("firebird.explorer.newSqlDocument");
-              }
-              if (selected === "Set Active Database") {
-                commands.executeCommand("firebird.chooseActive");
-              }
-            });
-          } else {
-            logger.showError(`Query failed: ${err?.message ?? err}`);
-          }
-        });
+      runSqlBatch(sql);
     })
   );
 

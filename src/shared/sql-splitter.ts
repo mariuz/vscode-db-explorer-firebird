@@ -99,7 +99,13 @@ export function splitStatementsWithOffsets(sql: string): SqlStatementRange[] {
     if (ch === "/" && sql[i + 1] === "*") {
       const end = sql.indexOf("*/", i + 2);
       if (end === -1) {
+        // Unterminated: the rest of the document belongs to this statement. `i` must be advanced
+        // to the end too, not left pointing at the comment's own start — the final flush() below
+        // uses it as the statement's raw end offset, and leaving it behind would cut the range
+        // short of the text it's supposed to span (splitStatementsWithOffsets()'s
+        // `sql.slice(start, end) === text` contract).
         current += sql.slice(i);
+        i = len;
         break;
       }
       current += sql.slice(i, end + 2);
@@ -111,7 +117,10 @@ export function splitStatementsWithOffsets(sql: string): SqlStatementRange[] {
     if (ch === "-" && sql[i + 1] === "-") {
       const end = sql.indexOf("\n", i + 2);
       if (end === -1) {
+        // Unterminated (a trailing `-- ...` with no newline at end of file) — same as the block
+        // comment case above: consume to the end and move `i` with it.
         current += sql.slice(i);
+        i = len;
         break;
       }
       current += sql.slice(i, end + 1);

@@ -548,4 +548,27 @@ suite('splitStatementsWithOffsets() (docs/roadmap/run-statement-under-cursor.md,
     ].join('\n');
     assert.deepStrictEqual(splitStatementsWithOffsets(sql).map(r => r.text), splitStatements(sql));
   });
+
+  test('a trailing line comment with no newline at end of file still yields a range spanning its own text', function () {
+    // Regression: the unterminated-comment branches consumed the rest of the document into the
+    // statement text but left `i` pointing at the comment's start, so the final flush() recorded
+    // an `end` short of the text — a cursor placed in that trailing comment then matched no
+    // range at all and the caller silently fell back to running the whole document.
+    const sql = 'SELECT 1 FROM T; SELECT 2 FROM T -- trailing note';
+    const ranges = splitStatementsWithOffsets(sql);
+    assert.strictEqual(ranges.length, 2);
+    for (const r of ranges) {
+      assert.strictEqual(sql.slice(r.start, r.end), r.text);
+    }
+    const offsetInComment = sql.indexOf('trailing');
+    const hit = ranges.find(r => offsetInComment >= r.start && offsetInComment <= r.end);
+    assert.strictEqual(hit?.text, 'SELECT 2 FROM T -- trailing note');
+  });
+
+  test('an unterminated block comment still yields a range spanning its own text', function () {
+    const sql = 'SELECT 1 FROM T /* unterminated';
+    const [range] = splitStatementsWithOffsets(sql);
+    assert.strictEqual(sql.slice(range.start, range.end), range.text);
+    assert.strictEqual(range.end, sql.length);
+  });
 });

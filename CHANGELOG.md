@@ -2,6 +2,14 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.93 - 2026-07-31
+
+### Fixed
+
+- **"Run Statement Under Cursor" no longer misbehaves when the cursor isn't inside a statement.** The fallback for a cursor sitting in the whitespace between two statements now runs the document through the same batch-aware path as "Run Firebird Query" (`Driver.runBatch()`), instead of sending the whole multi-statement document to the server as a single unsplit query that failed at the first `;`. As a side effect the two commands now share one implementation, so running a DDL statement under the cursor also gets the same success notification and Object Explorer refresh that "Run Firebird Query" already gave it, rather than an empty one-cell results grid.
+- **A trailing `-- comment` with no newline at end of file no longer breaks statement lookup.** The statement splitter's offset ranges were cut short at such a comment (and at an unterminated `/* ...`), so placing the cursor in that last statement's trailing comment matched no statement at all and silently ran the whole document instead.
+- **Dragging a column or table whose name is a reserved word missing from the completion list now quotes it.** `OFFSET`, `ROW`, `BOOLEAN`, `OVER` and `WINDOW` are real Firebird reserved words with no entry in the editor's completion word list, and were being inserted unquoted; identifier quoting now checks against the full reserved-word list from the Firebird language reference.
+
 ## 0.1.92 - 2026-07-18
 
 ### Added
