@@ -44,6 +44,7 @@ import {getConnectionLabel} from "./shared/utils";
 import {loadWorkspaceConnections} from "./shared/workspace-config";
 import {registerSqlNotebook, FIREBIRD_NOTEBOOK_TYPE} from "./sql-notebook";
 import {registerMcpServer, openMcpWriteAuditLog} from "./mcp-server";
+import {registerLanguageModelTools} from "./copilot/lm-tools";
 import {listConnections, getActiveConnection} from "./connection-sharing";
 import {runQuery, runWriteQuery} from "./connection-sharing/run-query";
 import {editConnectionSharingPermissions} from "./connection-sharing/permissions";
@@ -229,6 +230,10 @@ export function activate(context: ExtensionContext) {
 
   /* MCP Server (Phase 2: list_connections + get_schema, read-only) — no-ops on VS Code builds without MCP support */
   context.subscriptions.push(registerMcpServer(context));
+
+  /* Language Model Tools (docs/roadmap/language-model-tools.md) — the same five operations the MCP
+     server exposes, reachable from Copilot agent mode directly, with no MCP client involved. */
+  context.subscriptions.push(...registerLanguageModelTools(context));
   context.subscriptions.push(
     commands.registerCommand("firebird.mcp.showWriteAuditLog", () => {
       openMcpWriteAuditLog(context).catch(err => logger.error(err?.message ?? err));

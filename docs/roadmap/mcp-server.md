@@ -6,6 +6,8 @@
 
 **Phases 1-5 are done** (list_connections, get_schema, run_query, get_query_plan — read-only; run_write_query — opt-in write access).
 
+**Since then**: these five tool bodies no longer live in `src/mcp-server/server.ts` itself. `docs/roadmap/language-model-tools.md`'s phase 1 moved them to `src/shared/db-tools.ts`, behind a `ToolExecutor` seam, so the extension host's Language Model Tools run the exact same logic over a different transport. This file's subprocess now supplies only its own executor (raw `node-firebird`, one attach per tool call, audit lines appended to `FIREBIRD_MCP_AUDIT_LOG_PATH`) and its MCP registrations — the behavior those tools implement, and its tests, are documented there.
+
 Before writing any registration code, the API surface described below (written when this was purely directional) was validated against the actual installed `@types/vscode` (1.125.0 — notably newer than this extension's `engines.vscode: ^1.93.0` floor) and against VS Code's own MCP developer guide:
 
 - **The registration model is not "handle MCP calls in-process."** `vscode.lm.registerMcpServerDefinitionProvider(id, provider)` only tells VS Code *where* an MCP server lives — `provider.provideMcpServerDefinitions()` returns `McpStdioServerDefinition`s (a command + args + env to spawn), and VS Code's own built-in MCP client spawns that as a **separate child process** and speaks MCP-over-stdio to it directly. The extension host is not on the request path once the process is running.

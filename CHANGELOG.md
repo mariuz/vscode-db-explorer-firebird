@@ -2,6 +2,17 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.95 - 2026-07-31
+
+### Added
+
+- **Copilot agent mode can now use Firebird directly.** Five language model tools — list connections, get schema, run query, get query plan, and run write statement — are registered with VS Code's Language Model Tools API, so Copilot's agent mode can inspect and query your databases without any MCP server or separate client process. They're also `#`-referenceable in ask mode (`#firebirdSchema`, `#firebirdQuery`, …). Writes keep the existing per-connection opt-in (**Toggle MCP Server Write Access**) *and* ask you to confirm the exact statement before running it. Implements `docs/roadmap/language-model-tools.md`.
+
+### Changed
+
+- **Minimum VS Code version is now 1.101** (was 1.93). The extension already used 1.101 APIs for its MCP server integration — the declared minimum simply hadn't kept up, and `@types/vscode` was loose enough (`^1.32.0`, resolving to 1.125) that nothing caught the gap. Both are now pinned to the same version, so an accidental use of a newer API fails the build instead of shipping.
+- **The MCP server's five tools and the new language model tools are now one implementation** (`src/shared/db-tools.ts`) behind a small transport interface, rather than two copies. What's refused, what the write gate checks, and how results are shaped can no longer drift between them — and that logic is now unit-tested, which it wasn't before.
+
 ## 0.1.94 - 2026-07-31
 
 ### Added

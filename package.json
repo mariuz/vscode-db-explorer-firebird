@@ -1,7 +1,7 @@
 {
   "name": "vscode-firebird-studio",
   "displayName": "Firebird Studio for VS Code",
-  "version": "0.1.94",
+  "version": "0.1.95",
   "description": "Firebird Studio — explore, query, and manage Firebird databases directly inside VS Code.",
   "categories": [
     "Programming Languages",
@@ -1665,6 +1665,145 @@
           }
         ]
       }
+    ],
+    "languageModelTools": [
+      {
+        "name": "firebird_listConnections",
+        "displayName": "List Firebird Connections",
+        "toolReferenceName": "firebirdConnections",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(database)",
+        "userDescription": "List the Firebird connections saved in this workspace.",
+        "modelDescription": "Lists the Firebird connections available in this VS Code workspace, with the connection id every other Firebird tool needs. Never includes credentials. The writeEnabled field tells you upfront whether firebird_runWriteQuery is permitted for a connection. Call this first when you don't already have a connection id.",
+        "tags": [
+          "firebird",
+          "database",
+          "sql"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "firebird_getSchema",
+        "displayName": "Get Firebird Schema",
+        "toolReferenceName": "firebirdSchema",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(list-tree)",
+        "userDescription": "Read a Firebird database's tables, columns, primary keys, and foreign keys.",
+        "modelDescription": "Returns the schema (tables, columns, primary keys, and foreign keys) of one Firebird connection as JSON. Use this before writing SQL against a database you haven't inspected yet. Firebird dialect notes: identifiers created unquoted are folded to uppercase; row limiting uses FIRST n SKIP m or OFFSET/FETCH, never LIMIT; system metadata lives in RDB$-prefixed tables.",
+        "tags": [
+          "firebird",
+          "database",
+          "sql"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "connectionId": {
+              "type": "string",
+              "description": "A connection id returned by firebird_listConnections."
+            }
+          },
+          "required": [
+            "connectionId"
+          ]
+        }
+      },
+      {
+        "name": "firebird_runQuery",
+        "displayName": "Run Firebird Query",
+        "toolReferenceName": "firebirdQuery",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(play)",
+        "userDescription": "Run a read-only SELECT against a Firebird database.",
+        "modelDescription": "Executes a single read-only SELECT (or WITH ... AS (...) SELECT) statement against a Firebird connection and returns the rows as JSON. Any other statement (INSERT/UPDATE/DELETE/DDL/EXECUTE BLOCK) or more than one statement is rejected — this tool is read-only; use firebird_runWriteQuery for a write. Firebird uses FIRST n SKIP m or OFFSET/FETCH rather than LIMIT.",
+        "tags": [
+          "firebird",
+          "database",
+          "sql"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "connectionId": {
+              "type": "string",
+              "description": "A connection id returned by firebird_listConnections."
+            },
+            "sql": {
+              "type": "string",
+              "description": "A single read-only SELECT statement."
+            }
+          },
+          "required": [
+            "connectionId",
+            "sql"
+          ]
+        }
+      },
+      {
+        "name": "firebird_getQueryPlan",
+        "displayName": "Get Firebird Query Plan",
+        "toolReferenceName": "firebirdQueryPlan",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(graph)",
+        "userDescription": "Show the index-metadata execution plan heuristic for a SELECT.",
+        "modelDescription": "Returns Firebird's index-metadata-based execution plan heuristic for a single SELECT statement, listing which indexes exist on the tables it touches. Read-only, same restriction as firebird_runQuery. Use it to explain or optimize a slow query.",
+        "tags": [
+          "firebird",
+          "database",
+          "sql"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "connectionId": {
+              "type": "string",
+              "description": "A connection id returned by firebird_listConnections."
+            },
+            "sql": {
+              "type": "string",
+              "description": "A single SELECT statement to explain."
+            }
+          },
+          "required": [
+            "connectionId",
+            "sql"
+          ]
+        }
+      },
+      {
+        "name": "firebird_runWriteQuery",
+        "displayName": "Run Firebird Write Statement",
+        "toolReferenceName": "firebirdWriteQuery",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(edit)",
+        "userDescription": "Run a single INSERT, UPDATE, or DELETE against a write-enabled Firebird connection.",
+        "modelDescription": "Executes a single INSERT, UPDATE, or DELETE against a Firebird connection that the user has explicitly write-enabled (see firebird_listConnections' writeEnabled field), granted from the connection's right-click menu in VS Code ('Toggle MCP Server Write Access'). Any other statement (SELECT/DDL/EXECUTE BLOCK) or more than one statement is rejected. The user is asked to confirm each call, and every attempt is logged. Only call this after the user has explicitly asked for a specific write, never speculatively.",
+        "tags": [
+          "firebird",
+          "database",
+          "sql"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "connectionId": {
+              "type": "string",
+              "description": "A connection id returned by firebird_listConnections."
+            },
+            "sql": {
+              "type": "string",
+              "description": "A single INSERT, UPDATE, or DELETE statement."
+            }
+          },
+          "required": [
+            "connectionId",
+            "sql"
+          ]
+        }
+      }
     ]
   },
   "activationEvents": [
@@ -1689,7 +1828,7 @@
     "@types/node": "^14.11.2",
     "@types/ssh2": "^1.15.5",
     "@types/uuid": "^8.3.0",
-    "@types/vscode": "^1.32.0",
+    "@types/vscode": "~1.101.0",
     "@typescript-eslint/eslint-plugin": "^5.52.0",
     "@typescript-eslint/parser": "^5.52.0",
     "@vscode/test-cli": "^0.0.12",
@@ -1703,7 +1842,7 @@
     "typescript": "^6.0.3"
   },
   "engines": {
-    "vscode": "^1.93.0"
+    "vscode": "^1.101.0"
   },
   "icon": "resources/img/icon.png",
   "galleryBanner": {

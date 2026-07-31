@@ -28,9 +28,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as Firebird from "node-firebird";
 import { appendFileSync } from "fs";
-import { getSchemaColumnsQuery, getForeignKeysQuery } from "../shared/queries";
-import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow } from "../schema-designer/schema-graph";
-import { validateReadOnlyStatement, validateWriteStatement, extractTableNames, buildIndexMetadataQuery, renderIndexMetadataPlan } from "../shared/sql-analysis";
+import {
+  getQueryPlanTool,
+  getSchemaTool,
+  listConnectionsTool,
+  runQueryTool,
+  runWriteQueryTool,
+  ToolExecutor,
+  ToolOutcome,
+  ToolQueryFn,
+  TOOL_DESCRIPTIONS,
+} from "../shared/db-tools";
 
 interface ExposedConnection {
   id: string;
@@ -112,172 +120,94 @@ function appendAuditLog(entry: { connectionId: string; sql: string; success: boo
 
 const server = new McpServer({ name: "firebird-mcp", version: "1.0.0" });
 
+/**
+ * This subprocess's half of `ToolExecutor` (src/shared/db-tools.ts) — raw `node-firebird`, one
+ * attach per tool call, audit entries appended to the file the extension host handed us via
+ * FIREBIRD_MCP_AUDIT_LOG_PATH. The tools' actual behavior (what's refused, what the write gate
+ * checks, how results are shaped) lives in db-tools.ts and is shared with the extension host's
+ * Language Model Tools; only the plumbing below is specific to being a separate process.
+ */
+const executor: ToolExecutor = {
+  async listConnections() {
+    return loadExposedConnections().map(c => ({
+      id: c.id,
+      label: c.label,
+      host: c.host,
+      database: c.database,
+      writeEnabled: c.writeEnabled,
+    }));
+  },
+
+  async withConnection<T>(connectionId: string, run: (query: ToolQueryFn) => Promise<T>): Promise<T> {
+    const conn = loadExposedConnections().find(c => c.id === connectionId);
+    if (!conn) {
+      // db-tools.ts resolves the id before calling this, so reaching here means the exposed set
+      // changed underneath us mid-call — a real error, not a lookup miss to report as a tool result.
+      throw new Error(`Connection "${connectionId}" is no longer exposed.`);
+    }
+    const db = await connect(conn);
+    try {
+      return await run((sql, args) => query(db, sql, args ?? []));
+    } finally {
+      await detach(db);
+    }
+  },
+
+  audit(entry) {
+    appendAuditLog(entry);
+  },
+};
+
+/** Renders a db-tools outcome as an MCP tool result. */
+function toMcpResult(outcome: ToolOutcome) {
+  return {
+    content: [{ type: "text" as const, text: outcome.text }],
+    ...(outcome.isError ? { isError: true } : {}),
+  };
+}
+
+const connectionIdArg = z.string().describe("A connection id returned by list_connections");
+
 server.registerTool(
   "list_connections",
-  {
-    description: "Lists the Firebird connections this VS Code workspace has explicitly exposed to MCP clients. Never includes credentials. writeEnabled tells you upfront whether run_write_query is allowed for a given connection, without needing to try it first.",
-    inputSchema: {},
-  },
-  async () => {
-    const summary = loadExposedConnections().map(c => ({ id: c.id, label: c.label, host: c.host, database: c.database, writeEnabled: c.writeEnabled }));
-    return { content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }] };
-  }
+  { description: TOOL_DESCRIPTIONS.list_connections, inputSchema: {} },
+  async () => toMcpResult(await listConnectionsTool(executor))
 );
 
 server.registerTool(
   "get_schema",
-  {
-    description: "Returns the schema (tables, columns, primary keys, and foreign keys) of one exposed Firebird connection.",
-    inputSchema: { connectionId: z.string().describe("A connection id returned by list_connections") },
-  },
-  async ({ connectionId }) => {
-    const conn = loadExposedConnections().find(c => c.id === connectionId);
-    if (!conn) {
-      return {
-        content: [{ type: "text" as const, text: `No exposed connection with id "${connectionId}". Call list_connections first.` }],
-        isError: true,
-      };
-    }
-
-    let db: Firebird.Database | undefined;
-    try {
-      db = await connect(conn);
-      const columnRows = await query<SchemaColumnRow>(db, getSchemaColumnsQuery());
-      const fkRows = await query<ForeignKeyRow>(db, getForeignKeysQuery());
-      const graph = buildSchemaGraph(columnRows, fkRows);
-      return { content: [{ type: "text" as const, text: JSON.stringify(graph, null, 2) }] };
-    } catch (err: any) {
-      return { content: [{ type: "text" as const, text: `Could not fetch schema: ${err?.message ?? err}` }], isError: true };
-    } finally {
-      if (db) { await detach(db); }
-    }
-  }
+  { description: TOOL_DESCRIPTIONS.get_schema, inputSchema: { connectionId: connectionIdArg } },
+  async ({ connectionId }) => toMcpResult(await getSchemaTool(executor, connectionId))
 );
 
 server.registerTool(
   "run_query",
   {
-    description: "Executes a single read-only SELECT (or WITH ... AS (...) SELECT) statement against an exposed Firebird connection and returns the resulting rows as JSON. Any other statement (INSERT/UPDATE/DELETE/DDL/EXECUTE BLOCK) or more than one statement is rejected — this tool is read-only, matching the security model in docs/roadmap/mcp-server.md.",
-    inputSchema: {
-      connectionId: z.string().describe("A connection id returned by list_connections"),
-      sql: z.string().describe("A single SELECT statement"),
-    },
+    description: TOOL_DESCRIPTIONS.run_query,
+    inputSchema: { connectionId: connectionIdArg, sql: z.string().describe("A single SELECT statement") },
   },
-  async ({ connectionId, sql }) => {
-    const conn = loadExposedConnections().find(c => c.id === connectionId);
-    if (!conn) {
-      return {
-        content: [{ type: "text" as const, text: `No exposed connection with id "${connectionId}". Call list_connections first.` }],
-        isError: true,
-      };
-    }
-
-    const rejection = validateReadOnlyStatement(sql);
-    if (rejection) {
-      return { content: [{ type: "text" as const, text: rejection }], isError: true };
-    }
-
-    let db: Firebird.Database | undefined;
-    try {
-      db = await connect(conn);
-      const rows = await query(db, sql);
-      return { content: [{ type: "text" as const, text: JSON.stringify(rows, null, 2) }] };
-    } catch (err: any) {
-      return { content: [{ type: "text" as const, text: `Query failed: ${err?.message ?? err}` }], isError: true };
-    } finally {
-      if (db) { await detach(db); }
-    }
-  }
+  async ({ connectionId, sql }) => toMcpResult(await runQueryTool(executor, connectionId, sql))
 );
 
 server.registerTool(
   "get_query_plan",
   {
-    description: "Returns Firebird's index-metadata-based execution plan heuristic for a single SELECT statement (this subprocess doesn't bundle the native driver, so it can't request Firebird's real PLAN output — see docs/roadmap/mcp-server.md). Read-only, same restriction as run_query.",
-    inputSchema: {
-      connectionId: z.string().describe("A connection id returned by list_connections"),
-      sql: z.string().describe("A single SELECT statement"),
-    },
+    description: TOOL_DESCRIPTIONS.get_query_plan,
+    inputSchema: { connectionId: connectionIdArg, sql: z.string().describe("A single SELECT statement") },
   },
-  async ({ connectionId, sql }) => {
-    const conn = loadExposedConnections().find(c => c.id === connectionId);
-    if (!conn) {
-      return {
-        content: [{ type: "text" as const, text: `No exposed connection with id "${connectionId}". Call list_connections first.` }],
-        isError: true,
-      };
-    }
-
-    const rejection = validateReadOnlyStatement(sql);
-    if (rejection) {
-      return { content: [{ type: "text" as const, text: rejection }], isError: true };
-    }
-
-    const tables = extractTableNames(sql);
-    if (tables.length === 0) {
-      return { content: [{ type: "text" as const, text: renderIndexMetadataPlan(sql, tables, []) }] };
-    }
-
-    let db: Firebird.Database | undefined;
-    try {
-      db = await connect(conn);
-      const rows = await query(db, buildIndexMetadataQuery(tables), tables);
-      return { content: [{ type: "text" as const, text: renderIndexMetadataPlan(sql, tables, rows) }] };
-    } catch (err: any) {
-      return { content: [{ type: "text" as const, text: `Could not fetch query plan: ${err?.message ?? err}` }], isError: true };
-    } finally {
-      if (db) { await detach(db); }
-    }
-  }
+  async ({ connectionId, sql }) => toMcpResult(await getQueryPlanTool(executor, connectionId, sql))
 );
 
 server.registerTool(
   "run_write_query",
   {
-    description: "Executes a single INSERT, UPDATE, or DELETE statement against an exposed Firebird connection that has ALSO been explicitly write-enabled (see list_connections' writeEnabled field) — a separate, narrower opt-in on top of being exposed at all, granted from the connection's right-click menu in VS Code ('Toggle MCP Server Write Access'). Any other statement (SELECT/DDL/EXECUTE BLOCK) or more than one statement is rejected — use run_query for SELECT. There is no per-query confirmation dialog: every attempt, successful or not, is logged to this VS Code workspace's MCP write-audit log ('Show MCP Write Audit Log' command) whether or not this call succeeds. Only ever call this after the user has explicitly asked for a specific write, never speculatively.",
+    description: TOOL_DESCRIPTIONS.run_write_query,
     inputSchema: {
       connectionId: z.string().describe("A connection id returned by list_connections, with writeEnabled: true"),
       sql: z.string().describe("A single INSERT, UPDATE, or DELETE statement"),
     },
   },
-  async ({ connectionId, sql }) => {
-    const conn = loadExposedConnections().find(c => c.id === connectionId);
-    if (!conn) {
-      return {
-        content: [{ type: "text" as const, text: `No exposed connection with id "${connectionId}". Call list_connections first.` }],
-        isError: true,
-      };
-    }
-    if (!conn.writeEnabled) {
-      const message = `Write access is not enabled for connection "${connectionId}". Enable it from the connection's right-click menu in the Firebird Studio tree in VS Code ("Toggle MCP Server Write Access") first.`;
-      appendAuditLog({ connectionId, sql, success: false, error: message });
-      return { content: [{ type: "text" as const, text: message }], isError: true };
-    }
-
-    const rejection = validateWriteStatement(sql);
-    if (rejection) {
-      appendAuditLog({ connectionId, sql, success: false, error: rejection });
-      return { content: [{ type: "text" as const, text: rejection }], isError: true };
-    }
-
-    let db: Firebird.Database | undefined;
-    try {
-      db = await connect(conn);
-      const rows = await query(db, sql);
-      appendAuditLog({ connectionId, sql, success: true });
-      // rows is populated only if the statement had a RETURNING clause (node-firebird returns
-      // undefined for a plain DML statement with no result set) -- surface it when present, same
-      // as the rest of this extension already treats a RETURNING result.
-      const text = rows !== undefined ? JSON.stringify(rows, null, 2) : "Statement executed successfully.";
-      return { content: [{ type: "text" as const, text }] };
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      appendAuditLog({ connectionId, sql, success: false, error: message });
-      return { content: [{ type: "text" as const, text: `Write failed: ${message}` }], isError: true };
-    } finally {
-      if (db) { await detach(db); }
-    }
-  }
+  async ({ connectionId, sql }) => toMcpResult(await runWriteQueryTool(executor, connectionId, sql))
 );
 
 async function main(): Promise<void> {
