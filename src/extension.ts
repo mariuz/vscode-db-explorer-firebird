@@ -37,7 +37,7 @@ import {QueryHistoryProvider, QueryHistoryItem} from "./query-history/query-hist
 import {TaskTracker} from "./task-panel/task-tracker";
 import {registerCopilotChatParticipant} from "./copilot/copilot-chat-participant";
 import {registerAiQueryActions, runAnalyzeResultsAction, runAnalyzePlanAction} from "./copilot/ai-query-actions";
-import {buildIsqlArgs, buildIsqlEnv, resolveIsqlExecutable} from "./shared/isql-terminal";
+import {buildIsqlArgs, buildIsqlCommandLine, buildIsqlEnv, isqlRunFailed, resolveIsqlExecutable, summarizeIsqlFailure} from "./shared/isql-terminal";
 import {resolveGbakExecutable} from "./shared/gbak-options";
 import {attemptConnection} from "./shared/connection-wizard";
 import {getConnectionLabel} from "./shared/utils";
@@ -1348,23 +1348,87 @@ export function activate(context: ExtensionContext) {
     });
   }
 
+  /**
+   * True if `candidate` is a real Firebird isql.
+   *
+   * Two non-obvious details, both confirmed against a real Firebird 6 isql rather than assumed:
+   *
+   * - **`child.stdin.end()` is required, not tidiness.** `isql -z` prints its version banner and
+   *   then reads stdin ("Use CONNECT or CREATE DATABASE to specify a database"). Under `execFile`
+   *   stdin is an open pipe nobody ever closes, so isql waited forever, hit the timeout, and this
+   *   function reported a perfectly working isql as *not installed* — which made both isql commands
+   *   permanently unavailable ("Could not find the isql (or isql-fb) executable") on any machine
+   *   where isql really was installed. Closing stdin gives it the EOF it's waiting for.
+   * - **The version banner is checked, not just the exit code**, for the same reason `isql-fb` is
+   *   tried before `isql` in isqlCandidates(): on Linux, plain `isql` is very often unixODBC's
+   *   unrelated tool of the same name, and an exit-code-only check can't tell the two apart.
+   */
   function checkIsqlExecutable(candidate: string): Promise<boolean> {
     return new Promise(resolve => {
       try {
-        const child = cp.execFile(candidate, ["-z"], {timeout: 3000}, err => resolve(!err));
+        const child = cp.execFile(candidate, ["-z"], {timeout: 3000}, (err, stdout, stderr) => {
+          const banner = `${stdout ?? ""}${stderr ?? ""}`.toLowerCase().includes("isql version");
+          resolve(!err && banner);
+        });
         child.on("error", () => resolve(false));
+        child.stdin?.end();
       } catch {
         resolve(false);
       }
     });
   }
 
-  async function launchIsqlTask(connectionOptions: ConnectionOptions, taskName: string, extraArgs: string[] = []): Promise<void> {
-    if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
-      logger.showError("Open a workspace folder to use isql in the integrated terminal.");
-      return;
+  /**
+   * Resolves a terminal's shell integration, waiting briefly for the shell to activate it
+   * (docs/roadmap/isql-terminal-shell-integration.md). `Terminal.shellIntegration` is undefined
+   * until the shell reports in, and stays undefined forever for a shell that doesn't support it or
+   * whose startup scripts suppress it — hence the timeout and the `undefined` result, which callers
+   * must handle rather than assume away.
+   */
+  function waitForShellIntegration(
+    terminal: vscode.Terminal,
+    timeoutMs = 3000
+  ): Promise<vscode.TerminalShellIntegration | undefined> {
+    if (terminal.shellIntegration) {
+      return Promise.resolve(terminal.shellIntegration);
     }
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        subscription.dispose();
+        resolve(undefined);
+      }, timeoutMs);
+      const subscription = window.onDidChangeTerminalShellIntegration(event => {
+        if (event.terminal === terminal) {
+          clearTimeout(timer);
+          subscription.dispose();
+          resolve(event.shellIntegration);
+        }
+      });
+    });
+  }
 
+  /** How an isql launch's exit code should be interpreted — see launchIsqlTask(). */
+  type IsqlLaunchMode = "interactive" | "script";
+
+  /**
+   * Launches isql in an integrated terminal (docs/roadmap/isql-terminal-shell-integration.md).
+   *
+   * Uses `window.createTerminal()` + the shell integration API rather than the Tasks API this
+   * previously went through, for two reasons the roadmap doc records: a `vscode.Task` needs a
+   * workspace folder, so opening a single .sql file with no folder open made both isql commands
+   * unavailable for no reason intrinsic to isql; and `tasks.executeTask()` resolves when the task
+   * *starts*, so nothing ever observed isql's exit code — a script that failed reported nothing at
+   * all, unlike gbak backup/restore, which do check and fail visibly.
+   *
+   * Shell integration is best-effort: when it isn't available the command is still typed into the
+   * terminal with `sendText()`, which loses the exit code but is never worse than the old behavior.
+   */
+  async function launchIsqlTask(
+    connectionOptions: ConnectionOptions,
+    taskName: string,
+    extraArgs: string[] = [],
+    mode: IsqlLaunchMode = "interactive"
+  ): Promise<void> {
     const executable = await resolveIsqlExecutable(getOptions().isqlPath || undefined, checkIsqlExecutable);
     if (!executable) {
       logger.showError(
@@ -1378,15 +1442,80 @@ export function activate(context: ExtensionContext) {
       return;
     }
 
-    const task = new vscode.Task(
-      {type: "firebird-isql"},
-      workspace.workspaceFolders[0],
-      taskName,
-      "Firebird",
-      new vscode.ShellExecution(executable, buildIsqlArgs(connectionOptions, extraArgs), {env: buildIsqlEnv(connectionOptions)})
-    );
-    task.presentationOptions = {reveal: vscode.TaskRevealKind.Always, panel: vscode.TaskPanelKind.Dedicated, clear: false};
-    await vscode.tasks.executeTask(task);
+    const args = buildIsqlArgs(connectionOptions, extraArgs);
+    const terminal = window.createTerminal({
+      name: taskName,
+      // Same reasoning as the old ShellExecution's own env: credentials go through ISC_USER/
+      // ISC_PASSWORD so they never appear in the visible command line or a process listing.
+      env: buildIsqlEnv(connectionOptions),
+      iconPath: new vscode.ThemeIcon("database"),
+    });
+    terminal.show();
+
+    const shellIntegration = await waitForShellIntegration(terminal);
+    if (!shellIntegration) {
+      logger.debug("isql: shell integration unavailable — falling back to sendText (no exit code).");
+      terminal.sendText(buildIsqlCommandLine(executable, args), true);
+      return;
+    }
+
+    const execution = shellIntegration.executeCommand(executable, args);
+    const task = taskTracker.start(taskName);
+
+    // The exit code arrives on window.onDidEndTerminalShellExecution, not on the execution itself.
+    const exitCodePromise = new Promise<number | undefined>(resolve => {
+      const subscription = window.onDidEndTerminalShellExecution(event => {
+        if (event.execution === execution) {
+          subscription.dispose();
+          resolve(event.exitCode);
+        }
+      });
+    });
+
+    // Deliberately not awaited: an interactive isql session lasts until the user quits it, and this
+    // function's callers only launch it. Completion is reported whenever it actually happens.
+    void (async () => {
+      try {
+        // Output is only read for a script run — that's the case where isql's own error text is
+        // worth quoting back. Draining an interactive session's stream would serve no purpose.
+        let output = "";
+        if (mode === "script") {
+          for await (const chunk of execution.read()) {
+            output += chunk;
+            if (output.length > 64_000) {
+              output = output.slice(-64_000); // keep the tail: the failure is at the end
+            }
+          }
+        }
+
+        const exitCode = await exitCodePromise;
+        // Not `exitCode !== 0`: a failed *login* makes isql exit 0 while printing SQLSTATE 28000,
+        // so the output has to be consulted too — see isqlRunFailed(). An `undefined` exit code is
+        // documented as meaning several things (including a plain ctrl+c), so on its own it is not
+        // treated as failure; that would false-alarm on a normal interactive quit.
+        if (!isqlRunFailed(exitCode, output)) {
+          task.complete();
+          return;
+        }
+
+        const summary = summarizeIsqlFailure(exitCode, output);
+        task.fail(summary);
+        logger.error(`isql (${taskName}): ${summary}`);
+        // Only a script run gets a notification. An interactive session ends however the user chose
+        // to end it — Ctrl+C out of a prompt is a non-zero exit and emphatically not an error worth
+        // interrupting them over; it's still recorded in the Background Tasks view either way.
+        if (mode === "script") {
+          logger.showError(`isql: ${summary}`, ["Show Log Output"]).then(selected => {
+            if (selected === "Show Log Output") {
+              logger.showOutput();
+            }
+          });
+        }
+      } catch (err: any) {
+        task.fail(err?.message ?? String(err));
+        logger.error(`isql (${taskName}) could not be tracked: ${err?.message ?? err}`);
+      }
+    })();
   }
 
   /* DB ITEM: connect with isql in an integrated terminal */
@@ -1444,7 +1573,7 @@ export function activate(context: ExtensionContext) {
       try {
         const dbDetails = await Driver.resolvePassword(Global.activeConnection);
         const fileName = editor.document.fileName.split(/[\\/]/).pop() ?? editor.document.fileName;
-        await launchIsqlTask(dbDetails, `ISQL: ${fileName}`, ["-i", editor.document.fileName]);
+        await launchIsqlTask(dbDetails, `ISQL: ${fileName}`, ["-i", editor.document.fileName], "script");
       } catch (err: any) {
         logger.error(err);
         logger.showError(`Failed to launch isql: ${err?.message ?? err}`);

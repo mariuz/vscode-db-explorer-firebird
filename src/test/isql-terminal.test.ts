@@ -5,6 +5,11 @@ import {
   buildIsqlEnv,
   isqlCandidates,
   resolveIsqlExecutable,
+  quoteShellArgument,
+  buildIsqlCommandLine,
+  summarizeIsqlFailure,
+  isqlRunFailed,
+  isqlReportedError,
 } from '../shared/isql-terminal';
 import { ConnectionOptions } from '../interfaces';
 
@@ -139,5 +144,124 @@ suite('resolveIsqlExecutable', function () {
   test('an empty-string custom path is treated as "no custom path" (falls back to PATH search)', async function () {
     const result = await resolveIsqlExecutable('', async candidate => candidate === 'isql-fb', 'linux');
     assert.strictEqual(result, 'isql-fb');
+  });
+});
+
+suite('quoteShellArgument()/buildIsqlCommandLine() (docs/roadmap/isql-terminal-shell-integration.md, phase 1)', function () {
+
+  test('a plain argument is left alone on both platforms', function () {
+    assert.strictEqual(quoteShellArgument('localhost/3050:/tmp/test.fdb', 'linux'), 'localhost/3050:/tmp/test.fdb');
+    assert.strictEqual(quoteShellArgument('isql-fb', 'win32'), 'isql-fb');
+  });
+
+  test('a path containing a space is quoted, so it stays one argument', function () {
+    assert.strictEqual(quoteShellArgument('/tmp/my databases/test.fdb', 'linux'), "'/tmp/my databases/test.fdb'");
+    assert.strictEqual(quoteShellArgument('C:\\My Databases\\test.fdb', 'win32'), '"C:\\My Databases\\test.fdb"');
+  });
+
+  test('POSIX quoting survives an embedded single quote', function () {
+    // close, escaped literal quote, reopen — the only way single quotes can contain one
+    assert.strictEqual(quoteShellArgument("/tmp/o'brien.fdb", 'linux'), `'/tmp/o'\\''brien.fdb'`);
+  });
+
+  test('Windows quoting doubles an embedded double quote', function () {
+    assert.strictEqual(quoteShellArgument('a"b', 'win32'), '"a""b"');
+  });
+
+  test('an empty argument still produces an empty quoted argument, not nothing', function () {
+    assert.strictEqual(quoteShellArgument('', 'linux'), "''");
+    assert.strictEqual(quoteShellArgument('', 'win32'), '""');
+  });
+
+  test('shell metacharacters are quoted rather than passed through to the shell', function () {
+    for (const dangerous of ['a;b', 'a|b', 'a&b', 'a$b', 'a`b', 'a>b', 'a*b']) {
+      const quoted = quoteShellArgument(dangerous, 'linux');
+      assert.strictEqual(quoted, `'${dangerous}'`, dangerous);
+    }
+  });
+
+  test('a full command line joins the executable and every argument, each quoted', function () {
+    const line = buildIsqlCommandLine('isql-fb', ['-i', '/tmp/my script.sql', 'localhost/3050:/tmp/test.fdb'], 'linux');
+    assert.strictEqual(line, "isql-fb -i '/tmp/my script.sql' localhost/3050:/tmp/test.fdb");
+  });
+});
+
+suite('summarizeIsqlFailure() (docs/roadmap/isql-terminal-shell-integration.md, phase 3)', function () {
+
+  test('a real isql script failure is summarized from its own error lines, not the exit code', function () {
+    const output = [
+      'Database:  localhost/3050:/tmp/test.fdb',
+      'SQL> SELECT * FROM NOSUCHTABLE;',
+      'Statement failed, SQLSTATE = 42S02',
+      'Dynamic SQL Error',
+      '-SQL error code = -204',
+      '-Table unknown',
+      '-NOSUCHTABLE',
+      '-At line 1, column 15',
+    ].join('\n');
+    const summary = summarizeIsqlFailure(1, output);
+    assert.ok(summary.startsWith('Statement failed, SQLSTATE = 42S02'), summary);
+    assert.ok(summary.includes('-Table unknown'), summary);
+    assert.ok(!summary.includes('Database:'), 'preamble should not be included');
+  });
+
+  test('the detail is capped so a script failing on every statement cannot produce a huge message', function () {
+    const output = ['Statement failed, SQLSTATE = 42S02', ...Array.from({ length: 50 }, (_u, i) => `-detail ${i}`)].join('\n');
+    const summary = summarizeIsqlFailure(1, output);
+    assert.strictEqual(summary.split(' -detail ').length - 1, 5, summary);
+  });
+
+  test('output with no recognizable Firebird error falls back to the exit code', function () {
+    assert.strictEqual(summarizeIsqlFailure(2, 'some unrelated chatter'), 'isql exited with code 2.');
+    assert.strictEqual(summarizeIsqlFailure(2, ''), 'isql exited with code 2.');
+  });
+
+  test('an undetermined exit code still produces a usable message', function () {
+    assert.strictEqual(summarizeIsqlFailure(undefined, ''), 'isql reported a failure.');
+    assert.ok(summarizeIsqlFailure(undefined, 'Statement failed, SQLSTATE = 42S02').startsWith('Statement failed'));
+  });
+
+  test('a bare SQLSTATE line is recognized even without the "Statement failed" prefix', function () {
+    assert.ok(summarizeIsqlFailure(1, 'something SQLSTATE = 08006 happened').includes('SQLSTATE'));
+  });
+});
+
+suite('isqlRunFailed() (docs/roadmap/isql-terminal-shell-integration.md, phase 2)', function () {
+  const AUTH_FAILURE = [
+    'Statement failed, SQLSTATE = 28000',
+    'Your user name and password are not defined. Ask your database administrator to set up a Firebird login.',
+    'After line 0 in file /tmp/ok.sql',
+    'Use CONNECT or CREATE DATABASE to specify a database',
+  ].join('\n');
+
+  test('a non-zero exit code is a failure', function () {
+    assert.strictEqual(isqlRunFailed(1, ''), true);
+    assert.strictEqual(isqlRunFailed(2, 'anything'), true);
+  });
+
+  test('a clean run is not a failure', function () {
+    assert.strictEqual(isqlRunFailed(0, ''), false);
+    assert.strictEqual(isqlRunFailed(0, 'ID\n===\n 1\n'), false);
+  });
+
+  test('an authentication failure is caught despite isql exiting 0', function () {
+    // Verified against a real Firebird 6 isql: a failing *statement* in an -i script exits 1, but a
+    // failing *login* exits 0 while printing SQLSTATE 28000. Trusting the exit code alone would
+    // report a completely failed run as a success.
+    assert.strictEqual(isqlRunFailed(0, AUTH_FAILURE), true);
+  });
+
+  test('an undetermined exit code alone is not a failure, but one with error output is', function () {
+    // undefined covers a plain ctrl+c out of an interactive session — not worth an error toast.
+    assert.strictEqual(isqlRunFailed(undefined, ''), false);
+    assert.strictEqual(isqlRunFailed(undefined, AUTH_FAILURE), true);
+  });
+
+  test('isqlReportedError() recognizes each of isql\'s error line shapes', function () {
+    assert.strictEqual(isqlReportedError('Statement failed, SQLSTATE = 42S02'), true);
+    assert.strictEqual(isqlReportedError('Dynamic SQL Error'), true);
+    assert.strictEqual(isqlReportedError('  SQLSTATE = 08006  '), true);
+    assert.strictEqual(isqlReportedError('Database:  localhost:/tmp/test.fdb\nSQL> commit;'), false);
+    assert.strictEqual(isqlReportedError(''), false);
   });
 });

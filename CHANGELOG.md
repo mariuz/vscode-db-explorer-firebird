@@ -2,6 +2,17 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.96 - 2026-07-31
+
+### Fixed
+
+- **isql was reported as "not found" on machines where it was installed and working.** The check that probes for the executable ran `isql -z` and waited for it to exit — but real isql prints its version banner and then reads standard input, so it never exited, hit the timeout, and was written off as missing. Both **Connect with isql** and **Run File with isql** were therefore unavailable, telling you to install client tools you already had. The probe now closes stdin (and confirms the version banner, so unixODBC's unrelated `isql` isn't mistaken for Firebird's).
+- **A failing isql script now reports the failure.** Previously the run was launched and forgotten: a script that failed produced no error notification and no Background Tasks entry, unlike Backup/Restore. It now surfaces Firebird's own error text (`Statement failed, SQLSTATE = ... / -Table unknown ...`) rather than just an exit code. Note that isql exits **0** on a failed *login* — only a failed statement exits non-zero — so the output is checked too, otherwise a completely failed run looks like a success.
+
+### Changed
+
+- **isql now runs in a normal terminal rather than a VS Code task**, which removes the requirement to have a workspace folder open — you can run a single `.sql` file with no folder open. Where the shell supports shell integration, its exit code is tracked and reported in the Background Tasks view; where it doesn't, the command is still typed into the terminal exactly as before. Implements `docs/roadmap/isql-terminal-shell-integration.md`.
+
 ## 0.1.95 - 2026-07-31
 
 ### Added

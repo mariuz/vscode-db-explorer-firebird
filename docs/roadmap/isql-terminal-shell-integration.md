@@ -4,7 +4,30 @@
 
 ## Current state in Firebird Studio
 
-**Not started**, and the current implementation has two verified limitations that this API exists to solve.
+**All three phases are done** — and building it surfaced a bug that made this entire feature area unusable, plus a wrong assumption baked into both this doc and a pre-existing test.
+
+- **Phase 1 — terminal + shell integration — done.** `launchIsqlTask()` (`src/extension.ts`) now creates a real terminal (`window.createTerminal({name, env, iconPath})`) and runs isql through `shellIntegration.executeCommand(executable, args)`. The workspace-folder guard is gone, so a single `.sql` file with no folder open works. Shell integration is resolved by `waitForShellIntegration()`, which returns the already-present `terminal.shellIntegration` or waits up to 3s on `window.onDidChangeTerminalShellIntegration`; when it never arrives, the command is typed with `terminal.sendText()` instead — no exit code, but never worse than the old behavior. That fallback needs its own quoting (`executeCommand(executable, args)` quotes for you, `sendText()` takes one raw line), so `buildIsqlCommandLine()`/`quoteShellArgument()` were added to `isql-terminal.ts` as pure, unit-tested functions.
+- **Phase 2 — exit code → Background Tasks — done.** The exit code arrives via `window.onDidEndTerminalShellExecution` (it's on the *end event*, not on `TerminalShellExecution` — the `execution.exitCode` promise this doc originally assumed is from the proposed API, not the finalized one). Runs are registered with the same `TaskTracker` backup/restore already use. Tracking is deliberately not awaited by the caller: an interactive session lasts until the user quits it.
+- **Phase 3 — isql's own error text — done.** For a script run, `execution.read()` is drained into a capped buffer (64 KB, tail-biased — the failure is at the end) and `summarizeIsqlFailure()` quotes back the `Statement failed, SQLSTATE = …` line plus its `-`-prefixed detail lines instead of "exited with code 1".
+
+### Two things that turned out not to be true
+
+- **`checkIsqlExecutable()` was broken, and had been reporting a working isql as missing.** It ran `isql -z` under `cp.execFile` and waited for exit — but real isql prints its banner and then *reads stdin*, and under `execFile` stdin is an open pipe nobody closes, so it hung until the 3s timeout and resolved `false`. The user-visible effect: both isql commands answered "Could not find the isql (or isql-fb) executable. Install the Firebird client tools…" on machines where isql was installed and working. Fixed by closing stdin (`child.stdin?.end()`) and additionally requiring the version banner in the output — which also stops unixODBC's unrelated `isql` from being mistaken for Firebird's, the same concern that already made `isqlCandidates()` try `isql-fb` first. **This also silently disabled a whole test suite**: `src/test/suite/isql-terminal-integration.test.ts` has its own copy of that probe and skips when it fails, so its four tests had never once executed — including in CI, where `vscode-host.yml` installs Firebird and puts it on `PATH` specifically so they would.
+- **"isql exits non-zero on a script error" is only half true.** Confirmed against a real Firebird 6 isql: a failing *statement* in an `-i` script does exit 1, but a failed *login* exits **0**, printing `SQLSTATE = 28000 / Your user name and password are not defined` and then "Use CONNECT or CREATE DATABASE to specify a database". Trusting the exit code alone — which is what phase 2 originally proposed — would report a completely failed run as a success. Hence `isqlRunFailed(exitCode, output)`, which treats a non-zero exit *or* recognizable Firebird error output as failure. An `undefined` exit code alone is not failure (it's documented as covering an ordinary ctrl+c). The pre-existing wrong-password test asserted the non-zero exit that real isql doesn't produce; now that it actually runs, it asserts on the authentication error in the output instead.
+
+Only a script run gets an error notification. An interactive session ends however the user chose to end it — quitting out of a prompt shouldn't raise a toast — though both are recorded in the Background Tasks view.
+
+### Testing
+
+`src/test/isql-terminal.test.ts` grew from 18 to 36 tests: `quoteShellArgument()`/`buildIsqlCommandLine()` (plain arguments untouched, spaces quoted on both platforms, POSIX embedded-single-quote escaping, Windows doubled double-quotes, the empty argument, shell metacharacters, and a full command line); `summarizeIsqlFailure()` (a real isql failure block summarized without its preamble, the detail cap, the no-recognizable-error and undetermined-exit-code fallbacks, and a bare `SQLSTATE` line); and `isqlRunFailed()`/`isqlReportedError()` including the authentication-failure-with-exit-code-0 case above.
+
+`src/test/suite/isql-shell-integration.test.ts` (new, 2 tests) covers what only a real host can — that a real terminal's shell integration reports a real isql run's exit code, for both a succeeding and a failing script, and that `summarizeIsqlFailure()`'s parsing matches what a real Firebird 6 isql actually prints. It uses a script rather than `isql -z` for the success case, because `-z` waits at the isql prompt and a terminal's stdin never reaches EOF on its own. Its failing-script assertion deliberately requires a *number* that isn't 0, since `notStrictEqual(undefined, 0)` would pass vacuously if no exit code were ever reported — the exact thing the test exists to prove.
+
+Full pass: `tsc` clean on all three configs, `npm run test` → 1386 passing (18 new), `npm run compile` clean, `npx eslint` clean on every touched file, and `npm run test:vscode-host` → **110 passing, 0 failing, 0 pending** — up from 104 passing with 6 pending, because fixing the probe finally let the four long-dormant isql integration tests run for the first time.
+
+### Original state (before this item)
+
+The implementation had two verified limitations that this API exists to solve.
 
 `launchIsqlTask()` (`src/extension.ts`) — backing `firebird.terminal.connectIsql` and `firebird.terminal.runFileIsql` — builds a `vscode.Task` with a `ShellExecution` and calls `vscode.tasks.executeTask()`:
 
@@ -22,6 +45,6 @@
 
 ## Suggested phases
 
-1. Swap `launchIsqlTask()` to `createTerminal()` + `shellIntegration.executeCommand()` with a `sendText()` fallback when shell integration isn't available, and drop the workspace-folder guard — behavior-preserving otherwise.
-2. Await `exitCode`, register the run with `TaskTracker`, and report failure the way backup/restore already do.
-3. Read the execution output stream for `runFileIsql` and include isql's own error text in the failure notification.
+1. ~~Swap `launchIsqlTask()` to `createTerminal()` + `shellIntegration.executeCommand()` with a `sendText()` fallback when shell integration isn't available, and drop the workspace-folder guard — behavior-preserving otherwise.~~ — **done**, see above.
+2. ~~Await `exitCode`, register the run with `TaskTracker`, and report failure the way backup/restore already do.~~ — **done**, via `onDidEndTerminalShellExecution` rather than an `exitCode` promise, and via `isqlRunFailed()` rather than the exit code alone — see above for why both differ from what this phase originally assumed.
+3. ~~Read the execution output stream for `runFileIsql` and include isql's own error text in the failure notification.~~ — **done**, see above.

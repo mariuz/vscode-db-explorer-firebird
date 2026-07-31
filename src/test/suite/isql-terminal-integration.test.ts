@@ -28,8 +28,15 @@ import { getTestConnectionOptions } from './firebird-test-env';
 function checkExecutable(candidate: string): Promise<boolean> {
   return new Promise(resolve => {
     try {
-      const child = cp.execFile(candidate, ['-z'], { timeout: 5000 }, err => resolve(!err));
+      const child = cp.execFile(candidate, ['-z'], { timeout: 5000 }, (err, stdout, stderr) => {
+        const banner = `${stdout ?? ''}${stderr ?? ''}`.toLowerCase().includes('isql version');
+        resolve(!err && banner);
+      });
       child.on('error', () => resolve(false));
+      // Required: `isql -z` prints its banner and then reads stdin, so without an EOF it hangs
+      // until the timeout and a working isql is misreported as missing. See checkIsqlExecutable()
+      // in extension.ts for the full explanation — this is why this whole suite silently skipped.
+      child.stdin?.end();
     } catch {
       resolve(false);
     }
@@ -114,7 +121,18 @@ suite('isql terminal integration – real isql binary against a real Firebird se
       const args = buildIsqlArgs(conn, ['-i', scriptPath]);
       const env = buildIsqlEnv({ ...conn, password: 'definitely-the-wrong-password' });
       const result = await runIsql(executable, args, env);
-      assert.notStrictEqual(result.code, 0, 'expected isql to fail to authenticate with a wrong password');
+
+      // Asserting on the *output*, not the exit code: this test previously expected a non-zero
+      // exit and had never actually run (the -z executable check hung, so the whole suite skipped
+      // — see checkExecutable() above). Once it did run, real Firebird 6 isql turned out to exit
+      // **0** on an authentication failure, printing the error and then "Use CONNECT or CREATE
+      // DATABASE to specify a database". A failing *statement* does exit 1; a failing *login*
+      // doesn't. That's exactly why the product code's isqlRunFailed() consults the output too.
+      const combined = `${result.stdout}${result.stderr}`;
+      assert.ok(
+        /SQLSTATE\s*=\s*28000/.test(combined) || /user name and password are not defined/i.test(combined),
+        `expected an authentication error in isql's output, got (code ${result.code}):\n${combined}`
+      );
     } finally {
       fs.unlinkSync(scriptPath);
     }
