@@ -22,6 +22,12 @@ The pre-existing state this replaces: none — this was a net-new capability, no
 
 **Suite-tier coverage** (`src/test/suite/data-api-builder-integration.test.ts`, new): drives the real `runDataApiSpecGenerator()` inside a real Extension Development Host against a real Firebird server — confirms the opened document is real JSON (`openapi: "3.0.3"`), its `/products` path and `PRODUCTS` component schema reflect the live table's real columns, and a full-access table gets both `GET` and `POST`. Previously this module (as opposed to `buildOpenApiSpec()`'s pure logic, already unit-tested) had no suite-tier coverage against a live server; only the phase-3 Copilot-scoping path above had been checked that way.
 
+### Phase 5 — column-level include/exclude (not done)
+
+**Added after the fact from a [vscode-mssql](https://github.com/microsoft/vscode-mssql) 1.43.0 review** — "Added support for including and excluding columns to Data API builder". Today's `tableAccess` option scopes the spec at *table* granularity only (which tables appear, and whether each is full-CRUD or GET-only); every column of an included table is exposed. That's the wrong granularity for the case this feature most obviously serves — exposing a table that has a `PASSWORD_HASH`, `SALARY`, or internal audit column you don't want in a public REST surface.
+
+The natural shape, given what already exists: extend the `tableAccess` entry from a bare `"full" | "read-only"` string to an object that can also carry `includeColumns`/`excludeColumns`, and filter inside `buildOpenApiSpec()` where it already walks `table.columns`. Two constraints worth settling up front — a primary-key column can't be excluded without also dropping that table's by-PK routes (the path template needs it), and an excluded `NOT NULL` column with no default makes the generated `POST` body unsatisfiable, so the generator should either refuse or downgrade the table to read-only rather than emit a spec that can't work. The Copilot path (phase 3) then needs nothing new structurally: `copilotScopingPrompt()` asks for a richer JSON shape and `parseTableAccessResponse()` validates column names against the real schema exactly as it already validates table names.
+
 ### Explicitly deferred (not done)
 
 - **Phase 4 — Option B (bundled server runtime)**: no scaffolded Node/Express/GraphQL project — this remains "generate a spec for your own backend," not "run a Firebird API server," per the design doc's recommendation not to start Option B casually.
@@ -52,3 +58,4 @@ Whichever option is chosen, a natural Copilot hook (mirroring "GitHub Copilot in
 2. ~~REST route-spec generator (Option A) from schema metadata, no server.~~ — **done**.
 3. ~~Copilot-assisted natural-language config generation.~~ — **done**.
 4. (Only if justified) bundled minimal server runtime (Option B).
+5. Column-level include/exclude in `tableAccess`/`buildOpenApiSpec()`, plus the matching richer Copilot scoping response — see phase 5 above for the primary-key and `NOT NULL` constraints that need deciding first.
