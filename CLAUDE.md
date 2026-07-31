@@ -12,7 +12,7 @@ Firebird Studio is a VS Code extension (publisher `AdrianMariusPopa`) for explor
 npm install                          # install dependencies
 npm run compile                      # bundle extension with esbuild -> out/extension.js
 npm run watch                        # esbuild in watch mode
-npm run tsc-compile                  # tsc type-check only (reference — has known pre-existing errors, doesn't gate builds)
+npm run tsc-compile                  # tsc type-check only (doesn't gate builds; esbuild does the real build)
 
 npx eslint src --ext .ts             # lint
 
@@ -24,9 +24,18 @@ npm run test:vscode-host             # suite tests inside a real VS Code Extensi
 To run a single unit test file directly (faster iteration than the full `npm run test`):
 
 ```bash
-tsc -p tsconfig.test.json --noEmitOnError false
+node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false
 ./node_modules/.bin/mocha --require ./out/test/setup.js out/test/sql-formatter.test.js
 ```
+
+**Two TypeScripts are installed deliberately — don't "fix" this by consolidating.** Type-checking
+and test compilation use TypeScript 7 (the native compiler, ~10x faster) via the `typescript7`
+alias, invoked by explicit path. `typescript@6` remains the root `typescript` because TS 7 removed
+the JavaScript compiler API and no released `@typescript-eslint` supports it (8.65.0 still peers on
+`typescript <6.1.0`), so ESLint would not load at all otherwise. Consequence worth remembering: a
+bare `tsc`/`npx tsc` resolves to **6**, not the compiler the build uses — always go through the npm
+scripts or the explicit path. See CONTRIBUTING.md for how to collapse this back to one dependency
+once typescript-eslint catches up.
 
 Press `F5` in VS Code to launch an Extension Development Host with the extension loaded for manual testing.
 

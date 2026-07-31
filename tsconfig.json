@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
+    "moduleResolution": "bundler",
     "target": "es2020",
     "outDir": "out",
     "lib": ["ES2019", "WebWorker"],
@@ -11,7 +10,7 @@
     "skipLibCheck": true,
     "types": ["node", "mocha", "vscode"],
     /* Strict Type-Checking Option */
-    "strict": true,   /* TypeScript 6 defaults to strict; declared explicitly so it doesn't depend on compiler defaults */
+    "strict": true,   /* Declared explicitly so it never depends on a compiler default */
     /* Additional Checks */
     "noUnusedLocals": true /* Report errors on unused locals. */,
     "noImplicitReturns": true /* Report error when not all code paths in function return a value. */,

@@ -33,7 +33,7 @@
   "publisher": "AdrianMariusPopa",
   "main": "./out/extension.js",
   "scripts": {
-    "tsc-compile": "tsc -p ./",
+    "tsc-compile": "node node_modules/typescript7/bin/tsc -p ./",
     "vscode:prepublish": "npm run compile",
     "esbuild-base": "rimraf out && rimraf node_modules/node-firebird-native-api/build/Release && esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --external:node-firebird-native-api --external:*.node --format=cjs --platform=node",
     "esbuild-mcp-server": "esbuild ./src/mcp-server/server.ts --bundle --outfile=out/mcp-server/server.js --format=cjs --platform=node",
@@ -42,10 +42,10 @@
     "install-native": "npm run --prefix node_modules/node-firebird-native-api/ gyp:configure && npm run --prefix node_modules/node-firebird-native-api/ gyp:build",
     "compile": "npm run -S esbuild-build",
     "watch": "npm run -S esbuild-base -- --sourcemap --watch",
-    "tsc-watch": "tsc -watch -p ./",
-    "test": "tsc -p tsconfig.test.json --noEmitOnError false; mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
-    "test:e2e": "tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000 --exit",
-    "test:vscode-host": "npm run compile && tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test"
+    "tsc-watch": "node node_modules/typescript7/bin/tsc -watch -p ./",
+    "test": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
+    "test:e2e": "node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000 --exit",
+    "test:vscode-host": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test"
   },
   "contributes": {
     "notebooks": [
@@ -1840,7 +1840,8 @@
     "mocha": "^11.7.5",
     "rimraf": "5.0.1",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript7": "npm:typescript@^7.0.2"
   },
   "engines": {
     "vscode": "^1.101.0"

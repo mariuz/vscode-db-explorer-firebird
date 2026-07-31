@@ -70,7 +70,33 @@ The project uses [esbuild](https://esbuild.github.io/) for fast bundling.
 |---|---|
 | `npm run compile` | Build the extension (output to `out/`) |
 | `npm run watch` | Rebuild on every file change |
-| `npm run tsc-compile` | Type-check with TypeScript (reference only — known pre-existing errors) |
+| `npm run tsc-compile` | Type-check with TypeScript |
+
+#### Two TypeScripts are installed, on purpose
+
+Type-checking and test compilation use **TypeScript 7**, the native (Go) compiler — roughly 10x
+faster here (a full type-check of the extension went from ~4.2s to ~0.42s; compiling the unit-test
+tier from ~4.8s to ~0.47s).
+
+TypeScript 7 removed the JavaScript compiler API, and **no released version of
+`@typescript-eslint` supports it** — the latest (8.65.0) still declares `typescript ">=4.8.4
+<6.1.0"`, and with TS 7 as the only TypeScript installed, ESLint fails to load its plugin at all.
+So `typescript@6` stays installed for ESLint (and for whatever your editor uses), and TypeScript 7
+is installed alongside under the `typescript7` alias:
+
+```jsonc
+"typescript":  "^6.0.3",               // @typescript-eslint + editor tooling
+"typescript7": "npm:typescript@^7.0.2" // type-checking and test compilation
+```
+
+**This means `npx tsc` is *not* the compiler the build uses.** `node_modules/.bin/tsc` belongs to
+`typescript@6`; every npm script and CI workflow calls TypeScript 7 by explicit path
+(`node node_modules/typescript7/bin/tsc`). Use `npm run tsc-compile` rather than a bare `tsc`, or
+you'll be type-checking with the older compiler.
+
+Once `@typescript-eslint` ships TypeScript 7 support, this collapses back to a single dependency:
+drop the `typescript7` alias, move `typescript` to `^7`, and change the scripts/workflows back to
+plain `tsc`.
 
 To run the extension inside a VS Code Extension Development Host:
 

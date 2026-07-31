@@ -79,7 +79,10 @@ jobs:
           FIREBIRD_PASSWORD: masterkey
 
       - name: Compile E2E tests
-        run: ./node_modules/.bin/tsc -p tsconfig.e2e.json --noEmitOnError false
+        # TypeScript 7 (the native compiler) by explicit path, not ./node_modules/.bin/tsc:
+        # typescript@6 is still installed for @typescript-eslint, which has no TS 7
+        # support yet, and it owns the .bin/tsc link. See CONTRIBUTING.md.
+        run: node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmitOnError false
 
       - name: Run E2E tests
         # --exit: node-firebird doesn't close its TCP socket when a login fails (doError() only

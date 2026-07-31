@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "target": "es2020",
     "outDir": "out",
     "lib": [
@@ -10,8 +10,6 @@
     "sourceMap": true,
     "rootDir": "src",
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "types": [
       "node",
       "mocha"

@@ -115,7 +115,10 @@ jobs:
         run: npm run compile
 
       - name: Compile extension host test suite
-        run: ./node_modules/.bin/tsc -p tsconfig.suite.json --noEmitOnError false
+        # TypeScript 7 (the native compiler) by explicit path, not ./node_modules/.bin/tsc:
+        # typescript@6 is still installed for @typescript-eslint, which has no TS 7
+        # support yet, and it owns the .bin/tsc link. See CONTRIBUTING.md.
+        run: node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false
 
       - name: Run extension host tests (headless)
         run: xvfb-run -a npx vscode-test
