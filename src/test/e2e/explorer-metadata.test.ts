@@ -11,18 +11,10 @@
 
 import * as assert from 'assert';
 import * as Firebird from 'node-firebird';
+import { getE2EOptions } from './e2e-connection';
 import { getRolesQuery, getExceptionsQuery, getSystemTablesQuery, dropRoleQuery, dropExceptionQuery } from '../../shared/queries';
 
-function getOptions(): Firebird.Options {
-  return {
-    host:      process.env.FIREBIRD_HOST     ?? 'localhost',
-    port:      Number(process.env.FIREBIRD_PORT ?? '3050'),
-    database:  process.env.FIREBIRD_DATABASE ?? '/var/lib/firebird/data/test.fdb',
-    user:      process.env.FIREBIRD_USER     ?? 'sysdba',
-    password:  process.env.FIREBIRD_PASSWORD ?? 'masterkey',
-    wireCrypt: Firebird.WIRE_CRYPT_DISABLE,
-  };
-}
+const getOptions = getE2EOptions;
 
 function attach(): Promise<Firebird.Database> {
   return new Promise<Firebird.Database>((resolve, reject) => {

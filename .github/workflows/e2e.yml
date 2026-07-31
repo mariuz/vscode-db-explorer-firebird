@@ -18,6 +18,15 @@ jobs:
       matrix:
         node: [24, 25, 26]
         firebird: [3, 4, 5, '6-snapshot']
+        # Wire encryption is off for the matrix at large (Firebird 3 predates modern WireCrypt and
+        # this matrix also enables Legacy_Auth for it). This `include` matches an existing
+        # combination rather than adding a job, so node 26 x Firebird 6 runs *encrypted* instead of
+        # plaintext — the extension supports WireCrypt and nothing exercised it until now. The other
+        # node versions still cover Firebird 6 unencrypted.
+        include:
+          - node: 26
+            firebird: '6-snapshot'
+            wirecrypt: Enabled
 
     services:
       firebird:
@@ -25,7 +34,7 @@ jobs:
         env:
           FIREBIRD_ROOT_PASSWORD: masterkey
           FIREBIRD_DATABASE: test.fdb
-          FIREBIRD_CONF_WireCrypt: Disabled
+          FIREBIRD_CONF_WireCrypt: ${{ matrix.wirecrypt || 'Disabled' }}
           # Firebird 3 defaults to Legacy_Auth only, 4+ defaults to Srp; accept both so the
           # same client config works unmodified across the whole version matrix.
           FIREBIRD_CONF_AuthServer: "Legacy_Auth;Srp;Win_Sspi"
@@ -43,6 +52,7 @@ jobs:
       FIREBIRD_DATABASE: /var/lib/firebird/data/test.fdb
       FIREBIRD_USER: sysdba
       FIREBIRD_PASSWORD: masterkey
+      FIREBIRD_WIRE_CRYPT: ${{ matrix.wirecrypt || 'Disabled' }}
 
     steps:
       - name: Checkout repository
@@ -77,6 +87,8 @@ jobs:
           FIREBIRD_DATABASE: /var/lib/firebird/data/test.fdb
           FIREBIRD_USER: sysdba
           FIREBIRD_PASSWORD: masterkey
+          # This step declares its own env block, which replaces the job-level one entirely.
+          FIREBIRD_WIRE_CRYPT: ${{ matrix.wirecrypt || 'Disabled' }}
 
       - name: Compile E2E tests
         # TypeScript 7 (the native compiler) by explicit path, not ./node_modules/.bin/tsc:

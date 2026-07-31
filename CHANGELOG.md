@@ -2,6 +2,16 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.2.1 - 2026-07-31
+
+### Fixed
+
+- **Updated `node-firebird` to 2.14.1**, which corrects `TIMESTAMP WITH TIME ZONE` and `TIME WITH TIME ZONE` values being shifted by your machine's UTC offset when read back — on a `UTC+3` machine a value stored as 12:00 UTC came back as 09:00 UTC. Note the upstream fix is not quite complete: values that fall inside daylight saving time are still off by the DST hour (12:00 UTC in July reads back as 11:00 UTC), while values outside DST are now correct. Reported below for tracking.
+
+### Changed
+
+- **E2E tests can now run against a server that requires wire encryption.** They previously hard-coded encryption off, so they could only run against an unencrypted server — which is not the default for Firebird 4 and later. Set `FIREBIRD_WIRE_CRYPT=Enabled` to run them against a stock install; the default is unchanged. CI now runs one of its twelve e2e jobs with wire encryption on, which nothing covered before.
+
 ## 0.2.0 - 2026-07-31
 
 ### Added

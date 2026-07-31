@@ -1,7 +1,7 @@
 {
   "name": "vscode-firebird-studio",
   "displayName": "Firebird Studio for VS Code",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Firebird Studio — explore, query, and manage Firebird databases directly inside VS Code.",
   "categories": [
     "Programming Languages",
@@ -1815,7 +1815,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "bindings": "^1.5.0",
     "node-addon-api": "^5.0.0",
-    "node-firebird": "^2.14.0",
+    "node-firebird": "^2.14.1",
     "node-firebird-driver": "^3.6.0",
     "node-firebird-driver-native": "^3.6.0",
     "node-firebird-native-api": "^3.2.0",
