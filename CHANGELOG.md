@@ -2,6 +2,14 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.2.0 - 2026-07-31
+
+### Added
+
+- **Split a backup across multiple files.** Backup can now write a large database to several volumes — pick one path plus a file count and size, and the rest are named for you (`backup.fbk`, `backup.2.fbk`, …). Completes phase 4 of `docs/roadmap/backup-restore-options.md`, and with it the whole roadmap item.
+- **Restore accepts multiple backup files**, so a split backup can actually be restored — select every volume and they're ordered for you. gbak needs all of them: given only the first, it fails with a confusing "cannot open backup file" that names your target database.
+- **Parallel workers for backup and restore.** Offered only when the server is configured for it — the extension reads `MaxParallelWorkers` from the server first, because asking gbak for more workers than allowed makes it print a warning and quietly run single-threaded anyway.
+
 ## 0.1.99 - 2026-07-31
 
 ### Added

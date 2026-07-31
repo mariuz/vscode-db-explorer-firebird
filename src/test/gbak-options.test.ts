@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildBackupFlags, gbakCandidates, resolveGbakExecutable, buildRestoreFlags, buildRestoreArgs, renderGbakCommand } from '../shared/gbak-options';
+import { buildBackupFlags, gbakCandidates, resolveGbakExecutable, buildRestoreFlags, buildRestoreArgs, renderGbakCommand, buildParallelFlag, parseMaxParallelWorkers, buildMultiFileTargets, isValidVolumeSize } from '../shared/gbak-options';
 
 suite('gbak-options – buildBackupFlags() (docs/roadmap/backup-restore-options.md, phase 1)', function () {
   test('no choices at all produces no flags — matches gbak\'s own defaults exactly', function () {
@@ -107,7 +107,7 @@ suite('buildRestoreFlags()/buildRestoreArgs() (docs/roadmap/backup-restore-optio
   });
 
   test('create mode uses -C, replace mode uses -REP — a top-level switch, never both', function () {
-    const base = { choices: {}, user: 'sysdba', password: 'masterkey', backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb' };
+    const base = { choices: {}, user: 'sysdba', password: 'masterkey', backupPaths: ['/tmp/b.fbk'], target: 'localhost/3050:/tmp/t.fdb' };
     const created = buildRestoreArgs({ ...base, mode: 'create' });
     const replaced = buildRestoreArgs({ ...base, mode: 'replace' });
     assert.strictEqual(created[0], '-C');
@@ -122,7 +122,7 @@ suite('buildRestoreFlags()/buildRestoreArgs() (docs/roadmap/backup-restore-optio
       choices: { noValidity: true, pageSize: 4096 },
       user: 'sysdba',
       password: 'masterkey',
-      backupPath: '/tmp/b.fbk',
+      backupPaths: ['/tmp/b.fbk'],
       target: 'localhost/3050:/tmp/t.fdb',
     });
     assert.deepStrictEqual(args, [
@@ -137,7 +137,7 @@ suite('buildRestoreFlags()/buildRestoreArgs() (docs/roadmap/backup-restore-optio
     // the switch's letter case changes when no option is picked.
     const args = buildRestoreArgs({
       mode: 'create', choices: {}, user: 'sysdba', password: 'pw',
-      backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb',
+      backupPaths: ['/tmp/b.fbk'], target: 'localhost/3050:/tmp/t.fdb',
     });
     assert.deepStrictEqual(args, ['-C', '-user', 'sysdba', '-password', 'pw', '/tmp/b.fbk', 'localhost/3050:/tmp/t.fdb']);
   });
@@ -154,7 +154,7 @@ suite('renderGbakCommand() (command preview)', function () {
   test('every other argument is shown verbatim, so the preview matches what will run', function () {
     const args = buildRestoreArgs({
       mode: 'replace', choices: { metadataOnly: true }, user: 'sysdba', password: 'pw',
-      backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb',
+      backupPaths: ['/tmp/b.fbk'], target: 'localhost/3050:/tmp/t.fdb',
     });
     const rendered = renderGbakCommand('gbak', args);
     assert.strictEqual(rendered, 'gbak -REP -M -user sysdba -password ******** /tmp/b.fbk localhost/3050:/tmp/t.fdb');
@@ -170,5 +170,85 @@ suite('renderGbakCommand() (command preview)', function () {
     // not a realistic case, but a *value* equal to another argument is.
     const rendered = renderGbakCommand('gbak', ['-user', 'pw', '-password', 'pw', '/tmp/pw.fbk']);
     assert.strictEqual(rendered, 'gbak -user pw -password ******** /tmp/pw.fbk');
+  });
+});
+
+suite('parallel workers & multi-file backup (docs/roadmap/backup-restore-options.md, phase 4)', function () {
+
+  test('one worker (or none) emits no flag — 1 is gbak\'s own default', function () {
+    assert.deepStrictEqual(buildParallelFlag(undefined), []);
+    assert.deepStrictEqual(buildParallelFlag(1), []);
+    assert.deepStrictEqual(buildParallelFlag(0), []);
+  });
+
+  test('more than one worker emits -PAR <n>', function () {
+    assert.deepStrictEqual(buildParallelFlag(4), ['-PAR', '4']);
+  });
+
+  test('parseMaxParallelWorkers() reads the RDB$CONFIG row, and falls back to 1 for anything unusable', function () {
+    // The live shape: RDB$CONFIG_VALUE comes back as a string, aliased MAX_WORKERS.
+    assert.strictEqual(parseMaxParallelWorkers([{ MAX_WORKERS: '8' }]), 8);
+    assert.strictEqual(parseMaxParallelWorkers([{ MAX_WORKERS: 4 }]), 4);
+    assert.strictEqual(parseMaxParallelWorkers([{ MAX_WORKERS: '1' }]), 1);
+    assert.strictEqual(parseMaxParallelWorkers([{ MAX_WORKERS: 'nonsense' }]), 1);
+    assert.strictEqual(parseMaxParallelWorkers([{}]), 1);
+    assert.strictEqual(parseMaxParallelWorkers([]), 1);
+    assert.strictEqual(parseMaxParallelWorkers(undefined), 1);
+  });
+
+  test('a single volume is exactly the pre-phase-4 single-file argument', function () {
+    assert.deepStrictEqual(buildMultiFileTargets('/tmp/backup.fbk', 1, '500m'), ['/tmp/backup.fbk']);
+    assert.deepStrictEqual(buildMultiFileTargets('/tmp/backup.fbk', 0, '500m'), ['/tmp/backup.fbk']);
+  });
+
+  test('multiple volumes interleave file and size, with no size on the last one', function () {
+    // gbak's own form: `file1 <size> file2 <size> … fileN` — the last volume takes what's left.
+    assert.deepStrictEqual(buildMultiFileTargets('/tmp/backup.fbk', 3, '500m'), [
+      '/tmp/backup.fbk', '500m',
+      '/tmp/backup.2.fbk', '500m',
+      '/tmp/backup.3.fbk',
+    ]);
+  });
+
+  test('volume names keep the original extension so each part stays recognizable', function () {
+    const targets = buildMultiFileTargets('/tmp/my.backup.fbk', 2, '1g');
+    assert.deepStrictEqual(targets, ['/tmp/my.backup.fbk', '1g', '/tmp/my.backup.2.fbk']);
+  });
+
+  test('a path with no extension still produces distinct volume names', function () {
+    assert.deepStrictEqual(buildMultiFileTargets('/tmp/backup', 2, '1g'), ['/tmp/backup', '1g', '/tmp/backup.2']);
+  });
+
+  test('isValidVolumeSize() accepts gbak\'s own size forms and rejects the rest', function () {
+    for (const good of ['500m', '2g', '1024k', '4096', '500M', '2G']) {
+      assert.strictEqual(isValidVolumeSize(good), true, good);
+    }
+    for (const bad of ['', 'lots', '500mb', '-5m', '1.5g', '500 m']) {
+      assert.strictEqual(isValidVolumeSize(bad), false, bad);
+    }
+  });
+
+  test('a restore lists every volume, in order, ahead of the target', function () {
+    const args = buildRestoreArgs({
+      mode: 'create', choices: {}, user: 'sysdba', password: 'pw',
+      backupPaths: ['/tmp/b.fbk', '/tmp/b.2.fbk', '/tmp/b.3.fbk'],
+      target: 'localhost/3050:/tmp/t.fdb',
+    });
+    assert.deepStrictEqual(args, [
+      '-C', '-user', 'sysdba', '-password', 'pw',
+      '/tmp/b.fbk', '/tmp/b.2.fbk', '/tmp/b.3.fbk',
+      'localhost/3050:/tmp/t.fdb',
+    ]);
+  });
+
+  test('a restore can combine parallel workers with restore flags', function () {
+    const args = buildRestoreArgs({
+      mode: 'replace', choices: { noValidity: true }, user: 'sysdba', password: 'pw',
+      backupPaths: ['/tmp/b.fbk'], target: 'localhost/3050:/tmp/t.fdb', parallelWorkers: 4,
+    });
+    assert.deepStrictEqual(args, [
+      '-REP', '-N', '-PAR', '4', '-user', 'sysdba', '-password', 'pw',
+      '/tmp/b.fbk', 'localhost/3050:/tmp/t.fdb',
+    ]);
   });
 });

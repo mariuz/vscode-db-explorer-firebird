@@ -806,3 +806,18 @@ export function rollbackTransactionQuery(transactionId: number): string {
   }
   return `DELETE FROM MON$TRANSACTIONS WHERE MON$TRANSACTION_ID = ${transactionId};`;
 }
+
+/**
+ * The server's hard cap on `gbak -PAR <n>` (docs/roadmap/backup-restore-options.md, phase 4).
+ *
+ * `RDB$CONFIG` is a virtual table (Firebird 4+) exposing the server's effective configuration.
+ * `MaxParallelWorkers` is the ceiling; asking gbak for more produces a real warning — confirmed
+ * live against Firebird 6.0: `gbak -PAR 4` against a server with the default `MaxParallelWorkers`
+ * of 1 prints "WARNING:Wrong parallel workers value 4, valid range are from 1 to 1" and silently
+ * proceeds single-threaded. Querying this first means only usable values are ever offered.
+ */
+export function getMaxParallelWorkersQuery(): string {
+  return `SELECT RDB$CONFIG_VALUE AS MAX_WORKERS
+          FROM RDB$CONFIG
+          WHERE RDB$CONFIG_NAME = 'MaxParallelWorkers'`;
+}

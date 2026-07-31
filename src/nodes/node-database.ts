@@ -7,14 +7,14 @@ import {Driver} from "../shared/driver";
 import {Global} from "../shared/global";
 import {CredentialStore} from "../shared/credential-store";
 import {FirebirdTreeDataProvider} from "../firebirdTreeDataProvider";
-import {databaseInfoQry, getTablesQuery, getViewsQuery, getStoredProceduresQuery, getTriggersQuery, getGeneratorsQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getSystemTablesQuery, getUsersQuery} from "../shared/queries";
+import {getMaxParallelWorkersQuery, databaseInfoQry, getTablesQuery, getViewsQuery, getStoredProceduresQuery, getTriggersQuery, getGeneratorsQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getSystemTablesQuery, getUsersQuery} from "../shared/queries";
 import {logger} from "../logger/logger";
 import {getDatabaseFileName} from "../shared/utils";
 import {getObjectFilter, matchesObjectFilter} from "../shared/object-explorer-filter";
 import {buildConnectionString} from "../shared/connection-string";
 import {connectionWizard} from "../shared/connection-wizard";
 import {TaskTracker} from "../task-panel/task-tracker";
-import {buildBackupFlags, BackupFlagChoices, buildRestoreArgs, renderGbakCommand, RestoreFlagChoices, RestoreMode, RESTORE_PAGE_SIZES} from "../shared/gbak-options";
+import {buildBackupFlags, BackupFlagChoices, buildRestoreArgs, renderGbakCommand, RestoreFlagChoices, RestoreMode, RESTORE_PAGE_SIZES, buildParallelFlag, parseMaxParallelWorkers, buildMultiFileTargets, isValidVolumeSize} from "../shared/gbak-options";
 import {isConnectionUnreachable} from "../shared/connection-health";
 import {SchemaDesigner} from "../schema-designer";
 import {ProfilerView} from "../profiler";
@@ -35,6 +35,12 @@ const BACKUP_OPTION_ITEMS: (QuickPickItem & { key: keyof BackupFlagChoices })[] 
   { label: "Non-transportable format", description: "Faster/smaller, but only restorable on the same platform/architecture", key: "nonTransportable" },
 ];
 
+/** backupDatabase()'s phase-4 extras, kept separate because neither is a plain on/off flag. */
+const BACKUP_EXTRA_ITEMS: (QuickPickItem & { key: "split" | "parallel" })[] = [
+  { label: "Split into multiple files…", description: "For a backup too large for one file (or one volume)", key: "split" },
+  { label: "Use parallel workers…", description: "Faster on a server configured for it", key: "parallel" },
+];
+
 /**
  * restoreDatabase()'s options QuickPick (docs/roadmap/backup-restore-options.md, phase 2).
  * "Replace an existing database" is presented as a checkbox here even though it isn't a modifier
@@ -42,13 +48,14 @@ const BACKUP_OPTION_ITEMS: (QuickPickItem & { key: keyof BackupFlagChoices })[] 
  * "create or replace?" would be a third prompt before every restore for a question most people
  * answer the same way every time.
  */
-const RESTORE_OPTION_ITEMS: (QuickPickItem & { key: keyof RestoreFlagChoices | "replace" | "pageSize" })[] = [
+const RESTORE_OPTION_ITEMS: (QuickPickItem & { key: keyof RestoreFlagChoices | "replace" | "pageSize" | "parallel" })[] = [
   { label: "Replace an existing database", description: "Otherwise the restore fails if the target file already exists", key: "replace" },
   { label: "Metadata only", description: "Schema only, no table data", key: "metadataOnly" },
   { label: "One table at a time", description: "Slower, but can get past a single unreadable table", key: "oneAtATime" },
   { label: "Skip validity conditions", description: "Don't restore NOT NULL/CHECK constraints", key: "noValidity" },
   { label: "Don't recreate shadows", description: "Restore without the database's shadow files", key: "noShadows" },
   { label: "Override page size…", description: "Pick a page size instead of the one recorded in the backup", key: "pageSize" },
+  { label: "Use parallel workers…", description: "Faster on a server configured for it", key: "parallel" },
 ];
 
 export class NodeDatabase implements FirebirdTree {
@@ -585,13 +592,72 @@ export class NodeDatabase implements FirebirdTree {
     profilerView.open(resolved);
   }
 
+  /**
+   * The server's `MaxParallelWorkers` (docs/roadmap/backup-restore-options.md, phase 4). Any failure
+   * — an older server with no `RDB$CONFIG`, an unreachable connection — resolves to 1, i.e. "no
+   * parallelism offered", so a diagnostic query can never block a backup.
+   */
+  private async maxParallelWorkers(): Promise<number> {
+    try {
+      const resolved = await this.resolvedDetails();
+      const rows = await Driver.runQuery(getMaxParallelWorkersQuery(), resolved);
+      return parseMaxParallelWorkers(rows);
+    } catch (err: any) {
+      logger.debug(`Could not read MaxParallelWorkers, assuming 1: ${err?.message ?? err}`);
+      return 1;
+    }
+  }
+
   // backup database using gbak
   public async backupDatabase(taskTracker?: TaskTracker, gbakExecutable: string = "gbak"): Promise<void> {
-    const pickedOptions = await window.showQuickPick(BACKUP_OPTION_ITEMS, {
+    // Phase 4's two extras join the phase-1 flag list in one picker, so a backup still asks a single
+    // options question; each only prompts further when actually chosen.
+    const pickedOptions = await window.showQuickPick([...BACKUP_OPTION_ITEMS, ...BACKUP_EXTRA_ITEMS], {
       canPickMany: true,
       placeHolder: "Backup options (leave everything unchecked for Firebird's own defaults)",
     });
     if (pickedOptions === undefined) { return; } // Escape/dismissed -- cancel the whole backup, matching the file picker below.
+
+    const pickedBackupKeys = new Set(pickedOptions.map(item => item.key));
+
+    // Only offered when the server can actually honor it: asking gbak for more workers than
+    // MaxParallelWorkers prints "Wrong parallel workers value N, valid range are from 1 to 1" and
+    // silently runs single-threaded (confirmed live), so an unusable picker would be worse than none.
+    let parallelWorkers: number | undefined;
+    if (pickedBackupKeys.has("parallel")) {
+      const maxWorkers = await this.maxParallelWorkers();
+      if (maxWorkers <= 1) {
+        logger.showInfo("This server is configured with MaxParallelWorkers = 1, so a parallel backup isn't available.");
+      } else {
+        const pickedWorkers = await window.showQuickPick(
+          Array.from({ length: maxWorkers - 1 }, (_unused, i) => String(i + 2)),
+          { placeHolder: `Parallel workers (this server allows up to ${maxWorkers})` }
+        );
+        if (!pickedWorkers) { return; }
+        parallelWorkers = Number(pickedWorkers);
+      }
+    }
+
+    let volumeCount = 1;
+    let volumeSize = "";
+    if (pickedBackupKeys.has("split")) {
+      const countInput = await window.showInputBox({
+        title: "Split backup into multiple files",
+        prompt: "How many files? (gbak needs every volume named up front)",
+        value: "2",
+        validateInput: value => (/^\d+$/.test(value.trim()) && Number(value) >= 2 ? undefined : "Enter a whole number of 2 or more."),
+      });
+      if (!countInput) { return; }
+      const sizeInput = await window.showInputBox({
+        title: "Split backup into multiple files",
+        prompt: "Size of each file except the last (e.g. 500m, 2g, or a bare page count)",
+        value: "500m",
+        validateInput: value => (isValidVolumeSize(value) ? undefined : "Use a number optionally followed by k, m, or g."),
+      });
+      if (!sizeInput) { return; }
+      volumeCount = Number(countInput.trim());
+      volumeSize = sizeInput.trim();
+    }
 
     const saveUri = await window.showSaveDialog({
       title: "Backup Firebird Database",
@@ -604,8 +670,19 @@ export class NodeDatabase implements FirebirdTree {
     const { host, port, database, user, password } = this.dbDetails;
     const hostPort = `${host}/${port ?? 3050}:${database}`;
     const choices: BackupFlagChoices = {};
-    for (const item of pickedOptions) { choices[item.key] = true; }
-    const args = ["-b", ...buildBackupFlags(choices), "-user", user, "-password", password ?? "", hostPort, backupPath];
+    for (const item of pickedOptions) {
+      if (item.key !== "split" && item.key !== "parallel") { choices[item.key] = true; }
+    }
+    // The volume list goes last: gbak reads `… <source> file1 <size> file2 …`, and a single volume
+    // collapses back to exactly the one-file argument this command produced before phase 4.
+    const args = [
+      "-b",
+      ...buildBackupFlags(choices),
+      ...buildParallelFlag(parallelWorkers),
+      "-user", user, "-password", password ?? "",
+      hostPort,
+      ...buildMultiFileTargets(backupPath, volumeCount, volumeSize),
+    ];
 
     logger.info(`Starting backup to ${backupPath}`);
     logger.output(`[gbak] ${renderGbakCommand(gbakExecutable, args)}`);
@@ -658,14 +735,21 @@ export class NodeDatabase implements FirebirdTree {
 
   // restore database using gbak
   public async restoreDatabase(taskTracker?: TaskTracker, gbakExecutable: string = "gbak"): Promise<void> {
+    // canSelectMany, because phase 4 can *produce* a multi-file backup and gbak needs every volume
+    // listed in order to restore one. Selection order isn't guaranteed by the dialog, so volumes are
+    // sorted naturally (backup.fbk, backup.2.fbk, … backup.10.fbk) rather than lexically, which
+    // would put .10 before .2.
     const openUris = await window.showOpenDialog({
-      title: "Select Firebird Backup File",
+      title: "Select Firebird Backup File(s)",
       filters: { "Firebird Backup": ["fbk"], "All files": ["*"] },
-      canSelectMany: false
+      canSelectMany: true
     });
     if (!openUris || openUris.length === 0) { return; }
 
-    const backupPath = openUris[0].fsPath;
+    const backupPaths = openUris
+      .map(uri => uri.fsPath)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const backupPath = backupPaths[0];
 
     const restoreUri = await window.showSaveDialog({
       title: "Restore To Database File",
@@ -707,7 +791,23 @@ export class NodeDatabase implements FirebirdTree {
     const { host, port, user, password } = this.dbDetails;
     const hostPort = `${host}/${port ?? 3050}:${restorePath}`;
     const mode: RestoreMode = pickedKeys.has("replace") ? "replace" : "create";
-    const args = buildRestoreArgs({ mode, choices, user, password: password ?? "", backupPath, target: hostPort });
+
+    let restoreWorkers: number | undefined;
+    if (pickedKeys.has("parallel")) {
+      const maxWorkers = await this.maxParallelWorkers();
+      if (maxWorkers <= 1) {
+        logger.showInfo("This server is configured with MaxParallelWorkers = 1, so a parallel restore isn't available.");
+      } else {
+        const pickedWorkers = await window.showQuickPick(
+          Array.from({ length: maxWorkers - 1 }, (_unused, i) => String(i + 2)),
+          { placeHolder: `Parallel workers (this server allows up to ${maxWorkers})` }
+        );
+        if (!pickedWorkers) { return; }
+        restoreWorkers = Number(pickedWorkers);
+      }
+    }
+
+    const args = buildRestoreArgs({ mode, choices, user, password: password ?? "", backupPaths, target: hostPort, parallelWorkers: restoreWorkers });
 
     // Command preview before a destructive operation — the same assembled args that will actually
     // run, with the password redacted (renderGbakCommand()). Modal on purpose: replacing a live

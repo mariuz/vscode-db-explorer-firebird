@@ -73,10 +73,17 @@ export interface RestoreArgsParams {
   choices: RestoreFlagChoices;
   user: string;
   password: string;
-  /** The .fbk file being restored from. */
-  backupPath: string;
+  /**
+   * The backup volume(s) being restored from, in order. A multi-file backup **must** list every
+   * volume: confirmed live that handing gbak only the first file of a two-file backup makes it
+   * consume the target path as the next backup volume and fail with "cannot open backup file
+   * <target>" — a confusing error that looks like a permissions problem rather than a missing file.
+   */
+  backupPaths: string[];
   /** The target, as gbak wants it — `host/port:/path/to.fdb`. */
   target: string;
+  /** `-PAR <n>` workers; 1/undefined emits nothing. */
+  parallelWorkers?: number;
 }
 
 /**
@@ -88,9 +95,10 @@ export function buildRestoreArgs(params: RestoreArgsParams): string[] {
   return [
     params.mode === "replace" ? "-REP" : "-C",
     ...buildRestoreFlags(params.choices),
+    ...buildParallelFlag(params.parallelWorkers),
     "-user", params.user,
     "-password", params.password,
-    params.backupPath,
+    ...params.backupPaths,
     params.target,
   ];
 }
@@ -108,6 +116,63 @@ export function renderGbakCommand(executable: string, args: string[]): string {
     return /\s/.test(value) ? `"${value}"` : value;
   });
   return [/\s/.test(executable) ? `"${executable}"` : executable, ...rendered].join(" ");
+}
+
+
+/**
+ * Parallel workers (docs/roadmap/backup-restore-options.md, phase 4) — `gbak -PAR <n>`, valid for
+ * both backup and restore. `1` (or unset) emits nothing, since one worker *is* gbak's default and
+ * an explicit `-PAR 1` would only add noise to the command preview.
+ */
+export function buildParallelFlag(workers: number | undefined): string[] {
+  return workers && workers > 1 ? ["-PAR", String(workers)] : [];
+}
+
+/**
+ * The server's `MaxParallelWorkers` ceiling, read from the `RDB$CONFIG` rows returned by
+ * `getMaxParallelWorkersQuery()`. Falls back to 1 — "no parallelism available" — for any shape this
+ * doesn't recognize, which is the safe direction: offering a value the server rejects produces a
+ * gbak warning and a silently single-threaded run.
+ */
+export function parseMaxParallelWorkers(rows: any[] | undefined): number {
+  const raw = rows?.[0]?.MAX_WORKERS ?? rows?.[0]?.["MAX_WORKERS"];
+  const parsed = typeof raw === "number" ? raw : parseInt(String(raw ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : 1;
+}
+
+/**
+ * Multi-file backup (docs/roadmap/backup-restore-options.md, phase 4) — gbak takes the volumes as
+ * `file1 <size> file2 <size> … fileN`, where every file *except the last* carries a size and the
+ * last one absorbs whatever is left. Confirmed live against a real gbak: backing up with
+ * `/tmp/mf1.fbk 40k /tmp/mf2.fbk` produced a 40960-byte first volume and a second holding the rest.
+ *
+ * Volume names are derived from the chosen path so the user picks one file, not N: `backup.fbk`
+ * becomes `backup.fbk`, `backup.2.fbk`, `backup.3.fbk`, … — predictable, and keeps the extension so
+ * the OS still recognizes each part.
+ *
+ * A `volumeCount` of 1 (or less) returns just the base path, i.e. exactly the single-file behavior.
+ */
+export function buildMultiFileTargets(basePath: string, volumeCount: number, volumeSize: string): string[] {
+  if (!Number.isFinite(volumeCount) || volumeCount <= 1) {
+    return [basePath];
+  }
+  const dot = basePath.lastIndexOf(".");
+  const stem = dot > 0 ? basePath.slice(0, dot) : basePath;
+  const extension = dot > 0 ? basePath.slice(dot) : "";
+
+  const args: string[] = [];
+  for (let volume = 1; volume <= volumeCount; volume++) {
+    args.push(volume === 1 ? basePath : `${stem}.${volume}${extension}`);
+    if (volume < volumeCount) {
+      args.push(volumeSize); // every volume but the last is sized
+    }
+  }
+  return args;
+}
+
+/** Accepts gbak's own volume-size forms: a bare page count, or a number suffixed k/m/g. */
+export function isValidVolumeSize(value: string): boolean {
+  return /^\d+[kmg]?$/i.test(value.trim());
 }
 
 /**
