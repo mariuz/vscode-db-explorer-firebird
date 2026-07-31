@@ -1,6 +1,7 @@
 import { Disposable, ExtensionContext, workspace } from "vscode";
 import { FirebirdNotebookSerializer } from "./serializer";
 import { createSqlNotebookController, forgetNotebookConnection, FIREBIRD_NOTEBOOK_TYPE } from "./controller";
+import { registerNotebookResultExport } from "./export";
 
 export { FIREBIRD_NOTEBOOK_TYPE } from "./controller";
 
@@ -12,6 +13,8 @@ export function registerSqlNotebook(context: ExtensionContext): Disposable[] {
   );
   const controller = createSqlNotebookController(context);
   const closeListener = workspace.onDidCloseNotebookDocument(forgetNotebookConnection);
+  // Backs the renderer's Export button (docs/roadmap/sql-notebooks.md, phase 4).
+  const exportMessaging = registerNotebookResultExport();
 
-  return [serializerDisposable, controller, closeListener];
+  return [serializerDisposable, controller, closeListener, exportMessaging];
 }

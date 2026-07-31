@@ -2,6 +2,12 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.98 - 2026-07-31
+
+### Added
+
+- **Export a SQL Notebook result to a file.** Notebook result grids gain an **Export…** button alongside Copy as CSV/JSON, which saves the result as a CSV or JSON file. It exports exactly what you're looking at — the current filter and sort — and if the result was capped when it was displayed (notebook grids show the first 1000 rows), the confirmation says so rather than quietly exporting a partial file. Completes phase 4 of `docs/roadmap/sql-notebooks.md`.
+
 ## 0.1.97 - 2026-07-31
 
 ### Added

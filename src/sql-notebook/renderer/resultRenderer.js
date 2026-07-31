@@ -21,15 +21,18 @@ const DEFAULT_PAGE_SIZE = 25;
 
 let stylesInjected = false;
 
-export const activate = () => ({
+export const activate = (context) => ({
   renderOutputItem(outputItem, element) {
     injectStylesOnce();
     const table = outputItem.json();
-    element.replaceChildren(renderTable(table));
+    // `context.postMessage` only exists when the renderer contribution declares requiresMessaging
+    // and the host side registered a messaging channel; the Export button is hidden without it
+    // rather than throwing (docs/roadmap/sql-notebooks.md, phase 4).
+    element.replaceChildren(renderTable(table, context && context.postMessage ? context : undefined));
   },
 });
 
-function renderTable(table) {
+function renderTable(table, messaging) {
   const root = document.createElement('div');
   root.className = 'fb-nb-result';
 
@@ -70,6 +73,22 @@ function renderTable(table) {
   const copyCsvBtn = button('Copy as CSV', () => copyToClipboard(toCsv(filteredSortedRows(), table.headers), status, 'CSV'));
   const copyJsonBtn = button('Copy as JSON', () => copyToClipboard(toJson(filteredSortedRows(), table.headers), status, 'JSON'));
 
+  // Export to a file goes through the extension host: a notebook renderer runs in a sandboxed
+  // iframe where triggering a download isn't reliable, and only the host can show a save dialog.
+  // Exports exactly what's on screen -- the current filter/sort, same as the copy buttons above.
+  const exportBtn = messaging
+    ? button('Export…', () => {
+        messaging.postMessage({
+          type: 'exportResult',
+          headers: table.headers,
+          rows: filteredSortedRows(),
+          truncated: !!table.truncated,
+          totalRowCount: table.totalRowCount,
+        });
+        status.textContent = 'Exporting…';
+      })
+    : undefined;
+
   const prevBtn = button('‹', () => { if (page > 0) { page--; render(); } });
   const nextBtn = button('›', () => { page++; render(); });
   const pageLabel = document.createElement('span');
@@ -77,7 +96,9 @@ function renderTable(table) {
 
   const toolbar = document.createElement('div');
   toolbar.className = 'fb-nb-toolbar';
-  toolbar.append(filterInput, pageSizeSelect, copyCsvBtn, copyJsonBtn, prevBtn, pageLabel, nextBtn, status);
+  toolbar.append(filterInput, pageSizeSelect, copyCsvBtn, copyJsonBtn);
+  if (exportBtn) { toolbar.append(exportBtn); }
+  toolbar.append(prevBtn, pageLabel, nextBtn, status);
 
   const tableEl = document.createElement('table');
   tableEl.className = 'fb-nb-table';

@@ -82,6 +82,47 @@ export function rowsToResultTable(rows: any[], maxRows = NOTEBOOK_RESULT_ROW_CAP
   return { headers, rows: body, truncated: rows.length > maxRows, totalRowCount: rows.length };
 }
 
+/**
+ * Result export (docs/roadmap/sql-notebooks.md, phase 4) — serializing a notebook result for
+ * writing to a file from the *extension host*.
+ *
+ * These deliberately mirror `resultRenderer.js`'s own `toCsv()`/`toJson()`, which serve its
+ * clipboard buttons. Two implementations rather than one shared module is a real constraint, not an
+ * oversight: `src/test/sql-notebook-renderer.test.ts` loads the renderer's raw `.js` source through
+ * Node's own `import()`, so that file cannot import a `.ts` module without breaking its unit tests,
+ * and the renderer bundle is browser-targeted ESM while this is Node CommonJS. The two are instead
+ * pinned together by a drift test that runs the same table through both and asserts identical
+ * output — see `sql-notebook-renderer.test.ts`.
+ *
+ * A `null` cell (a genuine SQL NULL, kept distinct from an empty string by `rowsToResultTable()`)
+ * serializes to an empty CSV field and to JSON `null`.
+ */
+export function csvCellValue(value: string | null): string {
+  if (value === null) {
+    return "";
+  }
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function resultTableToCsv(headers: string[], rows: (string | null)[][]): string {
+  const lines = [headers.map(csvCellValue).join(",")];
+  rows.forEach(row => lines.push(row.map(csvCellValue).join(",")));
+  return lines.join("\n");
+}
+
+export function resultTableToJson(headers: string[], rows: (string | null)[][]): string {
+  return JSON.stringify(
+    rows.map(row => {
+      const obj: Record<string, string | null> = {};
+      headers.forEach((header, index) => { obj[header] = row[index]; });
+      return obj;
+    }),
+    null,
+    2
+  );
+}
+
 function cellToDisplayValue(v: any): string | null {
   if (v === null || v === undefined) {
     return null;

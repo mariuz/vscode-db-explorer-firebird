@@ -17,6 +17,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { FirebirdNotebookSerializer } from '../../sql-notebook/serializer';
+import { registerNotebookResultExport, serializeExport, NOTEBOOK_RENDERER_ID } from '../../sql-notebook/export';
 import { FIREBIRD_NOTEBOOK_TYPE, resolveNotebookConnection, resultToOutputItems, RESULT_TABLE_MIME } from '../../sql-notebook/controller';
 import { Constants } from '../../config';
 import { getTestConnectionOptions } from './firebird-test-env';
@@ -162,5 +163,40 @@ suite('SQL Notebooks – connection-binding persistence (extension host)', funct
       assert.strictEqual(items[0].mime, 'text/plain');
       assert.strictEqual(await itemText(items[0]), 'Statement executed successfully.');
     });
+  });
+});
+
+suite('SQL Notebook result export – renderer messaging (extension host)', function () {
+  this.timeout(20000);
+
+  test('the messaging channel registers against the same renderer id package.json contributes', function () {
+    // A mismatch between the id in export.ts and the contributed notebookRenderer id is silent:
+    // the channel would simply never receive a message, and the Export button would do nothing.
+    const extension = vscode.extensions.getExtension('AdrianMariusPopa.vscode-firebird-studio');
+    assert.ok(extension, 'extension should be found by id');
+    const contributed = extension!.packageJSON.contributes.notebookRenderer as { id: string; requiresMessaging?: string }[];
+    const renderer = contributed.find(r => r.id === NOTEBOOK_RENDERER_ID);
+    assert.ok(renderer, `no contributed notebookRenderer with id ${NOTEBOOK_RENDERER_ID}`);
+    assert.strictEqual(renderer!.requiresMessaging, 'optional', 'messaging must be declared or postMessage never reaches the host');
+  });
+
+  test('registering the export channel twice does not throw (activation is idempotent for tests)', function () {
+    const first = registerNotebookResultExport();
+    const second = registerNotebookResultExport();
+    first.dispose();
+    second.dispose();
+  });
+
+  test('serializeExport() produces the file contents for both formats', function () {
+    const message = {
+      type: 'exportResult' as const,
+      headers: ['ID', 'NAME'],
+      rows: [['1', 'Widget, A'], ['2', null]] as (string | null)[][],
+    };
+    assert.strictEqual(serializeExport(message, 'csv'), 'ID,NAME\n1,"Widget, A"\n2,');
+    assert.deepStrictEqual(JSON.parse(serializeExport(message, 'json')), [
+      { ID: '1', NAME: 'Widget, A' },
+      { ID: '2', NAME: null },
+    ]);
   });
 });

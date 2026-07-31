@@ -17,6 +17,7 @@
  */
 
 import * as assert from 'assert';
+import { resultTableToCsv, resultTableToJson } from '../shared/notebook-render';
 import * as path from 'path';
 
 const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'sql-notebook', 'renderer', 'resultRenderer.js');
@@ -252,5 +253,42 @@ suite('sql-notebook renderer – renderOutputItem() (faithful fake DOM)', functi
     const tbody = tbodyOf(root);
     assert.strictEqual(tbody.children.length, 1);
     assert.strictEqual(tbody.children[0].children[0].textContent, '0 rows returned.');
+  });
+});
+
+suite('renderer/host serializer parity (docs/roadmap/sql-notebooks.md, phase 4)', function () {
+
+  test('the renderer\'s toCsv/toJson and the host\'s resultTableToCsv/resultTableToJson agree exactly', async function () {
+    // Two implementations exist by necessity, not choice: this test file loads the renderer's raw
+    // .js through Node's own import(), so that file cannot import a .ts module, and the renderer
+    // bundle is browser ESM while notebook-render.ts is Node CommonJS. This test is what keeps the
+    // two from drifting — if either side changes its quoting or NULL handling, it fails here.
+    const { __test__ } = await import(RENDERER_PATH);
+
+    const headers = ['ID', 'NAME', 'NOTE', 'EMPTY', 'NULLABLE'];
+    const rows: (string | null)[][] = [
+      ['1', 'Widget A', 'has, a comma', '', null],
+      ['2', 'Say "hi"', 'line\nbreak', '', 'x'],
+      ['3', 'plain', 'nothing special', '', null],
+    ];
+
+    assert.strictEqual(__test__.toCsv(rows, headers), resultTableToCsv(headers, rows));
+    assert.strictEqual(__test__.toJson(rows, headers), resultTableToJson(headers, rows));
+  });
+
+  test('both serializers keep a SQL NULL distinct from an empty string', async function () {
+    const { __test__ } = await import(RENDERER_PATH);
+
+    const headers = ['A', 'B'];
+    const rows: (string | null)[][] = [[null, '']];
+
+    // CSV can't distinguish them (both are an empty field) — but JSON can, and must.
+    assert.strictEqual(resultTableToCsv(headers, rows), 'A,B\n,');
+    assert.strictEqual(__test__.toCsv(rows, headers), resultTableToCsv(headers, rows));
+
+    const parsed = JSON.parse(resultTableToJson(headers, rows));
+    assert.strictEqual(parsed[0].A, null);
+    assert.strictEqual(parsed[0].B, '');
+    assert.strictEqual(__test__.toJson(rows, headers), resultTableToJson(headers, rows));
   });
 });
