@@ -45,6 +45,7 @@
     "src/shared/connection-health.ts",
     "src/shared/identifier-quoting.ts",
     "src/shared/quick-queries.ts",
+    "src/shared/executable-probe.ts",
     "src/shared/db-tools.ts",
     "src/sql-notebook/export.ts",
     "src/schema-designer/schema-graph.ts",

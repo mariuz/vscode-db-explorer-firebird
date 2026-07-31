@@ -2,6 +2,12 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.2.2 - 2026-07-31
+
+### Fixed
+
+- **Hardened the checks that detect `isql`, `gbak`, and `docker` on your machine.** These were four separately hand-written copies of the same logic, and the one bug already fixed in 0.1.96 (a working `isql` being reported as missing because the check hung waiting on standard input) could just as easily have been introduced into any of the others. They now share a single implementation that always closes standard input and, where it matters, confirms the tool identifies itself — so `isql` isn't confused with unixODBC's unrelated tool of the same name. No change in behavior when your tools are already detected correctly.
+
 ## 0.2.1 - 2026-07-31
 
 ### Fixed

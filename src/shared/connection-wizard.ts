@@ -1,4 +1,5 @@
 import { window, Disposable, ProgressLocation, QuickInput, QuickInputButtons, QuickPickItem } from "vscode";
+import { probeDocker } from "./executable-probe";
 import * as cp from "node:child_process";
 import { ConnectionOptions } from "../interfaces";
 import { logger } from "../logger/logger";
@@ -18,16 +19,7 @@ import {
 
 type ConnectionType = "network" | "embedded" | "docker";
 
-function checkDockerExecutable(candidate: string): Promise<boolean> {
-  return new Promise(resolve => {
-    try {
-      const child = cp.execFile(candidate, ["--version"], { timeout: 3000 }, err => resolve(!err));
-      child.on("error", () => resolve(false));
-    } catch {
-      resolve(false);
-    }
-  });
-}
+const checkDockerExecutable = (candidate: string): Promise<boolean> => probeDocker(candidate);
 
 function execDocker(dockerExe: string, args: string[]): Promise<string | undefined> {
   return new Promise(resolve => {

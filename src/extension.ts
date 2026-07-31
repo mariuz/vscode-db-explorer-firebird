@@ -23,6 +23,7 @@ import {extractChangelogEntry, summarizeChangelogEntry} from "./shared/changelog
 import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue, ParamType} from "./shared/parameterized-query";
 import {formatSQL} from "./shared/sql-formatter";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
+import {probeGbak, probeIsql} from "./shared/executable-probe";
 import {
   applySelectedText,
   findBookmarkForSlot,
@@ -1327,56 +1328,13 @@ export function activate(context: ExtensionContext) {
   /* isql/isql-fb terminal integration (similar to "psql in the terminal" in Microsoft's
      PostgreSQL extension for VS Code) */
 
-  /**
-   * Unlike isql's own `-z` (exits cleanly), gbak's `-z` always exits non-zero -- confirmed
-   * directly against a real gbak (Firebird 6.0): it still prints its version banner to stdout
-   * ("gbak:gbak version ...") first, then errors with "requires both input and output filenames"
-   * since `-z` alone isn't a full backup/restore command. Checking the exit code the way
-   * checkIsqlExecutable() does would incorrectly report a real, working gbak as "not found" --
-   * check for the version banner in stdout instead.
-   */
-  function checkGbakExecutable(candidate: string): Promise<boolean> {
-    return new Promise(resolve => {
-      try {
-        const child = cp.execFile(candidate, ["-z"], {timeout: 3000}, (_err, stdout) => {
-          resolve((stdout || "").toLowerCase().includes("gbak version"));
-        });
-        child.on("error", () => resolve(false));
-      } catch {
-        resolve(false);
-      }
-    });
-  }
+  // gbak's -z prints its banner and then exits non-zero, so the exit code can't be trusted;
+  // probeGbak() encodes that (see src/shared/executable-probe.ts).
+  const checkGbakExecutable = (candidate: string): Promise<boolean> => probeGbak(candidate);
 
-  /**
-   * True if `candidate` is a real Firebird isql.
-   *
-   * Two non-obvious details, both confirmed against a real Firebird 6 isql rather than assumed:
-   *
-   * - **`child.stdin.end()` is required, not tidiness.** `isql -z` prints its version banner and
-   *   then reads stdin ("Use CONNECT or CREATE DATABASE to specify a database"). Under `execFile`
-   *   stdin is an open pipe nobody ever closes, so isql waited forever, hit the timeout, and this
-   *   function reported a perfectly working isql as *not installed* — which made both isql commands
-   *   permanently unavailable ("Could not find the isql (or isql-fb) executable") on any machine
-   *   where isql really was installed. Closing stdin gives it the EOF it's waiting for.
-   * - **The version banner is checked, not just the exit code**, for the same reason `isql-fb` is
-   *   tried before `isql` in isqlCandidates(): on Linux, plain `isql` is very often unixODBC's
-   *   unrelated tool of the same name, and an exit-code-only check can't tell the two apart.
-   */
-  function checkIsqlExecutable(candidate: string): Promise<boolean> {
-    return new Promise(resolve => {
-      try {
-        const child = cp.execFile(candidate, ["-z"], {timeout: 3000}, (err, stdout, stderr) => {
-          const banner = `${stdout ?? ""}${stderr ?? ""}`.toLowerCase().includes("isql version");
-          resolve(!err && banner);
-        });
-        child.on("error", () => resolve(false));
-        child.stdin?.end();
-      } catch {
-        resolve(false);
-      }
-    });
-  }
+  // isql -z reads stdin after printing its banner, and plain `isql` is often unixODBC's;
+  // probeIsql() handles both (see src/shared/executable-probe.ts).
+  const checkIsqlExecutable = (candidate: string): Promise<boolean> => probeIsql(candidate);
 
   /**
    * Resolves a terminal's shell integration, waiting briefly for the shell to activate it

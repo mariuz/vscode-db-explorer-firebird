@@ -1,4 +1,5 @@
 import { window, ProgressLocation } from "vscode";
+import { probeDocker } from "../shared/executable-probe";
 import * as cp from "node:child_process";
 import * as Firebird from "node-firebird";
 import { getOptions } from "../config";
@@ -16,16 +17,7 @@ const RUN_TIMEOUT_MS = 120000; // docker run may need to pull the image on first
 const READY_TIMEOUT_MS = 30000;
 const READY_POLL_INTERVAL_MS = 1000;
 
-function checkDockerExecutable(candidate: string): Promise<boolean> {
-  return new Promise(resolve => {
-    try {
-      const child = cp.execFile(candidate, ["--version"], { timeout: 3000 }, err => resolve(!err));
-      child.on("error", () => resolve(false));
-    } catch {
-      resolve(false);
-    }
-  });
-}
+const checkDockerExecutable = (candidate: string): Promise<boolean> => probeDocker(candidate);
 
 function execDocker(dockerExe: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; error?: Error }> {
   return new Promise(resolve => {
