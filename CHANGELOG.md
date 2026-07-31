@@ -2,6 +2,12 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.94 - 2026-07-31
+
+### Added
+
+- **Quick Queries.** Save SQL you run constantly and bind it to your own keyboard shortcut. Nine `Firebird: Run Quick Query 1…9` commands ship with **no default keybindings** — assign whichever you want in VS Code's Keyboard Shortcuts editor, then fill the `firebird.quickQueries` setting (each entry takes `sql`, plus optional `name` and `action`, where `action: "open"` puts the SQL in an editor for review instead of running it immediately). A query can contain `${selectedText}`, replaced with the editor's current selection — so one binding covers every table: highlight a name, press the key, and `SELECT COUNT(*) FROM ${selectedText}` runs against it. Bookmarks can claim a slot too, via **Assign to Quick Query Slot** in the Bookmarks view. Implements `docs/roadmap/quick-queries.md`.
+
 ## 0.1.93 - 2026-07-31
 
 ### Fixed

@@ -1,4 +1,4 @@
-import {ExtensionContext, window, commands, workspace} from "vscode";
+import {ExtensionContext, window, commands, workspace, QuickPickItem} from "vscode";
 import {Constants, getOptions} from "./config";
 import {FirebirdTreeDataProvider} from "./firebirdTreeDataProvider";
 import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeUser, NodeIndex, NodeIndexFolder, NodeCategoryFolder} from "./nodes";
@@ -23,6 +23,13 @@ import {extractChangelogEntry, summarizeChangelogEntry} from "./shared/changelog
 import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue, ParamType} from "./shared/parameterized-query";
 import {formatSQL} from "./shared/sql-formatter";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
+import {
+  applySelectedText,
+  findBookmarkForSlot,
+  QUICK_QUERY_SLOT_COUNT,
+  QuickQuery,
+  resolveQuickQuery,
+} from "./shared/quick-queries";
 import {SqlLinter} from "./shared/sql-linter";
 import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
 import {fetchSchemaSnapshot, diffSchemas, renderDiffReport} from "./schema-diff/schema-diff";
@@ -632,6 +639,60 @@ export function activate(context: ExtensionContext) {
       runSqlBatch(sql);
     })
   );
+
+  /**
+   * Quick Queries (docs/roadmap/quick-queries.md) — `firebird.quickQuery.1` … `.9`, each running
+   * the SQL configured for that slot. Contributed with no default keybindings: users bind whichever
+   * slots they want in VS Code's own Keyboard Shortcuts editor, which is the whole point (a fixed
+   * numbered command set is the only way to offer "bind an arbitrary saved query to a key", since
+   * keybindings are static in package.json and extensions can't mint commands at runtime).
+   *
+   * A slot resolves from the `firebird.quickQueries` setting first, then from a bookmark that's
+   * been assigned to it — the setting wins, per the roadmap doc.
+   */
+  const runQuickQuery = async (slot: number) => {
+    const fromSetting = resolveQuickQuery(config.quickQueries, slot);
+    const fromBookmark = fromSetting ? undefined : findBookmarkForSlot(bookmarkProvider.getAll(), slot);
+    const quickQuery: QuickQuery | undefined = fromSetting
+      ?? (fromBookmark ? { name: fromBookmark.name, sql: fromBookmark.sql, action: "run" } : undefined);
+
+    if (!quickQuery) {
+      const selected = await logger.showError(
+        `No query is configured for Quick Query ${slot}.`,
+        ["Cancel", "Configure Quick Queries"]
+      );
+      if (selected === "Configure Quick Queries") {
+        commands.executeCommand("workbench.action.openSettings", "firebird.quickQueries");
+      }
+      return;
+    }
+
+    // The selection is read from whatever editor is active — deliberately not restricted to SQL
+    // documents, since ${selectedText} is just as useful over a table name highlighted in a log,
+    // a migration script, or a code file.
+    const editor = window.activeTextEditor;
+    const selectedText = editor && !editor.selection.isEmpty
+      ? editor.document.getText(editor.selection)
+      : undefined;
+
+    const substituted = applySelectedText(quickQuery.sql, selectedText);
+    if (!substituted.ok) {
+      logger.showError(`${quickQuery.name}: ${substituted.reason}`);
+      return;
+    }
+
+    if (quickQuery.action === "open") {
+      await Driver.createSQLTextDocument(substituted.sql);
+      return;
+    }
+    runSqlBatch(substituted.sql);
+  };
+
+  for (let slot = 1; slot <= QUICK_QUERY_SLOT_COUNT; slot++) {
+    context.subscriptions.push(
+      commands.registerCommand(`firebird.quickQuery.${slot}`, () => runQuickQuery(slot))
+    );
+  }
 
   /* COMMAND: run the current query with named :paramName placeholders, prompting for each
      value's type and value before rewriting them to positional ? placeholders and binding them
@@ -1515,6 +1576,43 @@ export function activate(context: ExtensionContext) {
       });
       if (!newName) { return; }
       await bookmarkProvider.rename(item.bookmark.id, newName.trim());
+    })
+  );
+
+  /* COMMAND: bind a bookmark to a Quick Query slot (docs/roadmap/quick-queries.md) */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.bookmarks.assignSlot", async (item: BookmarkItem) => {
+      if (!item?.bookmark) { return; }
+      const taken = new Map(
+        bookmarkProvider.getAll()
+          .filter(b => b.slot !== undefined && b.id !== item.bookmark.id)
+          .map(b => [b.slot as number, b.name])
+      );
+      const picks: (QuickPickItem & { slot?: number })[] = [
+        ...Array.from({ length: QUICK_QUERY_SLOT_COUNT }, (_unused, i) => {
+          const slot = i + 1;
+          const occupant = taken.get(slot);
+          return {
+            label: `Quick Query ${slot}`,
+            // Naming who currently holds a slot matters: picking it silently unbinds them.
+            description: occupant ? `currently: ${occupant} (will be unbound)` : undefined,
+            picked: item.bookmark.slot === slot,
+            slot,
+          };
+        }),
+        { label: "Clear slot assignment", slot: undefined },
+      ];
+      const choice = await window.showQuickPick(picks, {
+        title: `Assign '${item.bookmark.name}' to a Quick Query slot`,
+        placeHolder: "Bind the slot's key combo in VS Code's Keyboard Shortcuts editor",
+      });
+      if (!choice) { return; }
+      await bookmarkProvider.assignSlot(item.bookmark.id, choice.slot);
+      logger.showInfo(
+        choice.slot === undefined
+          ? `'${item.bookmark.name}' is no longer bound to a Quick Query slot.`
+          : `'${item.bookmark.name}' is now Quick Query ${choice.slot}. Bind a key to "Firebird: Run Quick Query ${choice.slot}" to use it.`
+      );
     })
   );
 

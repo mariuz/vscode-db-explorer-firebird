@@ -46,6 +46,7 @@
     "src/shared/gbak-options.ts",
     "src/shared/connection-health.ts",
     "src/shared/identifier-quoting.ts",
+    "src/shared/quick-queries.ts",
     "src/copilot/schema-context.ts",
     "src/copilot/json-extraction.ts",
     "src/language-server/completionProvider.ts",

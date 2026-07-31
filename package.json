@@ -1,7 +1,7 @@
 {
   "name": "vscode-firebird-studio",
   "displayName": "Firebird Studio for VS Code",
-  "version": "0.1.93",
+  "version": "0.1.94",
   "description": "Firebird Studio — explore, query, and manage Firebird databases directly inside VS Code.",
   "categories": [
     "Programming Languages",
@@ -176,6 +176,51 @@
       {
         "command": "firebird.runCurrentStatement",
         "title": "Run Statement Under Cursor",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.1",
+        "title": "Run Quick Query 1",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.2",
+        "title": "Run Quick Query 2",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.3",
+        "title": "Run Quick Query 3",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.4",
+        "title": "Run Quick Query 4",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.5",
+        "title": "Run Quick Query 5",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.6",
+        "title": "Run Quick Query 6",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.7",
+        "title": "Run Quick Query 7",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.8",
+        "title": "Run Quick Query 8",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.quickQuery.9",
+        "title": "Run Quick Query 9",
         "category": "Firebird"
       },
       {
@@ -506,6 +551,11 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.bookmarks.assignSlot",
+        "title": "Assign to Quick Query Slot",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.bookmarks.refresh",
         "title": "Refresh Bookmarks",
         "category": "Firebird",
@@ -763,6 +813,37 @@
           "type": "boolean",
           "default": true,
           "description": "Validate table names against the active database schema."
+        },
+        "firebird.quickQueries": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Saved SQL queries bound to the `firebird.quickQuery.1` … `firebird.quickQuery.9` commands **by position** — the first entry is Quick Query 1, the second is Quick Query 2, and so on. These ship with no default keybindings on purpose: assign your own in VS Code's Keyboard Shortcuts editor (search for \"Firebird: Run Quick Query\"). Mirrors vscode-mssql's Quick Queries.\n\nEach entry takes:\n- `sql` (required): the SQL to run. May contain `${selectedText}`, replaced with the editor's current selection — e.g. `SELECT COUNT(*) FROM ${selectedText}` over a highlighted table name. A query using the placeholder with nothing selected is refused rather than run.\n- `name` (optional): shown in messages; defaults to the query's first line.\n- `action` (optional): `run` (default) executes immediately, `open` puts the SQL in a new editor for review first.\n\nA bookmark can also claim a slot (**Assign to Quick Query Slot** in the Bookmarks view); an entry here wins over a bookmark for the same slot.",
+          "items": {
+            "type": "object",
+            "required": [
+              "sql"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name; defaults to the query's first line."
+              },
+              "sql": {
+                "type": "string",
+                "description": "SQL to run. May contain ${selectedText}."
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "run",
+                  "open"
+                ],
+                "default": "run",
+                "description": "'run' executes immediately; 'open' puts the SQL in a new editor instead."
+              }
+            },
+            "additionalProperties": false
+          }
         }
       }
     },
@@ -1199,9 +1280,14 @@
           "group": "firebird@1"
         },
         {
-          "command": "firebird.bookmarks.delete",
+          "command": "firebird.bookmarks.assignSlot",
           "when": "view == firebird-bookmarks && viewItem == bookmark",
           "group": "firebird@2"
+        },
+        {
+          "command": "firebird.bookmarks.delete",
+          "when": "view == firebird-bookmarks && viewItem == bookmark",
+          "group": "firebird@3"
         },
         {
           "command": "firebird.history.open",

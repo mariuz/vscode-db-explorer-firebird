@@ -9,6 +9,12 @@ export interface Bookmark {
   name: string;
   sql: string;
   createdAt: string;
+  /**
+   * Quick Query slot this bookmark is bound to (1-based), if any — see
+   * docs/roadmap/quick-queries.md. Undefined for the (normal) unbound case; a `firebird.quickQueries`
+   * setting entry for the same slot takes precedence over this.
+   */
+  slot?: number;
 }
 
 /** A tree item representing a single bookmark */
@@ -16,7 +22,8 @@ export class BookmarkItem extends vscode.TreeItem {
   constructor(public readonly bookmark: Bookmark) {
     super(bookmark.name, vscode.TreeItemCollapsibleState.None);
     this.tooltip = bookmark.sql.length > 200 ? bookmark.sql.slice(0, 200) + '…' : bookmark.sql;
-    this.description = new Date(bookmark.createdAt).toLocaleDateString();
+    const created = new Date(bookmark.createdAt).toLocaleDateString();
+    this.description = bookmark.slot ? `Quick Query ${bookmark.slot} · ${created}` : created;
     this.contextValue = 'bookmark';
     this.command = {
       command: 'firebird.bookmarks.open',
@@ -76,6 +83,28 @@ export class BookmarkProvider implements vscode.TreeDataProvider<vscode.TreeItem
   /** Delete a bookmark by id */
   async delete(id: string): Promise<void> {
     const bookmarks = this.getAll().filter(b => b.id !== id);
+    await this.context.globalState.update(BOOKMARKS_KEY, bookmarks);
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Bind a bookmark to a Quick Query slot, or clear its binding with `undefined`
+   * (docs/roadmap/quick-queries.md). Any *other* bookmark holding that slot is cleared first — a
+   * slot is one keybinding, so two bookmarks claiming it would make which one runs depend on
+   * insertion order.
+   */
+  async assignSlot(id: string, slot: number | undefined): Promise<void> {
+    const bookmarks = this.getAll().map(b => {
+      if (b.id === id) {
+        const { slot: _previous, ...rest } = b;
+        return slot === undefined ? rest : { ...rest, slot };
+      }
+      if (slot !== undefined && b.slot === slot) {
+        const { slot: _taken, ...rest } = b;
+        return rest;
+      }
+      return b;
+    });
     await this.context.globalState.update(BOOKMARKS_KEY, bookmarks);
     this._onDidChangeTreeData.fire(undefined);
   }

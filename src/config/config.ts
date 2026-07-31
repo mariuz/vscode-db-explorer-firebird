@@ -1,6 +1,7 @@
 import { workspace, WorkspaceConfiguration } from "vscode";
 import { Options } from "../interfaces";
 import { Level, logger } from "../logger/logger";
+import { parseQuickQueries, QuickQuerySlot } from "../shared/quick-queries";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const properties = require("../../package.json").contributes.configuration.properties;
@@ -29,7 +30,8 @@ export function getOptions() {
     transactionWaitMode: _transactionWaitMode(),
     mcpEnabled: _mcpEnabled(),
     resultsFontSize: _resultsFontSize(),
-    resultsFontFamily: _resultsFontFamily()
+    resultsFontFamily: _resultsFontFamily(),
+    quickQueries: _quickQueries()
   } as Options;
 }
 
@@ -271,6 +273,15 @@ function _resultsFontSize(): number {
 function _resultsFontFamily(): string {
   const conf: any = getConfig().get("resultsFontFamily");
   return typeof conf === "string" ? conf : "";
+}
+
+/**
+ * Quick Queries (docs/roadmap/quick-queries.md) — validation lives in `parseQuickQueries()` rather
+ * than here, since this setting's value is free-form user JSON with per-entry rules, not a single
+ * scalar to range-check like every other accessor in this file.
+ */
+function _quickQueries(): QuickQuerySlot[] {
+  return parseQuickQueries(getConfig().get("quickQueries"));
 }
 
 function _recordsPerPage(): string {

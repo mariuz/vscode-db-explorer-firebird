@@ -1,3 +1,5 @@
+import { QuickQuerySlot } from "../shared/quick-queries";
+
 export interface Options {
   mockarooApiKey: string | null;
   maxTablesCount: number;
@@ -41,4 +43,10 @@ export interface Options {
   resultsFontSize: number;
   /** Query results grid font family (CSS font-family value). `''` means "use the webview's own default". */
   resultsFontFamily: string;
+  /**
+   * Quick Queries — saved SQL dispatched by the `firebird.quickQuery.N` commands, by position.
+   * Already validated by `parseQuickQueries()`; a `null` entry is a slot whose configured value
+   * was unusable (kept so later slots don't shift — see `QuickQuerySlot`).
+   */
+  quickQueries: QuickQuerySlot[];
 }
