@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildBackupFlags, gbakCandidates, resolveGbakExecutable } from '../shared/gbak-options';
+import { buildBackupFlags, gbakCandidates, resolveGbakExecutable, buildRestoreFlags, buildRestoreArgs, renderGbakCommand } from '../shared/gbak-options';
 
 suite('gbak-options – buildBackupFlags() (docs/roadmap/backup-restore-options.md, phase 1)', function () {
   test('no choices at all produces no flags — matches gbak\'s own defaults exactly', function () {
@@ -77,5 +77,98 @@ suite('gbak-options – resolveGbakExecutable()', function () {
   test('an empty-string custom path is treated as "no custom path" (falls back to PATH search)', async function () {
     const result = await resolveGbakExecutable('', async candidate => candidate === 'gbak', 'linux');
     assert.strictEqual(result, 'gbak');
+  });
+});
+
+suite('buildRestoreFlags()/buildRestoreArgs() (docs/roadmap/backup-restore-options.md, phase 2)', function () {
+
+  test('no choices produce no modifier flags — identical to gbak\'s own defaults', function () {
+    assert.deepStrictEqual(buildRestoreFlags({}), []);
+  });
+
+  test('each choice maps to the switch gbak\'s own help documents', function () {
+    assert.deepStrictEqual(buildRestoreFlags({ metadataOnly: true }), ['-M']);
+    assert.deepStrictEqual(buildRestoreFlags({ oneAtATime: true }), ['-O']);
+    assert.deepStrictEqual(buildRestoreFlags({ noValidity: true }), ['-N']);
+    assert.deepStrictEqual(buildRestoreFlags({ noShadows: true }), ['-K']);
+  });
+
+  test('page size is a flag *and* a value, not a bare switch', function () {
+    assert.deepStrictEqual(buildRestoreFlags({ pageSize: 16384 }), ['-P', '16384']);
+    assert.deepStrictEqual(buildRestoreFlags({ pageSize: undefined }), []);
+    assert.deepStrictEqual(buildRestoreFlags({ pageSize: 0 }), [], '0 is not a page size — treat as unset');
+  });
+
+  test('multiple choices combine in a stable order', function () {
+    assert.deepStrictEqual(
+      buildRestoreFlags({ metadataOnly: true, oneAtATime: true, noValidity: true, noShadows: true, pageSize: 8192 }),
+      ['-M', '-O', '-N', '-K', '-P', '8192']
+    );
+  });
+
+  test('create mode uses -C, replace mode uses -REP — a top-level switch, never both', function () {
+    const base = { choices: {}, user: 'sysdba', password: 'masterkey', backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb' };
+    const created = buildRestoreArgs({ ...base, mode: 'create' });
+    const replaced = buildRestoreArgs({ ...base, mode: 'replace' });
+    assert.strictEqual(created[0], '-C');
+    assert.strictEqual(replaced[0], '-REP');
+    assert.ok(!created.includes('-REP'));
+    assert.ok(!replaced.includes('-C'));
+  });
+
+  test('the full argument list keeps gbak\'s expected order: mode, flags, credentials, source, target', function () {
+    const args = buildRestoreArgs({
+      mode: 'replace',
+      choices: { noValidity: true, pageSize: 4096 },
+      user: 'sysdba',
+      password: 'masterkey',
+      backupPath: '/tmp/b.fbk',
+      target: 'localhost/3050:/tmp/t.fdb',
+    });
+    assert.deepStrictEqual(args, [
+      '-REP', '-N', '-P', '4096',
+      '-user', 'sysdba', '-password', 'masterkey',
+      '/tmp/b.fbk', 'localhost/3050:/tmp/t.fdb',
+    ]);
+  });
+
+  test('an options-free restore produces exactly the argument list this command used before phase 2', function () {
+    // The pre-phase-2 behavior was ["-c", "-user", u, "-password", p, backup, target]; nothing but
+    // the switch's letter case changes when no option is picked.
+    const args = buildRestoreArgs({
+      mode: 'create', choices: {}, user: 'sysdba', password: 'pw',
+      backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb',
+    });
+    assert.deepStrictEqual(args, ['-C', '-user', 'sysdba', '-password', 'pw', '/tmp/b.fbk', 'localhost/3050:/tmp/t.fdb']);
+  });
+});
+
+suite('renderGbakCommand() (command preview)', function () {
+
+  test('the password is redacted — the preview exists to be shown to a human', function () {
+    const rendered = renderGbakCommand('gbak', ['-C', '-user', 'sysdba', '-password', 'hunter2', '/tmp/b.fbk', 'localhost/3050:/tmp/t.fdb']);
+    assert.ok(!rendered.includes('hunter2'), rendered);
+    assert.ok(rendered.includes('-password ********'), rendered);
+  });
+
+  test('every other argument is shown verbatim, so the preview matches what will run', function () {
+    const args = buildRestoreArgs({
+      mode: 'replace', choices: { metadataOnly: true }, user: 'sysdba', password: 'pw',
+      backupPath: '/tmp/b.fbk', target: 'localhost/3050:/tmp/t.fdb',
+    });
+    const rendered = renderGbakCommand('gbak', args);
+    assert.strictEqual(rendered, 'gbak -REP -M -user sysdba -password ******** /tmp/b.fbk localhost/3050:/tmp/t.fdb');
+  });
+
+  test('paths containing spaces are quoted so the preview is unambiguous', function () {
+    const rendered = renderGbakCommand('/opt/fb bin/gbak', ['-C', '/tmp/my backup.fbk']);
+    assert.strictEqual(rendered, '"/opt/fb bin/gbak" -C "/tmp/my backup.fbk"');
+  });
+
+  test('a value that merely looks like a password elsewhere is not redacted', function () {
+    // Only the token immediately after -password is a password; a database named "-password" is
+    // not a realistic case, but a *value* equal to another argument is.
+    const rendered = renderGbakCommand('gbak', ['-user', 'pw', '-password', 'pw', '/tmp/pw.fbk']);
+    assert.strictEqual(rendered, 'gbak -user pw -password ******** /tmp/pw.fbk');
   });
 });

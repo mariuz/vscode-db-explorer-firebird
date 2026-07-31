@@ -1,4 +1,4 @@
-import {ExtensionContext, TreeItem, TreeItemCollapsibleState, window, Uri, ThemeIcon, ThemeColor, env, QuickPickItem} from "vscode";
+import {ExtensionContext, TreeItem, TreeItemCollapsibleState, window, Uri, ThemeIcon, ThemeColor, env, QuickPickItem, ProgressLocation} from "vscode";
 import {join} from "path";
 import {NodeTable, NodeCategoryFolder, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeSystemTable, NodeUser} from "./";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
@@ -14,7 +14,7 @@ import {getObjectFilter, matchesObjectFilter} from "../shared/object-explorer-fi
 import {buildConnectionString} from "../shared/connection-string";
 import {connectionWizard} from "../shared/connection-wizard";
 import {TaskTracker} from "../task-panel/task-tracker";
-import {buildBackupFlags, BackupFlagChoices} from "../shared/gbak-options";
+import {buildBackupFlags, BackupFlagChoices, buildRestoreArgs, renderGbakCommand, RestoreFlagChoices, RestoreMode, RESTORE_PAGE_SIZES} from "../shared/gbak-options";
 import {isConnectionUnreachable} from "../shared/connection-health";
 import {SchemaDesigner} from "../schema-designer";
 import {ProfilerView} from "../profiler";
@@ -33,6 +33,22 @@ const BACKUP_OPTION_ITEMS: (QuickPickItem & { key: keyof BackupFlagChoices })[] 
   { label: "Compress backup file", description: ".zip format", key: "compress" },
   { label: "Metadata only", description: "Schema only, no table data", key: "metadataOnly" },
   { label: "Non-transportable format", description: "Faster/smaller, but only restorable on the same platform/architecture", key: "nonTransportable" },
+];
+
+/**
+ * restoreDatabase()'s options QuickPick (docs/roadmap/backup-restore-options.md, phase 2).
+ * "Replace an existing database" is presented as a checkbox here even though it isn't a modifier
+ * flag — it switches gbak's top-level `-C`/`-REP` switch — because a separate dialog just to ask
+ * "create or replace?" would be a third prompt before every restore for a question most people
+ * answer the same way every time.
+ */
+const RESTORE_OPTION_ITEMS: (QuickPickItem & { key: keyof RestoreFlagChoices | "replace" | "pageSize" })[] = [
+  { label: "Replace an existing database", description: "Otherwise the restore fails if the target file already exists", key: "replace" },
+  { label: "Metadata only", description: "Schema only, no table data", key: "metadataOnly" },
+  { label: "One table at a time", description: "Slower, but can get past a single unreadable table", key: "oneAtATime" },
+  { label: "Skip validity conditions", description: "Don't restore NOT NULL/CHECK constraints", key: "noValidity" },
+  { label: "Don't recreate shadows", description: "Restore without the database's shadow files", key: "noShadows" },
+  { label: "Override page size…", description: "Pick a page size instead of the one recorded in the backup", key: "pageSize" },
 ];
 
 export class NodeDatabase implements FirebirdTree {
@@ -592,34 +608,52 @@ export class NodeDatabase implements FirebirdTree {
     const args = ["-b", ...buildBackupFlags(choices), "-user", user, "-password", password ?? "", hostPort, backupPath];
 
     logger.info(`Starting backup to ${backupPath}`);
-    const statusItem = window.createStatusBarItem();
-    statusItem.text = "$(loading~spin) Backing up database...";
-    statusItem.show();
+    logger.output(`[gbak] ${renderGbakCommand(gbakExecutable, args)}`);
     // Background Tasks entry (docs/roadmap/connection-management-enhancements.md, phase 4) --
-    // alongside, not instead of, the status bar spinner above: a durable record for anyone who
-    // isn't watching the status bar when a backup finishes.
+    // alongside, not instead of, the progress notification below: a durable record for anyone who
+    // isn't watching when a backup finishes.
     const task = taskTracker?.start(`Backup: ${getDatabaseFileName(database)} → ${backupPath}`);
 
     const child = cp.execFile(gbakExecutable, args);
     child.stderr?.on("data", d => logger.output(`[gbak] ${d}`));
-    child.on("error", err => {
-      statusItem.dispose();
-      logger.error(`Backup error: ${err.message}`);
-      logger.showError(`Backup failed: ${err.message}`);
-      task?.fail(err.message);
-    });
-    child.on("close", code => {
-      statusItem.dispose();
-      if (code === 0) {
-        logger.info(`Backup completed: ${backupPath}`);
-        window.showInformationMessage(`Database backed up successfully to ${backupPath}`);
-        task?.complete();
-      } else {
-        logger.error(`Backup failed with exit code ${code}`);
-        logger.showError(`Backup failed (exit code ${code}). Check the log for details.`);
-        task?.fail(`gbak exited with code ${code}`);
-      }
-    });
+
+    // Cancel support (docs/roadmap/backup-restore-options.md, phase 3) -- a cancellable progress
+    // notification in place of the old status bar spinner, so a long backup can actually be
+    // stopped rather than only having its indicator hidden.
+    await window.withProgress(
+      { location: ProgressLocation.Notification, title: `Backing up ${getDatabaseFileName(database)}…`, cancellable: true },
+      (_progress, token) => new Promise<void>(resolve => {
+        let cancelled = false;
+        token.onCancellationRequested(() => {
+          cancelled = true;
+          child.kill();
+        });
+
+        child.on("error", err => {
+          logger.error(`Backup error: ${err.message}`);
+          logger.showError(`Backup failed: ${err.message}`);
+          task?.fail(err.message);
+          resolve();
+        });
+
+        child.on("close", code => {
+          if (cancelled) {
+            logger.info("Backup cancelled.");
+            logger.showInfo("Backup cancelled. The backup file may be incomplete.");
+            task?.fail("Cancelled");
+          } else if (code === 0) {
+            logger.info(`Backup completed: ${backupPath}`);
+            window.showInformationMessage(`Database backed up successfully to ${backupPath}`);
+            task?.complete();
+          } else {
+            logger.error(`Backup failed with exit code ${code}`);
+            logger.showError(`Backup failed (exit code ${code}). Check the log for details.`);
+            task?.fail(`gbak exited with code ${code}`);
+          }
+          resolve();
+        });
+      })
+    );
   }
 
   // restore database using gbak
@@ -641,35 +675,95 @@ export class NodeDatabase implements FirebirdTree {
     if (!restoreUri) { return; }
 
     const restorePath = restoreUri.fsPath;
+
+    // Restore options (docs/roadmap/backup-restore-options.md, phase 2). Asked after the file
+    // pickers so the two questions everyone must answer come first; dismissing cancels the whole
+    // restore, matching the pickers' own behavior and backupDatabase()'s options step.
+    const pickedOptions = await window.showQuickPick(RESTORE_OPTION_ITEMS, {
+      canPickMany: true,
+      placeHolder: "Restore options (leave everything unchecked for Firebird's own defaults)",
+    });
+    if (pickedOptions === undefined) { return; }
+
+    const pickedKeys = new Set(pickedOptions.map(item => item.key));
+    const choices: RestoreFlagChoices = {
+      metadataOnly: pickedKeys.has("metadataOnly"),
+      oneAtATime: pickedKeys.has("oneAtATime"),
+      noValidity: pickedKeys.has("noValidity"),
+      noShadows: pickedKeys.has("noShadows"),
+    };
+
+    // Only asked when its checkbox was ticked — a page-size prompt on every restore would be a
+    // dialog almost nobody needs.
+    if (pickedKeys.has("pageSize")) {
+      const pickedSize = await window.showQuickPick(
+        RESTORE_PAGE_SIZES.map(size => ({ label: String(size), description: size === 8192 ? "Firebird's default" : undefined })),
+        { placeHolder: "Page size for the restored database" }
+      );
+      if (!pickedSize) { return; }
+      choices.pageSize = Number(pickedSize.label);
+    }
+
     const { host, port, user, password } = this.dbDetails;
     const hostPort = `${host}/${port ?? 3050}:${restorePath}`;
-    const args = ["-c", "-user", user, "-password", password ?? "", backupPath, hostPort];
+    const mode: RestoreMode = pickedKeys.has("replace") ? "replace" : "create";
+    const args = buildRestoreArgs({ mode, choices, user, password: password ?? "", backupPath, target: hostPort });
+
+    // Command preview before a destructive operation — the same assembled args that will actually
+    // run, with the password redacted (renderGbakCommand()). Modal on purpose: replacing a live
+    // database shouldn't be a blind "trust the checkboxes I ticked" action.
+    const confirmed = await window.showWarningMessage(
+      mode === "replace"
+        ? `Replace the database at ${restorePath}? Its current contents will be lost.`
+        : `Restore to ${restorePath}?`,
+      { modal: true, detail: renderGbakCommand(gbakExecutable, args) },
+      "Restore"
+    );
+    if (confirmed !== "Restore") { return; }
 
     logger.info(`Starting restore from ${backupPath} to ${restorePath}`);
-    const statusItem = window.createStatusBarItem();
-    statusItem.text = "$(loading~spin) Restoring database...";
-    statusItem.show();
+    logger.output(`[gbak] ${renderGbakCommand(gbakExecutable, args)}`);
     const task = taskTracker?.start(`Restore: ${getDatabaseFileName(backupPath)} → ${restorePath}`);
 
     const child = cp.execFile(gbakExecutable, args);
     child.stderr?.on("data", d => logger.output(`[gbak] ${d}`));
-    child.on("error", err => {
-      statusItem.dispose();
-      logger.error(`Restore error: ${err.message}`);
-      logger.showError(`Restore failed: ${err.message}`);
-      task?.fail(err.message);
-    });
-    child.on("close", code => {
-      statusItem.dispose();
-      if (code === 0) {
-        logger.info(`Restore completed: ${restorePath}`);
-        window.showInformationMessage(`Database restored successfully to ${restorePath}`);
-        task?.complete();
-      } else {
-        logger.error(`Restore failed with exit code ${code}`);
-        logger.showError(`Restore failed (exit code ${code}). Check the log for details.`);
-        task?.fail(`gbak exited with code ${code}`);
-      }
-    });
+
+    // Cancel support (phase 3): a cancellable progress notification replaces the old status bar
+    // spinner — gbak is a real child process, so cancelling can actually kill it rather than just
+    // hiding the indicator. The promise resolves on the process's own close/error either way.
+    await window.withProgress(
+      { location: ProgressLocation.Notification, title: `Restoring ${getDatabaseFileName(restorePath)}…`, cancellable: true },
+      (_progress, token) => new Promise<void>(resolve => {
+        let cancelled = false;
+        token.onCancellationRequested(() => {
+          cancelled = true;
+          child.kill();
+        });
+
+        child.on("error", err => {
+          logger.error(`Restore error: ${err.message}`);
+          logger.showError(`Restore failed: ${err.message}`);
+          task?.fail(err.message);
+          resolve();
+        });
+
+        child.on("close", code => {
+          if (cancelled) {
+            logger.info("Restore cancelled.");
+            logger.showInfo("Restore cancelled. The target database may be incomplete.");
+            task?.fail("Cancelled");
+          } else if (code === 0) {
+            logger.info(`Restore completed: ${restorePath}`);
+            window.showInformationMessage(`Database restored successfully to ${restorePath}`);
+            task?.complete();
+          } else {
+            logger.error(`Restore failed with exit code ${code}`);
+            logger.showError(`Restore failed (exit code ${code}). Check the log for details.`);
+            task?.fail(`gbak exited with code ${code}`);
+          }
+          resolve();
+        });
+      })
+    );
   }
 }

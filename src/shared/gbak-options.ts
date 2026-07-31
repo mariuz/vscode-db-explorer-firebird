@@ -27,6 +27,90 @@ export function buildBackupFlags(choices: BackupFlagChoices): string[] {
 }
 
 /**
+ * Restore options (docs/roadmap/backup-restore-options.md, phase 2). Flag letters verified against
+ * a real `gbak`'s own help output (Firebird 6.0), not from memory — `-K(ILL)` is "restore without
+ * creating shadows", `-N(O_VALIDITY)` is "do not restore database validity conditions",
+ * `-O(NE_AT_A_TIME)` is "restore one table at a time", `-P(AGE_SIZE)` takes a value, and
+ * `-M(ETA_DATA)` is documented as "backup **or restore** metadata only", which is why the same flag
+ * appears in both this and BackupFlagChoices.
+ */
+export interface RestoreFlagChoices {
+  /** `-M` — restore the schema only, no table data. */
+  metadataOnly?: boolean;
+  /** `-O` — restore one table at a time; slower, but lets a restore past a single corrupt table. */
+  oneAtATime?: boolean;
+  /** `-N` — don't restore validity constraints (NOT NULL/CHECK), for data that would fail them. */
+  noValidity?: boolean;
+  /** `-K` — don't recreate the database's shadow files. */
+  noShadows?: boolean;
+  /** `-P <size>` — override the page size the backup recorded. */
+  pageSize?: number;
+}
+
+/**
+ * How the target database is created — a *top-level* switch, used instead of the other, not
+ * alongside it. `-C` fails outright if the target file already exists, which is today's behavior
+ * and the safe default; `-REP` replaces an existing database.
+ */
+export type RestoreMode = "create" | "replace";
+
+/** Page sizes gbak accepts for `-P`. */
+export const RESTORE_PAGE_SIZES = [4096, 8192, 16384, 32768] as const;
+
+/** The modifier flags for the given restore choices — [] when everything is unset, matching gbak's own defaults. */
+export function buildRestoreFlags(choices: RestoreFlagChoices): string[] {
+  const flags: string[] = [];
+  if (choices.metadataOnly) { flags.push("-M"); }
+  if (choices.oneAtATime) { flags.push("-O"); }
+  if (choices.noValidity) { flags.push("-N"); }
+  if (choices.noShadows) { flags.push("-K"); }
+  if (choices.pageSize) { flags.push("-P", String(choices.pageSize)); }
+  return flags;
+}
+
+export interface RestoreArgsParams {
+  mode: RestoreMode;
+  choices: RestoreFlagChoices;
+  user: string;
+  password: string;
+  /** The .fbk file being restored from. */
+  backupPath: string;
+  /** The target, as gbak wants it — `host/port:/path/to.fdb`. */
+  target: string;
+}
+
+/**
+ * The complete gbak argument list for a restore. Assembled here rather than inline at the call site
+ * specifically so the command *preview* shown to the user and the command actually executed are
+ * built by the same function — a preview that can drift from what runs is worse than no preview.
+ */
+export function buildRestoreArgs(params: RestoreArgsParams): string[] {
+  return [
+    params.mode === "replace" ? "-REP" : "-C",
+    ...buildRestoreFlags(params.choices),
+    "-user", params.user,
+    "-password", params.password,
+    params.backupPath,
+    params.target,
+  ];
+}
+
+/**
+ * Renders a gbak invocation for display — **not** for execution: arguments are quoted only enough
+ * to be readable, and the password is replaced with `********`. The whole point of the preview is
+ * to let someone confirm a destructive restore, so showing them their own password would be a poor
+ * trade for that.
+ */
+export function renderGbakCommand(executable: string, args: string[]): string {
+  const rendered = args.map((arg, index) => {
+    const previous = args[index - 1]?.toLowerCase();
+    const value = previous === "-password" || previous === "-pas" ? "********" : arg;
+    return /\s/.test(value) ? `"${value}"` : value;
+  });
+  return [/\s/.test(executable) ? `"${executable}"` : executable, ...rendered].join(" ");
+}
+
+/**
  * `gbak` has no established alternate name the way isql does (isql-fb vs. isql, to dodge
  * unixODBC's own isql) — one candidate name per platform.
  */

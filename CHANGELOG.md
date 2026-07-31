@@ -2,6 +2,14 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## 0.1.97 - 2026-07-31
+
+### Added
+
+- **Restore Database now offers gbak's restore options.** A picker before the restore lets you replace an existing database (rather than the restore just failing because the target file exists), restore metadata only, restore one table at a time, skip validity conditions, skip shadow files, and override the page size. Leaving everything unchecked behaves exactly as before. Completes phase 2 of `docs/roadmap/backup-restore-options.md`.
+- **A command preview before restoring.** Because a restore can overwrite a live database, the exact `gbak` command that's about to run is shown for confirmation first — with the password redacted. The preview is built from the same argument list that gets executed, so it can't drift from what actually happens.
+- **Backup and Restore can now be cancelled.** Both show a cancellable progress notification; cancelling actually terminates the `gbak` process rather than just hiding the indicator, and the run is recorded as cancelled in the Background Tasks view. Completes phase 3 of the same roadmap item.
+
 ## 0.1.96 - 2026-07-31
 
 ### Fixed
