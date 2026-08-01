@@ -304,4 +304,35 @@ suite('schema-designer app.js – diff engine / DDL generation (via __test__ hoo
       assert.strictEqual(draft().tables.length, before);
     });
   });
+
+  suite('Firebird 6 schemas — generated DDL', function () {
+    test('DDL names a table exactly as the graph identifies it, schema and all', function () {
+      // The graph's `name` is schema-qualified on Firebird 6 precisely so that generated DDL does
+      // not depend on the session search path. This pins that: an ALTER against SALES.ORDERS must
+      // not come out as ALTER TABLE ORDERS, which would hit whichever ORDERS the path finds first.
+      hooks.handleSchemaData(schemaPayload({
+        graph: {
+          tables: [{ name: 'SALES.ORDERS', displayName: 'SALES.ORDERS', columns: [col({ name: 'ID', type: 'INTEGER' })] }],
+          relationships: [],
+        },
+      }));
+      const table = draft().tables.find((t: any) => t.name === 'SALES.ORDERS');
+      table.columns.push({ name: 'TOTAL', type: 'INTEGER', length: 4, notNull: false, isPrimaryKey: false });
+      const ddl = hooks.buildDDL();
+      assert.ok(ddl.includes('ALTER TABLE SALES.ORDERS ADD TOTAL'), ddl);
+    });
+
+    test('a default-schema table is still qualified in DDL, even though its label is not', function () {
+      // displayName drops the redundant PUBLIC. prefix for the diagram; `name` keeps it for SQL.
+      hooks.handleSchemaData(schemaPayload({
+        graph: {
+          tables: [{ name: 'PUBLIC.ORDERS', displayName: 'ORDERS', columns: [col({ name: 'ID', type: 'INTEGER' })] }],
+          relationships: [],
+        },
+      }));
+      const table = draft().tables.find((t: any) => t.name === 'PUBLIC.ORDERS');
+      table.columns.push({ name: 'NOTE', type: 'VARCHAR', length: 20, notNull: false, isPrimaryKey: false });
+      assert.ok(hooks.buildDDL().includes('ALTER TABLE PUBLIC.ORDERS ADD NOTE'), hooks.buildDDL());
+    });
+  });
 });

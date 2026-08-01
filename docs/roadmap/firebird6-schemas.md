@@ -185,6 +185,23 @@ Naming uses the split from phase 1h: routes and schema components take `displayN
 - **The Schema Designer shows `PUBLIC.` prefixes** on a single-schema Firebird 6 database; see phase 1g. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 
+## Phase 2 status — the write path, mostly already done
+
+Phase 2 as written ("qualified names on every write path") turns out to be largely satisfied by the read-path work, because qualification was pushed into the *names themselves* rather than bolted onto each SQL builder. Audited rather than assumed:
+
+| Write path | Status |
+| --- | --- |
+| `SELECT *` (Select All Records) | qualified — `NodeTable`/`NodeView.getTableName()` |
+| `DROP TABLE` / `DROP VIEW` / `DROP PROCEDURE` | qualified — same accessors |
+| Script as Create | qualified, including each foreign key's two ends independently (phase 1e) |
+| Row editing (`UPDATE`/`INSERT`/`DELETE`) | qualified — the results view receives the qualified name, and `assertValidIdentifier()` accepts two-part names (phase 1c) |
+| Schema Designer / Table Designer DDL | qualified — the webview builds DDL from the graph's `name`, which is the qualified identity. Now pinned by two tests asserting `ALTER TABLE SALES.ORDERS …` and `ALTER TABLE PUBLIC.ORDERS …` rather than the bare forms |
+| Drag identifier into editor | qualified — `getDragIdentifier()` returns the SQL name |
+| **schema-diff** | **not done** — still compares bare names, so a table moving between schemas reads as an unrelated drop-and-create |
+| **Database Projects** extract/publish | **not done** — see the note above about its per-object file layout |
+
+So what remains of phase 2 is exactly the two consumers already listed as outstanding, rather than a separate sweep. The remaining phases are 3 (search path), 4 (designer colour-coding), and 5 (schema lifecycle DDL).
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
