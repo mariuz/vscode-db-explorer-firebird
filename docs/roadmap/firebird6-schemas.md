@@ -198,7 +198,7 @@ Phase 2 as written ("qualified names on every write path") turns out to be large
 | Schema Designer / Table Designer DDL | qualified — the webview builds DDL from the graph's `name`, which is the qualified identity. Now pinned by two tests asserting `ALTER TABLE SALES.ORDERS …` and `ALTER TABLE PUBLIC.ORDERS …` rather than the bare forms |
 | Drag identifier into editor | qualified — `getDragIdentifier()` returns the SQL name |
 | **schema-diff** | done — snapshots are keyed by schema + name (see below) |
-| **Database Projects** extract/publish | **not done** — see the note above about its per-object file layout |
+| **Database Projects** extract/publish | done for the graph half (see below); view/procedure/trigger *sources* still come from name-only queries |
 
 So what remains of phase 2 is exactly the two consumers already listed as outstanding, rather than a separate sweep. The remaining phases are 3 (search path), 4 (designer colour-coding), and 5 (schema lifecycle DDL).
 
@@ -219,6 +219,23 @@ Tables, views, procedures and triggers are all qualified now, so `diffSchemas()`
 `fieldsQuery()` gained the same optional schema column. Its **name match deliberately stays name-only**: callers pass bare relation names and key the rows by schema + name themselves, which is simpler than threading qualified names through an `IN` list and produces the same result.
 
 One consequence worth stating: a table that genuinely *moves* between schemas will read as a drop plus an add rather than a move, because the name is the identity. That is defensible — the two are different objects to every statement that references them — but it is a behaviour, not an oversight.
+
+## Phase 2b — Database Projects (graph half done)
+
+This was deferred twice on the grounds that qualified names change file names on disk and the doc prefers per-schema folders. The layout question turned out to be avoidable: the phase 1h split answers it. **File names use the display name, DDL content uses the qualified one.** Verified live:
+
+```
+table files: tables/CAP_DEMO.sql, tables/SALES.CUST.sql, tables/CUST.sql,
+             tables/SALES.ORDERS.sql, tables/ORDERS.sql, ...
+  tables/ORDERS.sql      -> CREATE TABLE PUBLIC.ORDERS (
+  tables/SALES.CUST.sql  -> CREATE TABLE SALES.CUST (
+```
+
+A single-schema Firebird 6 database therefore keeps `tables/ORDERS.sql` rather than renaming every file in an existing project to `PUBLIC.ORDERS.sql`, while a second schema gets its own file instead of overwriting the first — which is what happened before, since both tables were one merged entry. The content is what has to be unambiguous, and it is.
+
+Per-schema folders (`schemas/SALES/tables/…`) remain the tidier long-term layout, but they are now a refinement rather than a prerequisite for correctness.
+
+**Still name-only**: views, procedures and triggers reach a project through `getAllViewSourcesQuery()` and friends, which have no schema variant. Their *sources* are extracted by name, so two same-named procedures in different schemas would still collide. That is the remaining piece of this phase.
 
 ## Suggested phases
 

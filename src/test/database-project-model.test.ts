@@ -400,3 +400,39 @@ suite('database-project-model – buildProjectFiles()', function () {
     assert.ok(files.some(f => f.path === 'users/JOHN_DOE.sql'));
   });
 });
+
+suite('buildProjectFiles() — Firebird 6 schema names', function () {
+  const table = (name: string, displayName?: string) => ({
+    name,
+    ...(displayName ? { displayName } : {}),
+    columns: [{ name: 'ID', type: 'INTEGER', length: 4, notNull: true, isPrimaryKey: true }],
+  });
+  const input = (tables: any[]) => ({
+    graph: { tables, relationships: [] },
+    views: [], procedures: [], triggers: [], generators: [], domains: [], roles: [], exceptions: [], users: [],
+    pkConstraintNames: {},
+  }) as any;
+
+  test('a default-schema table keeps its short file name, so existing projects do not churn', function () {
+    const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS')]));
+    const tableFile = files.find(f => f.path.startsWith('tables/'))!;
+    assert.strictEqual(tableFile.path, 'tables/ORDERS.sql');
+  });
+
+  test('but its DDL is qualified, because that is what has to be unambiguous', function () {
+    const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS')]));
+    const tableFile = files.find(f => f.path.startsWith('tables/'))!;
+    assert.ok(tableFile.content.includes('CREATE TABLE PUBLIC.ORDERS'), tableFile.content);
+  });
+
+  test('a second schema gets its own file rather than overwriting the first', function () {
+    const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS'), table('SALES.ORDERS')]));
+    const paths = files.filter(f => f.path.startsWith('tables/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['tables/ORDERS.sql', 'tables/SALES.ORDERS.sql']);
+  });
+
+  test('a pre-Firebird-6 graph is unaffected', function () {
+    const files = buildProjectFiles(input([table('ORDERS')]));
+    assert.strictEqual(files.find(f => f.path.startsWith('tables/'))!.path, 'tables/ORDERS.sql');
+  });
+});

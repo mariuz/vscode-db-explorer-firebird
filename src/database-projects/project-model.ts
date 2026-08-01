@@ -374,7 +374,13 @@ export function buildProjectFiles(input: ProjectInput): ProjectFile[] {
   });
 
   input.graph.tables.forEach(table => {
-    files.push({ path: `tables/${sanitizeFileName(table.name)}.sql`, content: buildTableCreateDDL(table) });
+    // File named after the *display* name, DDL written with the qualified one. On a single-schema
+    // Firebird 6 database that keeps `tables/ORDERS.sql` rather than renaming every file in an
+    // existing project to `PUBLIC.ORDERS.sql`, while a second schema still gets its own file
+    // (`SALES.ORDERS.sql`). The content is what has to be unambiguous, and `buildTableCreateDDL()`
+    // already writes `CREATE TABLE PUBLIC.ORDERS` from the qualified identity.
+    const fileName = sanitizeFileName(table.displayName ?? table.name);
+    files.push({ path: `tables/${fileName}.sql`, content: buildTableCreateDDL(table) });
   });
 
   if (input.graph.relationships.length > 0) {

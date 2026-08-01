@@ -8,6 +8,8 @@ import {
   getAllProcedureSourcesQuery, getAllProcedureParametersQuery, getAllTriggerSourcesQuery, getGeneratorsQuery,
   getAllPrimaryKeyConstraintNamesQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getUsersQuery,
 } from "../shared/queries";
+import { getEngineMajorVersion } from "../shared/engine-version";
+import { supportsSchemas } from "../shared/schema-support";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, normalizeDefault } from "../schema-designer/schema-graph";
 import { buildProjectFiles, MANIFEST_FILE_NAME, ProjectInput, ProcedureParameter } from "./project-model";
 import { diffProjects, buildPublishScript } from "./publish-model";
@@ -26,9 +28,19 @@ export const SNAPSHOT_FILE_NAME = "firebird.project-snapshot.json";
  * also read this data).
  */
 export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions): Promise<ProjectInput> {
+  // Firebird 6 keeps every object in a schema. Without asking for it, same-named tables from
+  // different schemas merge into one graph entry with the union of their columns, and Extract
+  // would write that fiction to disk as a table's definition. Gated on the server version.
+  const withSchemas = supportsSchemas(
+    await getEngineMajorVersion(connectionOptions.id, async probe => {
+      const [row] = await Driver.runBatch(probe, connectionOptions);
+      return (row?.rows ?? []) as any[];
+    })
+  );
+
   const sql = [
-    getSchemaColumnsQuery(),
-    getForeignKeysQuery(),
+    getSchemaColumnsQuery(withSchemas),
+    getForeignKeysQuery(withSchemas),
     getAllViewSourcesQuery(),
     getAllProcedureSourcesQuery(),
     getAllProcedureParametersQuery(),
