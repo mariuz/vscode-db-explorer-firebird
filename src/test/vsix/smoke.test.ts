@@ -119,6 +119,16 @@ suite("Packaged VSIX – smoke test", function () {
     }
   });
 
+  test("chat instruction files named by the manifest are packaged", function () {
+    // These ship as plain Markdown outside out/ and src/, so a broad ignore rule is exactly what
+    // would drop them — and their absence is silent: chat simply stops getting the dialect rules.
+    const instructions: { path: string }[] = extension.packageJSON.contributes?.chatInstructions ?? [];
+    assert.ok(instructions.length > 0, "Expected at least one chatInstructions contribution");
+    for (const entry of instructions) {
+      assertPackagedFileExists(entry.path, "a chat instructions file");
+    }
+  });
+
   test("snippet and grammar files named by the manifest are packaged", function () {
     const contributes = extension.packageJSON.contributes ?? {};
     for (const snippet of contributes.snippets ?? []) {

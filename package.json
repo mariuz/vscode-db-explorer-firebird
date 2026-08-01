@@ -60,6 +60,12 @@
     "test:playwright": "playwright test"
   },
   "contributes": {
+    "chatInstructions": [
+      {
+        "path": "./instructions/firebird-sql.instructions.md",
+        "when": "resourceExtname == .sql || resourceExtname == .fbnb"
+      }
+    ],
     "notebooks": [
       {
         "type": "firebird-notebook",

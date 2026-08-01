@@ -62,10 +62,22 @@ Both are used twice over. Activation reconciles against the saved connections �
 
 Six unit tests cover it, including the cases that are easy to get wrong: an SSH secret surviving when its connection is live but has no database password, and keys from other extensions being left alone. The `vscode` mock gained `secrets.keys()`.
 
+## Phase 3 — Firebird dialect rules as `chatInstructions` (done)
+
+`instructions/firebird-sql.instructions.md`, contributed via `contributes.chatInstructions` (VS Code 1.105). Any chat in the workspace now gets the dialect rules, not just the `@firebird` participant — which is the missing half of the language-model tools work: an agent could already query the database, but nothing told it that the SQL it writes is Firebird.
+
+**A correction to this doc's own claim.** It said `src/copilot/prompts.ts` "already encodes what a model needs to write correct Firebird SQL (`FIRST`/`SKIP` …, `EXECUTE BLOCK`, generators/sequences …)". It does not. The shared `systemPrompt()` says only *"Always use Firebird SQL dialect and syntax"* — the specifics live solely in the `/migrate` command's prompt, where they describe converting *from* other dialects. So this phase was writing the content, not moving it, and the instructions file is now the one place the dialect rules are actually spelled out.
+
+What it covers, chosen as the differences that most often produce SQL Firebird rejects outright: `FIRST`/`SKIP` and `OFFSET`/`FETCH` instead of `LIMIT`/`TOP`; `RDB$DATABASE` as the dummy table; unquoted identifiers folding to upper case; identity columns and sequences instead of `AUTO_INCREMENT`/`SERIAL`; `||` for concatenation and single quotes for strings; `EXECUTE BLOCK` and the `SET TERM` dance for scripts containing procedural code; `RDB$`/`MON$` instead of `information_schema`; and Firebird 6 schemas, including the advice to qualify names rather than trust the search path — the exact failure the schema work in this repo has been fixing all session.
+
+**Scoped with a `when` clause** (`resourceExtname == .sql || resourceExtname == .fbnb`) rather than applied to every chat in the workspace. A database extension has no business injecting SQL dialect rules into a conversation about someone's TypeScript. The trade-off is that a chat started from a non-SQL file will not pick them up, which is the right side to err on.
+
+The VSIX smoke test gained a case for it. Instructions ship as plain Markdown outside `out/` and `src/`, so a broad ignore rule is exactly what would drop them — and their absence is silent, since chat simply stops receiving the rules with no error anywhere. That test is now 11 assertions and passed against the real packaged extension.
+
 ## Suggested phases
 
 1. ~~**Raise the floor**: `engines.vscode` and `@types/vscode` to `^1.110.0`.~~ — **done**.
 2. ~~**`secrets.keys()`**: activation-time reconciliation plus a "Clear All Saved Passwords" command.~~ — **done**, see above.
-3. **`chatInstructions`** carrying the dialect rules already in `prompts.ts`, so agent mode writes Firebird SQL without going through `@firebird`.
+3. ~~**`chatInstructions`** carrying the dialect rules, so agent mode writes Firebird SQL without going through `@firebird`.~~ — **done**; note the rules had to be written, not moved (see above).
 4. **Presentation**: `ThemeIcon` webview tab icons, then the QuickInput toggle/prompt refinements in object search and the Object Explorer filter.
 5. **Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.
