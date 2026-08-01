@@ -62,8 +62,20 @@ Details that needed deciding:
 
 12 tests on the model. The provider itself is a nine-line adapter that maps offsets to `Range`s.
 
+## Phase 3 — go to definition (done)
+
+`F12` on a table name opens its generated `CREATE TABLE` DDL. Firebird has no source file to jump to, so the definition is *generated* — and the design doc's two open questions are both settled:
+
+**Identity.** Rather than tracking which editors are open, each object gets a stable URI under a custom scheme (`firebird-ddl:CUSTOMERS.sql`) served by a `TextDocumentContentProvider`. VS Code then reuses the editor for a URI it has already opened, for free, so pressing `F12` twice on the same table does not accumulate documents. `findTableName()` returns the *cached* spelling rather than what the user typed, so `customers` and `CUSTOMERS` resolve to one URI rather than two. The `.sql` suffix means the document opens with SQL highlighting without anyone setting a language mode.
+
+**Multiple resolutions.** Not reachable yet, and honestly so: the completion cache holds tables only, from `getTablesQuery()`, so views, procedures and the rest do not resolve — and neither do system tables, which that query excludes. A Firebird 6 name resolving in several schemas would need the cache to carry schemas first.
+
+**Verified end to end**, unlike hover: the Playwright tier drives `Go to Definition` from the palette and asserts a `CAP_DEMO.sql` tab appears containing `CREATE TABLE`. Two mistakes on the way there, both mine and both in the test rather than the code — first picking `RDB$DATABASE`, a system table the cache deliberately excludes, then asserting on `.monaco-editor` *first()*, which is still the query file rather than the newly opened document.
+
+The content provider fails soft in three ways rather than throwing into an editor: no active connection, an object with no columns, and a query error each produce a commented explanation in the document.
+
 ## Suggested phases
 
 1. ~~**Hover** — the cheapest and most-used of the three, and it validates the "identifier under the cursor" resolution logic that the other two depend on.~~ — **done**, see above. `identifierAt()` is now available for phases 2 and 3 to reuse.
 2. ~~**Document Symbols** — pure text analysis over `sql-splitter.ts`, no connection required.~~ — **done**, see above.
-3. **Go to Definition** — reuses phase 1's identifier resolution plus `ddl-builders.ts`, and needs the generated-document lifecycle question answered first.
+3. ~~**Go to Definition** — reuses phase 1's identifier resolution plus `ddl-builders.ts`, and needs the generated-document lifecycle question answered first.~~ — **done**; the lifecycle question is answered by a custom URI scheme plus a content provider. All three phases of this doc are complete.

@@ -1,7 +1,9 @@
-import { Disposable, languages, TextDocument } from "vscode";
+import { Disposable, languages, TextDocument, workspace } from "vscode";
 import { CompletionProvider } from "./completionProvider";
 import { HoverProvider } from "./hoverProvider";
 import { SqlDocumentSymbolProvider } from "./documentSymbolProvider";
+import { SqlDefinitionProvider, DdlDocumentProvider } from "./definitionProvider";
+import { DDL_SCHEME } from "./definition-model";
 import { FirebirdSchema, Schema } from "../interfaces";
 
 export default class LanguageServer implements Disposable {
@@ -35,6 +37,14 @@ export default class LanguageServer implements Disposable {
     this.subscriptions.push(languages.registerHoverProvider(documentSelector, this.hoverProvider));
     // Needs no schema and no connection — pure text analysis over the statement splitter.
     this.subscriptions.push(languages.registerDocumentSymbolProvider(documentSelector, new SqlDocumentSymbolProvider()));
+
+    // F12 on a table name opens its generated DDL. The content provider is what gives those
+    // generated documents a stable identity, so pressing F12 twice reuses one editor.
+    this.subscriptions.push(languages.registerDefinitionProvider(documentSelector, new SqlDefinitionProvider({
+      provideSchema: doc =>
+        this.schemaHandler ? this.schemaHandler(doc) : Promise.resolve({} as Schema.Database),
+    })));
+    this.subscriptions.push(workspace.registerTextDocumentContentProvider(DDL_SCHEME, new DdlDocumentProvider()));
   }
 
   setSchemaHandler(schemaHandler: (doc: TextDocument) => Thenable<FirebirdSchema>) {

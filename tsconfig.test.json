@@ -58,6 +58,7 @@
     "src/shared/engine-version.ts",
     "src/language-server/hover-model.ts",
     "src/language-server/symbol-model.ts",
+    "src/language-server/definition-model.ts",
     "src/interfaces/**/*.ts",
     "src/test/**/*.ts"
   ],

@@ -13,10 +13,16 @@
  * so any Firebird database will do — no seeded schema needed.
  */
 
-import { test, expect, makeWorkspace, launchVSCode, addConnection, runQueryInEditor, expectWebviewText, type LaunchedVSCode } from "./vscode-fixture";
+import { test, expect, makeWorkspace, launchVSCode, addConnection, runQueryInEditor, runCommand, expectWebviewText, type LaunchedVSCode } from "./vscode-fixture";
 
 /** Unlikely to appear anywhere in the workbench chrome, so finding it proves the grid rendered it. */
 const SENTINEL = "8675309";
+/**
+ * A *user* table: the completion cache this feature resolves against is built from
+ * `getTablesQuery()`, which excludes system tables — so `RDB$DATABASE` deliberately does not
+ * resolve, and using it here is what made the first version of this spec fail.
+ */
+const TABLE = "CAP_DEMO";
 
 test.describe("Query results grid", () => {
   test.skip(
@@ -54,5 +60,24 @@ test.describe("Query results grid", () => {
     // tier's `vscode` mock would happily accept any string.
     const { page } = vscode;
     await expect(page.locator('.tab .codicon-table').first()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("Go to Definition on a table opens its generated DDL", async () => {
+    // docs/roadmap/sql-language-features.md phase 3. Worth checking here because the whole point
+    // is a *generated* document behind a custom URI scheme — the unit tier covers the URI and the
+    // name lookup, but not that the definition provider and the content provider are wired
+    // together such that VS Code actually opens something.
+    const { page } = vscode;
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type(`SELECT * FROM ${TABLE}`);
+    await page.keyboard.press("End");
+    await runCommand(page, "Go to Definition");
+
+    // Assert on the tab, not on `.monaco-editor` first(): the query file is still open and is
+    // still the first editor in the DOM, so matching the first one checks the wrong document —
+    // which is exactly how the first version of this failed, in 435ms rather than on a timeout.
+    await expect(page.locator(".tab", { hasText: `${TABLE}.sql` })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".monaco-editor", { hasText: "CREATE TABLE" }).first()).toBeVisible();
   });
 });

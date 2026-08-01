@@ -11,6 +11,7 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ### Added
 
+- **Press F12 on a table name to see how it is defined.** Firebird keeps no source for a table, so Firebird Studio scripts one: its `CREATE TABLE`, generated from the connected database and opened read-only. Pressing F12 on the same table again reuses that document rather than opening another copy. It resolves table names — the same ones autocomplete offers.
 - **A `.sql` file now has an outline.** The Outline view and the breadcrumb list the file's statements — `CREATE TABLE CUSTOMERS`, `INSERT INTO ORDERS`, `COMMIT` — so a long migration script can be navigated by clicking rather than scrolling. It works in any SQL file, with or without a database connection.
 - **Hover a table or column name in a `.sql` file to see what it is.** A table shows its columns and their types; a column shows its type and which table it belongs to — and every table, when more than one has a column by that name. Nothing appears for keywords, aliases or anything else the connected database does not recognise. It reuses the schema information autocomplete has already loaded, so it costs no extra queries.
 
