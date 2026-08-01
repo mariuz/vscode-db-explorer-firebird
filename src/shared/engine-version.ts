@@ -13,9 +13,7 @@
  * degradation.
  */
 
-import { ConnectionOptions } from "../interfaces";
 import { parseEngineMajorVersion } from "./actual-plan";
-import { logger } from "../logger/logger";
 
 const ENGINE_VERSION_QUERY = `SELECT RDB$GET_CONTEXT('SYSTEM', 'ENGINE_VERSION') AS V FROM RDB$DATABASE;`;
 
@@ -28,15 +26,19 @@ export type VersionQueryRunner = (sql: string) => Promise<any[]>;
  * Returns the server's major version, e.g. `6` for "6.0.0".
  *
  * Returns 0 when the version cannot be determined, which every caller must treat as "assume the
- * oldest behaviour": a failure to detect must never enable newer SQL. The failure is logged but
- * not surfaced — a version probe failing is not itself worth interrupting the user for, and
- * whatever the caller does next will report its own error if it matters.
+ * oldest behaviour": a failure to detect must never enable newer SQL. The failure is swallowed
+ * rather than reported — a version probe failing is not itself worth interrupting the user for,
+ * and whatever the caller does next will report its own error if it matters.
+ *
+ * Deliberately free of any `vscode` import (and therefore of the logger, which owns an output
+ * channel): `shared/db-tools.ts` runs inside the MCP subprocess, which is a plain Node process,
+ * and needs this same probe.
  */
 export async function getEngineMajorVersion(
-  connectionOptions: ConnectionOptions,
+  connectionId: string | undefined,
   runQuery: VersionQueryRunner
 ): Promise<number> {
-  const key = connectionOptions.id;
+  const key = connectionId;
   if (key) {
     const cached = cache.get(key);
     if (cached !== undefined) {
@@ -48,8 +50,7 @@ export async function getEngineMajorVersion(
   try {
     const rows = await runQuery(ENGINE_VERSION_QUERY);
     major = parseEngineMajorVersion(String(rows?.[0]?.V ?? ""));
-  } catch (err) {
-    logger.debug(`Could not determine the Firebird engine version, assuming pre-6 behaviour: ${err}`);
+  } catch {
     return 0;
   }
 

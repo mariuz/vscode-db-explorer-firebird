@@ -10,6 +10,7 @@ import {
   ToolQueryFn,
   WriteAuditEntry,
 } from '../shared/db-tools';
+import { clearEngineVersionCache } from '../shared/engine-version';
 
 /**
  * These five tool bodies lived inline in the MCP subprocess until
@@ -91,14 +92,44 @@ suite('db-tools – connection resolution (docs/roadmap/language-model-tools.md,
 });
 
 suite('db-tools – get_schema', function () {
+  // The engine version is cached per connection id, so without this a test that reports 5.0.1
+  // would pin the shared fake connection to legacy behaviour for every test after it. Clearing
+  // between tests keeps them order-independent — which is exactly what the seam is for.
+  setup(function () {
+    clearEngineVersionCache();
+  });
 
-  test('both metadata queries run on one connection, and the result is a schema graph', async function () {
+
+  test('the metadata queries run on one connection, and the result is a schema graph', async function () {
     const executor = fakeExecutor(sql => (sql.includes('RDB$RELATION_CONSTRAINTS') ? [] : []));
     const outcome = await getSchemaTool(executor, 'read-only');
     assert.strictEqual(outcome.isError, undefined);
-    assert.strictEqual(executor.statements.length, 2, 'columns query + foreign keys query');
-    assert.strictEqual(executor.connectCount, 1, 'both statements must share one connection');
+    // Version probe + columns query + foreign keys query. The probe is what decides whether to
+    // ask for RDB$SCHEMA_NAME, which does not exist before Firebird 6.
+    assert.strictEqual(executor.statements.length, 3, 'version probe + columns query + foreign keys query');
+    assert.strictEqual(executor.connectCount, 1, 'every statement must share one connection');
     assert.ok('tables' in JSON.parse(outcome.text));
+  });
+
+  test('a server that does not report Firebird 6 is never asked for schema columns', async function () {
+    // The whole gate: RDB$SCHEMA_NAME is a hard SQL error on Firebird 5 and earlier, so an
+    // undetectable or older version must produce exactly the queries this tool always sent.
+    const executor = fakeExecutor(sql => (sql.includes('ENGINE_VERSION') ? [{ V: '5.0.1' }] : []));
+    await getSchemaTool(executor, 'read-only');
+    const metadataQueries = executor.statements.map(s => s.sql).filter(sql => !sql.includes('ENGINE_VERSION'));
+    assert.strictEqual(metadataQueries.length, 2);
+    assert.ok(metadataQueries.every(sql => !sql.includes('RDB$SCHEMA_NAME')), 'must not reference the column');
+  });
+
+  test('a Firebird 6 server is asked for schemas, so an agent never sees merged tables', async function () {
+    // Verified live against Firebird 6.0.0: without this the graph merges SALES.ORDERS and
+    // PUBLIC.ORDERS into one entry, and an agent reading it writes SQL against a table that does
+    // not exist.
+    const executor = fakeExecutor(sql => (sql.includes('ENGINE_VERSION') ? [{ V: '6.0.0' }] : []));
+    await getSchemaTool(executor, 'read-only');
+    const metadataQueries = executor.statements.map(s => s.sql).filter(sql => !sql.includes('ENGINE_VERSION'));
+    assert.strictEqual(metadataQueries.length, 2);
+    assert.ok(metadataQueries.every(sql => sql.includes('RDB$SCHEMA_NAME')), 'both queries should carry the schema');
   });
 
   test('a failure is reported as a tool error rather than thrown at the caller', async function () {

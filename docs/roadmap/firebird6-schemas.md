@@ -138,11 +138,29 @@ The merge was the obvious one. The **duplication** was not: `getSchemaColumnsQue
 
 `buildSchemaGraph()` itself now qualifies from the rows: tables by `SCHEMA_NAME`, and each end of a relationship independently from `SCHEMA_NAME`/`REF_SCHEMA_NAME`, since a foreign key may cross schemas. Rows without a schema keep their bare name, so pre-6 servers and callers that have not opted in are untouched.
 
-**Only the Schema Designer opted in.** `data-api-builder`, `database-projects` and the MCP server also call `buildSchemaGraph()` and still pass no flag, so they behave exactly as before — deliberately, since qualified table names would flow into generated REST specs, project files and agent-visible schema output, each of which deserves its own decision rather than being changed as a side effect.
+**The Schema Designer and the AI tools opted in; the rest did not.** `data-api-builder` and `database-projects` also call `buildSchemaGraph()` and still pass no flag, so they behave exactly as before — deliberately, since qualified names would flow into generated REST specs and project files, each of which deserves its own decision.
+
+### Phase 1g — the agent-facing `get_schema` (done)
+
+`shared/db-tools.ts` backs *both* AI transports (the MCP subprocess and the Copilot language-model tools), and its `get_schema` had the same merge. This is the worst place for it: an agent reading a merged table writes SQL against a table that does not exist, and unlike a UI there is nobody to notice the diagram looks odd. Verified live through the real tool body against Firebird 6.0.0:
+
+```
+tables the agent sees: PUBLIC.CAP_DEMO, SALES.CUST, PUBLIC.CUST, SALES.ORDERS,
+                       PUBLIC.ORDERS, PUBLIC.PW_DIAGRAM_DEMO, PUBLIC.PW_PLAN_DEMO
+  SALES.ORDERS  -> ID,TOTAL,CUST_ID
+  PUBLIC.ORDERS -> ID,NOTE,CUST_ID
+```
+
+Doing this required making `engine-version.ts` free of any `vscode` import — it used the logger, which owns an output channel, and `db-tools.ts` runs inside the MCP subprocess, which is a plain Node process. The probe now swallows a failed lookup rather than logging it, and takes a connection *id* rather than a whole `ConnectionOptions`, which also removed its last interface dependency.
+
+Two things the tests had to learn. The version probe is a third statement on the same connection, so the existing "both metadata queries run on one connection" assertion became "three statements, one connection". And because the version is cached per connection id, a test reporting 5.0.1 pinned the shared fake connection to legacy behaviour for every test after it — `clearEngineVersionCache()` in a `setup()` hook keeps them order-independent, which is exactly what that seam exists for.
+
+**Known cosmetic consequence.** `buildSchemaGraph()` qualifies *always* (it feeds DDL generation and agents, where relying on the search path is the bug), so on a single-schema Firebird 6 database every Schema Designer box now reads `PUBLIC.X` rather than `X`. Correct but noisier than the tree, which hides the default schema. Separating a display name from the graph's identity key is the fix, and is a follow-up rather than something to bolt on here.
 
 ### What is still missing, precisely
 - **No Schemas level in the tree**, which is the rest of phase 1.
-- **Data API Builder, Database Projects and the MCP server still build schema-blind graphs** — see phase 1f for why that was left as a deliberate choice rather than swept along. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
+- **Data API Builder and Database Projects still build schema-blind graphs** — see phase 1f for why that was left as a deliberate choice rather than swept along.
+- **The Schema Designer shows `PUBLIC.` prefixes** on a single-schema Firebird 6 database; see phase 1g. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 
 ## Suggested phases

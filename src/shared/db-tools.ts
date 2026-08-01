@@ -21,6 +21,8 @@
 
 import { getSchemaColumnsQuery, getForeignKeysQuery } from "./queries";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow } from "../schema-designer/schema-graph";
+import { getEngineMajorVersion } from "./engine-version";
+import { supportsSchemas } from "./schema-support";
 import {
   validateReadOnlyStatement,
   validateWriteStatement,
@@ -134,8 +136,15 @@ export async function getSchemaTool(executor: ToolExecutor, connectionId: string
 
   try {
     const graph = await executor.withConnection(connectionId, async query => {
-      const columnRows = (await query(getSchemaColumnsQuery())) as SchemaColumnRow[] | undefined;
-      const fkRows = (await query(getForeignKeysQuery())) as ForeignKeyRow[] | undefined;
+      // Firebird 6 keeps every object in a schema. Without asking for it the graph merges
+      // same-named tables from different schemas into one entry holding the union of their
+      // columns — and an agent reading that would write SQL against a table that does not exist,
+      // which is a worse failure here than in any UI.
+      const withSchemas = supportsSchemas(
+        await getEngineMajorVersion(connectionId, async sql => (await query(sql)) ?? [])
+      );
+      const columnRows = (await query(getSchemaColumnsQuery(withSchemas))) as SchemaColumnRow[] | undefined;
+      const fkRows = (await query(getForeignKeysQuery(withSchemas))) as ForeignKeyRow[] | undefined;
       return buildSchemaGraph(columnRows ?? [], fkRows ?? []);
     });
     return ok(JSON.stringify(graph, null, 2));

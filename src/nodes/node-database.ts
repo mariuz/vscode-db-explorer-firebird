@@ -132,7 +132,7 @@ export class NodeDatabase implements FirebirdTree {
    */
   private async schemasSupported(connection: any, resolved: ConnectionOptions): Promise<boolean> {
     return supportsSchemas(
-      await getEngineMajorVersion(resolved, sql => Driver.client.queryPromise<any>(connection, sql))
+      await getEngineMajorVersion(resolved.id, sql => Driver.client.queryPromise<any>(connection, sql))
     );
   }
 

@@ -156,7 +156,7 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
       // the union of their columns. Asking a pre-6 server for the column is a hard SQL error, so
       // the flag comes from the cached version probe.
       const withSchemas = supportsSchemas(
-        await getEngineMajorVersion(this.dbDetails, async sql => {
+        await getEngineMajorVersion(this.dbDetails.id, async sql => {
           const [row] = await Driver.runBatch(sql, this.dbDetails!);
           return (row?.rows ?? []) as any[];
         })
