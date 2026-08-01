@@ -133,6 +133,9 @@ $(() => {
       const meta = `${r.durationMs} ms` + (r.rowCount ? ` · ${r.rowCount} row(s)` : "");
       $panel.append($("<div>").addClass("result-meta").text(meta));
 
+      const note = truncationNote(r.truncatedFrom, r.rowCount);
+      if (note) { $panel.append($("<div>").addClass("result-message").text(note)); }
+
       if (r.error) {
         $panel.append($("<div>").addClass("result-error").text(r.error));
       } else if (r.message) {
@@ -168,6 +171,9 @@ $(() => {
     $("#batch-results").hide();
     $("#single-result").show();
     const $target = $("#single-result-table").empty();
+    // Same disclosure as the batch view: a trimmed result must say so rather than look complete.
+    const note = truncationNote(data.truncatedFrom, (data.tableBody || []).length);
+    if (note) { $target.append($("<div>").addClass("result-message").text(note)); }
     buildEditableTable($target, "query-results", data.tableHeader, data.tableBody, data.recordsPerPage, data.editableTable);
     $("body").addClass("loaded");
   }
@@ -997,13 +1003,26 @@ $(() => {
     $ta.remove();
   }
 
+  /**
+   * The note shown when `firebird.maxResultRows` trimmed a result.
+   *
+   * Returns "" when nothing was dropped, so callers can append unconditionally. Pure, so it is
+   * unit-testable the same way every other function in this hook is — the point of the note is
+   * that a partial result is *stated* rather than silently displayed, which is exactly the
+   * behaviour worth pinning down with a test.
+   */
+  function truncationNote(truncatedFrom, shown) {
+    if (!truncatedFrom || truncatedFrom <= shown) { return ""; }
+    return `Showing the first ${shown} of ${truncatedFrom} rows — raise or disable the limit with the "firebird.maxResultRows" setting.`;
+  }
+
   // Test-only hook: no-op in a real webview (there is no `module` global there).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports.__test__ = {
       sqlLiteral, buildInsertStatement, buildInClause, selectionRange,
       parseShortcut, matchesShortcut,
       detectNumericColumns, buildBarChartSvg, buildLineChartSvg, buildPieChartSvg, buildScatterChartSvg,
-      buildTextView,
+      buildTextView, truncationNote,
       computeSelectionStats, formatSelectionStats,
       resultsFontProperties,
     };

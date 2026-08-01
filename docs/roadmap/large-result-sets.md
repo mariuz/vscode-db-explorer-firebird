@@ -27,8 +27,21 @@ The practical failure mode is not subtle: a `SELECT *` against a large table blo
 - **Transaction semantics.** Today's single-fetch result is one consistent read. Paged fetches are separate statements and, depending on `firebird.transaction.isolationLevel`, may not see a consistent snapshot — a row can appear on two pages or none. Worth stating in the UI rather than pretending it is a scrolled window over a stable set.
 - **This changes a default.** Capping rows makes some current behavior "worse" (you no longer get all 10M rows in one go). That is the right trade, but it is a user-visible behavior change and needs a CHANGELOG entry that says so plainly.
 
+## Phase 1 — the row cap and its disclosure (done)
+
+A new `firebird.maxResultRows` setting (integer, default **10 000**, `0` for no limit — the same convention as the existing `firebird.maxTablesCount`). It does two different things in two places, and the difference is worth stating plainly rather than letting the setting name imply more than it delivers:
+
+- **A genuine server-side cap where the extension writes the query.** `selectAllRecordsQuery()` now emits `SELECT FIRST n * FROM t`, so "Select All Records" on a huge table never asks the server for more than `n` rows in the first place. Verified against a live Firebird server, not just unit-tested: five rows inserted, `SELECT FIRST 2 *` returned 2 while the uncapped form returned 5.
+- **A display cap for everything else.** For arbitrary user SQL there is no streaming loop to stop — the pure-JS driver hands back a whole result set in a single callback — so by the time the extension sees the rows, the server has already produced all of them. `capRows()` bounds what crosses into the webview, which is the part that actually falls over on a large table, but it saves the server and the driver no work. Anyone reading the setting as "queries stop early" would be wrong, and the code comment on `capRows()` says so.
+
+**The disclosure is the other half, and is not optional.** A trimmed result that looks complete is worse than a slow one. `truncationNote()` (pure, in the webview's `__test__` hook, so it is unit-tested like every other function there) renders *"Showing the first 10000 of 50000 rows — raise or disable the limit with the `firebird.maxResultRows` setting."* above the grid, in both the single-result and batch views. It names the setting so the note is actionable rather than merely informative, and it returns `""` when nothing was dropped so callers can append unconditionally.
+
+`rowCount` deliberately stays the number of rows actually shown, so the grid's own count never disagrees with its contents; `truncatedFrom` is what carries "there were more".
+
+**This changes a default**, as the doc's own Risks section anticipated: a result over 10 000 rows is now trimmed where it previously was not. That is a user-visible behaviour change and has a CHANGELOG entry saying so.
+
 ## Suggested phases
 
-1. **`firebird.maxResultRows` cap + truncation disclosure in the grid.** Smallest change that removes the unbounded case; no protocol or paging work.
+1. ~~**`firebird.maxResultRows` cap + truncation disclosure in the grid.** Smallest change that removes the unbounded case; no protocol or paging work.~~ — **done**, see above.
 2. **Server-side paging** for wrappable single-`SELECT` statements, including the deterministic-order requirement and the row-count decision.
 3. **Query-level filter/sort push-down** for the single-table (row-editing) case, reusing `parameterized-query.ts` for values.

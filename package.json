@@ -790,6 +790,11 @@
           "default": "INFO",
           "description": "Logging level in the output channel."
         },
+        "firebird.maxResultRows": {
+          "type": "integer",
+          "default": 10000,
+          "description": "Maximum number of rows a query result will show. 'Select All Records' asks the server for at most this many (a FIRST clause), and any larger result is trimmed before it reaches the results view, which says so when it happens. Use 0 for no limit."
+        },
         "firebird.maxTablesCount": {
           "type": "integer",
           "default": 10,

@@ -10,6 +10,7 @@ export function getOptions() {
   return {
     mockarooApiKey: _mockarooApiKey(),
     maxTablesCount: _maxTablesCount(),
+    maxResultRows: _maxResultRows(),
     codeCompletionKeywords: _codeCompletionKeywords(),
     codeCompletionDatabase: _codeCompletionDatabase(),
     logLevel: _logLevel(),
@@ -64,6 +65,19 @@ function _mockarooApiKey(): string | null {
   } else {
     return apiKeyConf;
   }
+}
+
+function _maxResultRows(): number {
+  const configured: any = getConfig().get("maxResultRows");
+  const fallback: number = properties["firebird.maxResultRows"]["default"];
+
+  // Negative is meaningless here and 0 already means "no limit", so anything below zero is a
+  // mistake rather than an intent worth honouring.
+  if (typeof configured !== "number" || !Number.isInteger(configured) || configured < 0) {
+    logger.error("Invalid settings detected in Max Result Rows. Fallback to default value.");
+    return fallback;
+  }
+  return configured;
 }
 
 function _maxTablesCount(): number {

@@ -110,8 +110,21 @@ export function fieldsQuery(tables: string[]): string {
    ORDER BY Tbl, Pos;`;
 }
 
-export function selectAllRecordsQuery(tableName: string): string {
-  return `SELECT * FROM ${tableName};`;
+/**
+ * "Select All Records" for a table or view.
+ *
+ * `maxRows` becomes a Firebird `FIRST n` clause — a genuine *server-side* cap, so the rows never
+ * leave the server rather than being fetched and then discarded. That distinction matters: the
+ * pure-JS driver hands back a whole result set in one callback with no streaming loop to stop, so
+ * for arbitrary user SQL the only available limit is on what reaches the webview. Here, where the
+ * extension writes the query itself, the limit can be real.
+ *
+ * 0 (or anything not a positive integer) means no limit, matching `firebird.maxTablesCount`'s
+ * existing convention.
+ */
+export function selectAllRecordsQuery(tableName: string, maxRows = 0): string {
+  const first = Number.isInteger(maxRows) && maxRows > 0 ? `FIRST ${maxRows} ` : "";
+  return `SELECT ${first}* FROM ${tableName};`;
 }
 
 export function dropTableQuery(tableName: string): string {

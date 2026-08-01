@@ -3,6 +3,7 @@ import { QuickQuerySlot } from "../shared/quick-queries";
 export interface Options {
   mockarooApiKey: string | null;
   maxTablesCount: number;
+  maxResultRows: number;
   codeCompletionKeywords: boolean;
   codeCompletionDatabase: boolean;
   logLevel: string;

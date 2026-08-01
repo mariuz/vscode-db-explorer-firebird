@@ -3,6 +3,7 @@ import {join} from "path";
 import {NodeField, NodeInfo, NodeIndexFolder} from ".";
 import {ConnectionOptions, FirebirdTree, Options} from "../interfaces";
 import {selectAllRecordsQuery, tableInfoQuery, dropTableQuery, getForeignKeysQuery, getObjectPrivilegesQuery} from "../shared/queries";
+import {getOptions} from "../config";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {logger} from "../logger/logger";
@@ -73,7 +74,7 @@ export class NodeTable implements FirebirdTree {
   public async selectAllRecords() {
     logger.info("Custom Query: Select All Records");
 
-    const qry = selectAllRecordsQuery(this.table.trim());
+    const qry = selectAllRecordsQuery(this.table.trim(), getOptions().maxResultRows);
     Global.activeConnection = this.dbDetails;
 
     return Driver.runQuery(qry, this.dbDetails)

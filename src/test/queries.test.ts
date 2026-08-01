@@ -25,6 +25,7 @@ import {
   rollbackTransactionQuery,
   tableInfoQuery,
   getTablesQuery,
+  selectAllRecordsQuery
 } from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
@@ -492,5 +493,25 @@ suite('getTablesQuery', function () {
   test('omits FIRST entirely when max is 0 (no cap)', function () {
     const sql = getTablesQuery(0);
     assert.ok(!sql.includes('FIRST'), sql);
+  });
+});
+
+suite('selectAllRecordsQuery() — the firebird.maxResultRows server-side cap', function () {
+  test('no cap by default, so existing behaviour is unchanged', function () {
+    assert.strictEqual(selectAllRecordsQuery('CUSTOMERS'), 'SELECT * FROM CUSTOMERS;');
+  });
+
+  test('a positive limit becomes a FIRST clause, which caps on the server', function () {
+    assert.strictEqual(selectAllRecordsQuery('CUSTOMERS', 500), 'SELECT FIRST 500 * FROM CUSTOMERS;');
+  });
+
+  test('0 means no limit', function () {
+    assert.strictEqual(selectAllRecordsQuery('CUSTOMERS', 0), 'SELECT * FROM CUSTOMERS;');
+  });
+
+  test('a negative or non-integer limit is ignored rather than emitted as broken SQL', function () {
+    assert.strictEqual(selectAllRecordsQuery('T', -5), 'SELECT * FROM T;');
+    assert.strictEqual(selectAllRecordsQuery('T', 1.5), 'SELECT * FROM T;');
+    assert.strictEqual(selectAllRecordsQuery('T', NaN), 'SELECT * FROM T;');
   });
 });

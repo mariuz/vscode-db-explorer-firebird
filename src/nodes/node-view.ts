@@ -2,6 +2,7 @@ import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, Uri} fro
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {viewColumnsQuery, selectAllRecordsQuery, getViewDefinitionQuery, dropViewQuery, createViewScaffold, getObjectPrivilegesQuery} from "../shared/queries";
+import {getOptions} from "../config";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {NodeInfo} from "./node-info";
@@ -47,7 +48,7 @@ export class NodeView implements FirebirdTree {
 
   public async selectAllRecords() {
     logger.info("Custom Query: Select All View Records");
-    const qry = selectAllRecordsQuery(this.viewName.trim());
+    const qry = selectAllRecordsQuery(this.viewName.trim(), getOptions().maxResultRows);
     Global.activeConnection = this.dbDetails;
     return Driver.runQuery(qry, this.dbDetails)
       .then(result => result)

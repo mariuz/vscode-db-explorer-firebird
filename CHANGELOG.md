@@ -4,6 +4,10 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ## Unreleased
 
+### Added
+
+- **Query results are now capped at 10 000 rows by default**, and the results view says when it trimmed something. Previously there was no ceiling at all: **Select All Records** on a large table asked the server for every row and pushed all of them into the results view, which is what made the extension struggle rather than the database. Two things changed. **Select All Records** now asks for at most the configured number (`SELECT FIRST n …`), so the rows never leave the server; and any result larger than the limit is trimmed before it is displayed, with a note above the grid — *"Showing the first 10000 of 50000 rows"* — naming the setting so you can raise it. Set `firebird.maxResultRows` to `0` for the old unlimited behaviour. One caveat worth knowing: for queries you write yourself the limit applies to what gets displayed, not to what the server produces — the driver returns a whole result set in one go, so a `SELECT` over a huge table still costs the server the same work.
+
 ### Changed
 
 - **Opening an untrusted folder now tells you why Firebird Studio is unavailable**, instead of the extension simply not appearing. Its behaviour in VS Code's Restricted Mode is unchanged — it was already disabled there, because an extension that doesn't declare a Workspace Trust capability is disabled by default — but that was a default nobody had chosen and nothing explained. The extension now states the reason: it runs `isql`, `gbak`, and `docker` from paths that `firebird.isqlPath`/`firebird.gbakPath`/`firebird.dockerPath` can set, and reads connection definitions from `.vscode/firebird.json`, both of which a folder you haven't trusted controls. Trusting the folder enables the extension as before.

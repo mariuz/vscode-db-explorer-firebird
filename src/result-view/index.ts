@@ -29,6 +29,12 @@ export interface PreparedResultSet {
   error?: string;
   /** Table name auto-detected from the statement's FROM clause, pre-filled for row editing. */
   editableTable?: string;
+  /**
+   * Set when the server returned more rows than `firebird.maxResultRows` and the extra ones were
+   * dropped before reaching the webview. Carries the *original* row count so the grid can say how
+   * much is missing rather than just that something is.
+   */
+  truncatedFrom?: number;
 }
 
 /** Payload for the "applyChanges" message sent from the webview's edit toolbar. */
@@ -306,10 +312,11 @@ export default class ResultView extends QueryResultsView implements Disposable {
         tableHeader.push({ title: field });
       }
     }
-    this.resultSet.forEach(row => {
+    const capped = capRows(this.resultSet, getOptions().maxResultRows);
+    capped.rows.forEach((row: any) => {
       tableBody.push(encodeRow(row, decoder));
     });
-    return { tableHeader, tableBody, recordsPerPage: this.recordsPerPage };
+    return { tableHeader, tableBody, recordsPerPage: this.recordsPerPage, truncatedFrom: capped.truncatedFrom };
   }
 
   private prepareBatchResult(r: BatchResult): PreparedResultSet {
@@ -326,9 +333,29 @@ export default class ResultView extends QueryResultsView implements Disposable {
     }
 
     const tableHeader = Object.keys(r.rows[0]).map(f => ({ title: f }));
-    const tableBody = r.rows.map(row => encodeRow(row, decoder));
-    return { sql, fullSql, tableHeader, tableBody, rowCount: r.rows.length, durationMs: r.durationMs, editableTable };
+    const capped = capRows(r.rows, getOptions().maxResultRows);
+    const tableBody = capped.rows.map((row: any) => encodeRow(row, decoder));
+    // rowCount stays the number of rows actually shown, so the grid's own count never disagrees
+    // with what is in it; `truncatedFrom` is what tells the user rows were dropped.
+    return { sql, fullSql, tableHeader, tableBody, rowCount: capped.rows.length, durationMs: r.durationMs, editableTable, truncatedFrom: capped.truncatedFrom };
   }
+}
+
+/**
+ * Applies the `firebird.maxResultRows` cap to a set of already-fetched rows.
+ *
+ * Worth being precise about what this is and is not: the pure-JS driver returns a whole result
+ * set in a single callback, with no streaming loop to stop, so for arbitrary user SQL the server
+ * has already produced every row by the time this runs. Capping here bounds what crosses into the
+ * webview — which is what actually falls over on a large table — but it does not save the server
+ * or the driver any work. The genuine server-side limit is `selectAllRecordsQuery()`'s FIRST
+ * clause, which only applies where the extension writes the query itself.
+ */
+export function capRows<T>(rows: T[], maxRows: number): { rows: T[]; truncatedFrom?: number } {
+  if (!Number.isInteger(maxRows) || maxRows <= 0 || rows.length <= maxRows) {
+    return { rows };
+  }
+  return { rows: rows.slice(0, maxRows), truncatedFrom: rows.length };
 }
 
 function encodeRow(row: any, decoder: TextDecoder): string[] {

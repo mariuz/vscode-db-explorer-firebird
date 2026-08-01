@@ -313,4 +313,28 @@ suite('result-view app.js – pure helpers (via __test__ hook)', function () {
       );
     });
   });
+
+
+  suite('truncationNote() — a trimmed result must say so (docs/roadmap/large-result-sets.md)', function () {
+    test('says nothing when nothing was dropped', function () {
+      assert.strictEqual(hooks.truncationNote(undefined, 10), '');
+      assert.strictEqual(hooks.truncationNote(0, 10), '');
+    });
+
+    test('reports both how many are shown and how many there were', function () {
+      const note = hooks.truncationNote(50000, 10000);
+      assert.ok(note.includes('10000'), `expected the shown count: ${note}`);
+      assert.ok(note.includes('50000'), `expected the original count: ${note}`);
+    });
+
+    test('names the setting, so the note is actionable rather than just informative', function () {
+      assert.ok(hooks.truncationNote(50000, 10000).includes('firebird.maxResultRows'));
+    });
+
+    test('says nothing if the original count is not actually larger', function () {
+      // Defensive: a payload where truncatedFrom equals the shown count means nothing was dropped,
+      // and claiming otherwise would be worse than staying quiet.
+      assert.strictEqual(hooks.truncationNote(10, 10), '');
+    });
+  });
 });
