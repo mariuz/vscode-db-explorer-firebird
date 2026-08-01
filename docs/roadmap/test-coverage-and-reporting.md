@@ -1,0 +1,49 @@
+# Test coverage measurement, reporting, and platform matrix
+
+**Inspired by**: [vscode-mssql](https://github.com/microsoft/vscode-mssql)'s test pipeline, reviewed from its actual configuration rather than its docs — `codecov.yml`, `extensions/mssql/package.json`, `.vscode-test.mjs`, `scripts/vscode-test-config.mjs`, and `.github/workflows/build-and-test.yml`. (vscode-pgsql could not be reviewed: its public repository contains only `README.md`, `CHANGELOG.md`, license/support files and images — no source, no tests, no workflows. There is nothing to compare against, and any claim about how pgsql tests would be invention.)
+
+## What vscode-mssql actually does
+
+| | vscode-mssql | Firebird Studio today |
+| --- | --- | --- |
+| Unit test host | Real VS Code (**Insiders**) via `@vscode/test-cli`; no `vscode` mock | Plain Mocha + a hand-written 323-line `vscode` stub |
+| Test doubles | `sinon` 21, `chai` 5, `sinon-chai` | none — hand-rolled fakes per test |
+| Unit test count | 189 files under `test/unit` | 58 files under `src/test` |
+| Coverage | `vscode-test --coverage` → `text-summary, html, lcov, cobertura` | **none, anywhere** |
+| Coverage gate | Codecov: **project 50 %, patch 70 %**, per-extension flags | none |
+| Webview coverage | `nyc instrument ./dist/views --in-place`, collected from `window.__coverage__` during Playwright runs, merged with unit coverage | none |
+| Machine-readable results | `mocha-multi-reporters` + `mocha-junit-reporter` → JUnit XML → `dorny/test-reporter` GitHub checks with badges | raw Mocha console output in the job log |
+| Stack traces | `source-map-support` hook registered for every run, so failures point at the `.ts` | compiled `out/**/*.js` line numbers |
+| UI/e2e | Playwright driving real VS Code + a real SQL Server in Docker | none (see [webview-ui-testing.md](webview-ui-testing.md)) |
+| Test-tier config | multiple labeled `@vscode/test-cli` configs (unit, activation) | one unlabeled config |
+
+Two of their choices are worth *not* copying. Their CI marks test steps `continue-on-error: true` and captures the exit code into an env var for reporting, so a failing test does not fail the build — this repo's plain `run:` steps are stricter and should stay that way. And their unit tier runs inside VS Code because their code is entangled with the API; this repo's mocked-`vscode` unit tier is *faster* and keeps 58 files runnable in seconds without downloading an editor. The gap worth closing is measurement and reporting, not the architecture.
+
+## Current state in Firebird Studio
+
+The three-tier setup is genuinely good, and one part of it is better than mssql's: **the e2e tier already runs a 12-job matrix** (Node 24/25/26 × Firebird 3/4/5/6-snapshot, with one job forced to WireCrypt-enabled). Nothing below is a criticism of test *quantity* — 83 test files across three tiers is substantial. What is missing is everything downstream of running them:
+
+- **No coverage tooling exists.** `devDependencies` has no `nyc`, `c8`, or `istanbul` entry; no workflow computes or uploads coverage; nothing states what fraction of `src/` the 83 files actually reach. Several design docs carefully describe what *is* and *is not* covered — that knowledge is entirely manual, and nothing detects when a new file lands untested.
+- **`@vscode/test-cli@0.0.12` is already installed and already supports coverage** — verified directly against the installed copy: `--coverage`, `--coverage-output`, `--coverage-reporter`, plus a config-level `coverage: { include, exclude, reporter, srcDir, all }` (V8-based, no instrumentation step). `.vscode-test.mjs` uses none of it; it is 9 lines with a single unlabeled config. **The suite tier can produce coverage today with a config change and zero new dependencies.**
+- **CI reports nothing machine-readable.** `ci.yml` runs Mocha with the default `spec` reporter; a failure is only visible by opening the job log. No JUnit XML, no GitHub check annotations, no artifacts.
+- **Everything is `ubuntu-latest`** — all three workflows, single OS. Yet a large amount of this codebase is platform-specific by nature: `executable-probe.ts` spawning `isql`/`gbak`/`docker`, `isql-terminal.ts` composing shell command lines, `gbak-options.ts` building argument lists with file paths, and the native-driver build path. The `isql -z` stdin hang (0.1.96) and the `gbak -z` non-zero-exit quirk (0.2.2) were both process-spawning bugs — exactly the class that behaves differently on Windows.
+- **Workspace Trust is undeclared and untested.** `package.json` has no `capabilities.untrustedWorkspaces`, so VS Code disables the extension in Restricted Mode by default. That is arguably the right default for an extension that reads `.vscode/firebird.json` and spawns external binaries — but it is currently a default nobody chose, and no test asserts what happens in an untrusted folder. VS Code's own testing guidance recommends separate test configurations for trusted and untrusted states.
+- **No Insiders run.** Every tier pins stable. With `engines.vscode` at `^1.101.0` against a 1.131 stable ([vscode-api-adoption.md](vscode-api-adoption.md)), a scheduled Insiders run is the cheapest possible early warning for a breaking platform change.
+
+## Proposed feature
+
+- **Measure coverage on both testable tiers.** The suite tier via `@vscode/test-cli`'s built-in `coverage` config; the unit tier via **`c8`** (Node's native V8 coverage — no `nyc`-style source instrumentation, so no build-step change and no risk of instrumented code leaking into a package). Emit `lcov` + `cobertura` + `text-summary` from both.
+- **Upload both to Codecov under separate flags** (`unit`, `suite`) rather than merging locally — Codecov merges server-side, which avoids reproducing mssql's `mergeReports.js` + ReportGenerator + .NET-toolchain step for the same result.
+- **Do not set a coverage gate in the first pass.** mssql's 50 %/70 % is *their* measured baseline, not a universal target; copying a number before measuring produces either a no-op gate or an instantly-red build. Measure first, then set the project floor at roughly the measured value and a patch target above it, so the gate ratchets rather than blocks.
+- **JUnit XML + a GitHub check.** `mocha-multi-reporters` + `mocha-junit-reporter` (exactly mssql's pair) and `dorny/test-reporter`, so a failing test shows up as an annotated check with the failing test name, not a line to find in a log. Worth adopting mssql's `source-map-support` hook at the same time if the test tsconfigs emit sourcemaps, so the annotation points at the `.ts`.
+- **A platform matrix for the tiers that can afford one.** The unit tier is fast and has no external dependencies — run it on `ubuntu-latest`, `windows-latest`, and `macos-latest`. The suite tier needs a Firebird server, so Windows/macOS coverage there is a bigger lift; the cheaper first step is to run the *unit* tier cross-platform, since the process-spawning and path-handling logic that differs by platform is all unit-testable.
+- **A scheduled Insiders run** of the suite tier (mssql's `version: "insiders"`), on a nightly cron rather than per PR, reported separately so an upstream breakage does not block merges.
+- **Decide and test Workspace Trust.** Declare `capabilities.untrustedWorkspaces` explicitly (almost certainly `supported: false` with a stated reason, given the external-process surface), and add a suite config that opens an untrusted folder to assert the extension degrades the way the declaration promises.
+
+## Suggested phases
+
+1. **Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate. Publish the first measured number in the PR description so the baseline is on record.
+2. **Reporting**: JUnit XML from all tiers + `dorny/test-reporter` checks; source-map registration if sourcemaps are available.
+3. **Coverage gate** set from phase 1's actual baseline, patch target above project target.
+4. **Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.
+5. **Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.

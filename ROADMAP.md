@@ -72,6 +72,7 @@ The following features are adapted from Microsoft's [vscode-mssql](https://githu
 - [x] Visual multi-table Schema Designer — drag-and-drop ER modeling, auto-layout, and consolidated DDL generation, replacing/merging today's read-only schema visualizer and single-table designer ([design doc](docs/roadmap/visual-schema-designer.md))
 - [x] Copilot-assisted schema editing inside the Schema Designer — natural-language edits applied to an open diagram, not just one-shot DDL generation (see design doc above)
 - [x] Extend the Table Designer to alter existing tables, not just create new ones (see design doc above)
+- [ ] ORM-based migrations from the Schema Designer — emit the designer's diff as a migration file for a JS/TS ORM (Prisma, TypeORM, Sequelize, Knex) instead of only raw DDL, mirroring mssql 1.43.0's "ORM-based migrations in Schema Designer" (speculative — validate demand first, and confirm which ORMs actually have usable Firebird support before picking one)
 
 ### Query execution & analysis
 
@@ -81,6 +82,7 @@ The following features are adapted from Microsoft's [vscode-mssql](https://githu
 - [x] Configurable keyboard shortcuts for query/result actions (a `firebird.shortcuts` setting, mirroring `mssql.shortcuts`)
 - [x] Per-session transaction isolation level, lock timeout, and other `SET`-option controls exposed as settings
 - [x] AI analysis of query results in the results panel — reuse the existing `/explain`/`/optimize` chat-prompt-building pattern (`src/copilot/prompts.ts`) to summarize/explain a result set on request, mirroring mssql's own "future" roadmap item for Copilot-assisted result analysis
+- [ ] Server-side result paging and query-level filtering — today every row of a result is fetched and posted to the webview (`selectAllRecordsQuery()` is a bare `SELECT * FROM t`, and `firebird.recordsPerPage` only sets DataTables' client-side page length), so sort/filter/page never reach the server and a large table has no ceiling at all; mssql 1.43.0's "query-level filtering for Edit Data across full result sets" is the same idea ([design doc](docs/roadmap/large-result-sets.md))
 
 ### Data import/export & integration
 
@@ -122,17 +124,55 @@ The following features are adapted from Microsoft's [PostgreSQL extension for VS
 
 - [x] Generic "Script as Create" / "Script as Drop" — reverse-engineer any selected object's DDL from one tree action regardless of type, rather than only tables/procedures/views/triggers each having their own bespoke edit command
 - [x] Object privileges/grants viewer — show a selected object's grants (`RDB$USER_PRIVILEGES`) in a simple read-only panel, complementing "Script as Create" (which covers DDL, not privileges)
+- [ ] Deep refresh — refreshing a tree node re-reads all of its *expanded* descendants in place, so objects added or dropped elsewhere appear/disappear without collapsing the tree or reconnecting (pgsql 1.19.0's "Object Explorer refresh handling additions and deletions throughout subtrees"); today `refresh(element)` only fires the change event for that one node
 
 ### Connectivity
 
 - [x] SSH tunneling — connect to a Firebird server reachable only through an SSH bastion/jump host, tunneling the wire-protocol connection through a local forwarded port ([design doc](docs/roadmap/ssh-tunneling.md))
 
+## Firebird 6 support
+
+Firebird 6.0 is the first Firebird release with SQL schemas, which changes the object model this extension is built on rather than adding a feature beside it. The CI already installs a Firebird 6 snapshot, so this is testable today.
+
+- [ ] **SQL schemas** — a schema level in the Object Explorer, `RDB$SCHEMA_NAME` in every metadata query, schema-qualified DDL/scripting/row-editing, `SET SEARCH_PATH`-aware completion and a "New Query in Schema" action, and color-coded schemas in the Schema Designer. Every metadata query in `src/shared/queries.ts` is schema-blind today (`grep -rn 'RDB\$SCHEMA' src/` returns nothing at all), so on a Firebird 6 database with two same-named tables in different schemas the tree shows two indistinguishable nodes and every action on them resolves by search path — silently operating on the wrong object. All of it must be version-gated: `RDB$SCHEMA_NAME` is a hard SQL error on Firebird 3/4/5 ([design doc](docs/roadmap/firebird6-schemas.md))
+
+## Editor language features
+
+- [ ] **Hover, Go to Definition, and Document Symbols for `.sql` files** — `languages.registerCompletionItemProvider` is currently the *only* language provider registered in the entire codebase; there is no hover, no `F12`, and no Outline/breadcrumb for a SQL script. All three reuse machinery that already exists (`SchemaProvider`'s metadata cache, `sql-splitter.ts`'s statement boundaries, `script-as/ddl-builders.ts`'s DDL generation) ([design doc](docs/roadmap/sql-language-features.md))
+
+## VS Code platform API adoption
+
+`engines.vscode` is `^1.101.0` while VS Code stable is 1.131 — the extension runs fine, but the type floor hides ~13 months of API additions, several of which replace code written by hand here. Reviewed release by release; Marketplace-publishable work only (proposed APIs are tracked as a watch list in the design doc) ([design doc](docs/roadmap/vscode-api-adoption.md)).
+
+- [ ] Raise `engines.vscode`/`@types/vscode` to `^1.110.0` — the floor that covers every finalized API below
+- [ ] `context.secrets.keys()` (1.105) to reconcile stored passwords against saved connections and back a "Clear All Saved Passwords" command — `CredentialStore` can store, read, and delete a password but cannot enumerate them, so a secret orphaned by a failed delete stays in SecretStorage permanently and invisibly
+- [ ] Ship the Firebird dialect rules already in `src/copilot/prompts.ts` as a `contributes.chatInstructions` file (1.105), so agent mode and inline chat write Firebird-correct SQL instead of only the `@firebird` participant — the missing half of the existing Language Model Tools work
+- [ ] `ThemeIcon` webview/custom-editor tab icons (1.110) for the six webviews that currently share the default editor tab icon
+- [ ] `QuickInputButton.toggle`/`.location` and `QuickPick.prompt`/`QuickPickItem.resourceUri` (1.108/1.109) in the Object Explorer filter, object search, and connection picker
+- [ ] Contribute the view container to the `secondarySidebar` (1.106), so the connection tree can sit opposite the editor with results in the panel
+
+## Distribution
+
+- [ ] Publish to the [Open VSX Registry](https://open-vsx.org/) alongside the VS Marketplace, so the extension installs in Cursor, VSCodium, and other non-Microsoft builds — vscode-pgsql ships exactly this (a Cursor build on Open VSX), and this extension's own MCP server already names Cursor as a target client while being uninstallable there. There is no release/publish workflow in `.github/workflows/` at all today (only `ci`, `e2e`, and `vscode-host`), so this is a packaging/release-automation item as much as a registry one
+
 ## Testing and CI
 
 - [x] E2E test matrix covering Firebird 3, 4, 5, and 6 (snapshot) across Node.js 24-26, mirroring [node-firebird's own CI](https://github.com/mariuz/node-firebird/blob/master/.github/workflows/node.js.yml) so driver-compatibility regressions surface before they reach users on older or newer servers
+
+Reviewed against [vscode-mssql](https://github.com/microsoft/vscode-mssql)'s actual test pipeline — `codecov.yml`, `playwright.config.ts`, `.vscode-test.mjs`, and `build-and-test.yml`, not its documentation. (vscode-pgsql's public repository contains only a README, changelog, and images — no source, no tests, nothing to compare against.) Two design docs: [test-coverage-and-reporting.md](docs/roadmap/test-coverage-and-reporting.md) and [webview-ui-testing.md](docs/roadmap/webview-ui-testing.md).
+
+- [ ] **Measure test coverage.** There is no coverage tooling in the repo at all — no `nyc`/`c8`/`istanbul` dependency, nothing computed in CI, no record of what fraction of `src/` the 83 test files across the three tiers actually reach. The installed `@vscode/test-cli@0.0.12` **already supports** `--coverage`/`coverage: { include, exclude, reporter, srcDir }` (verified against the installed copy), so the suite tier needs a config change and no new dependency; the plain-Mocha unit tier needs `c8`. Measure before setting any gate — mssql's Codecov thresholds (project 50 %, patch 70 %) are their measured baseline, not a target to copy
+- [ ] **Machine-readable test results** — JUnit XML via `mocha-multi-reporters` + `mocha-junit-reporter` surfaced as an annotated GitHub check (mssql's exact pair, plus `dorny/test-reporter`), so a failure names the failing test instead of hiding in a job log
+- [ ] **Cross-platform unit-test matrix** (Windows + macOS alongside Linux) — every workflow is `ubuntu-latest` today, yet the process-spawning and path-handling code is where the platform differences live: `executable-probe.ts`, `isql-terminal.ts`, `gbak-options.ts`. Both external-tool bugs fixed in 0.1.96 and 0.2.2 were of exactly this class, and the unit tier is fast enough to fan out
+- [ ] **VSIX packaging + install smoke test** — all three tiers run from source via `extensionDevelopmentPath`, so nothing ever exercises the *packaged* extension; a `.vscodeignore` mistake, a missing bundled asset, or a broken esbuild external ships silently across three separate bundle outputs. Package with `vsce`, install into the test VS Code, activate, run a command (mssql's `vsix.spec.ts`) — also a prerequisite for the Open VSX item above
+- [ ] **Real-browser webview tests (Playwright)** — the six webviews are verified today only by loading their `app.js` under `src/test/webview-harness.ts`, a Proxy-based stub whose own header states it is "intentionally not a real DOM" and excludes anything needing real layout (the Schema Designer's `render()`/`measureAll()` specifically). No test has ever confirmed that any webview *renders*. Nightly rather than per-PR, given how fragile mssql's own equivalent tier is configured to be (`workers: 1`, `retries: 2`, video-on-failure)
+- [ ] **Nightly VS Code Insiders run** of the extension-host suite — every tier pins stable today, and with `engines.vscode` well behind current stable this is the cheapest early warning for an upstream breaking change
+- [ ] **Declare and test Workspace Trust** — `package.json` declares no `capabilities.untrustedWorkspaces`, so VS Code silently disables the extension in Restricted Mode. That is probably the right answer for an extension that reads `.vscode/firebird.json` and spawns `isql`/`gbak`/`docker`, but it is currently a default nobody chose and no test asserts; VS Code's testing guidance recommends separate trusted/untrusted test configurations
 
 ---
 
 > **Note**: This roadmap is subject to change based on community feedback and contributions. Feature requests and suggestions are welcome via [GitHub Issues](https://github.com/mariuz/vscode-firebird-studio/issues).
 >
 > Inspired by the features announced in [Microsoft's IDE for PostgreSQL in VS Code](https://techcommunity.microsoft.com/blog/adforpostgresql/announcing-a-new-ide-for-postgresql-in-vs-code-from-microsoft/4414648), by [Microsoft's vscode-mssql extension](https://github.com/microsoft/vscode-mssql) for SQL Server, and by [Microsoft's vscode-pgsql extension](https://marketplace.visualstudio.com/items?itemName=ms-ossdata.vscode-pgsql) for PostgreSQL.
+>
+> **Upstream review cutoffs** (2026-08-01): vscode-mssql through **1.44.1**, vscode-pgsql through **1.28.0** (plus its published feature documentation, not only its changelog), and the VS Code extension API through **1.131**. Both extensions' changelogs were last reviewed on 2026-07-31 and have shipped nothing new since, so the items added in this round come from reviewing their documented feature surface and the VS Code platform rather than their release notes. The testing items were reviewed separately against vscode-mssql's test configuration and CI workflows in source; vscode-pgsql publishes no source or tests, so it could not be reviewed for testing practice at all.
