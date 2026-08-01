@@ -335,4 +335,54 @@ suite('schema-designer app.js – diff engine / DDL generation (via __test__ hoo
       assert.ok(hooks.buildDDL().includes('ALTER TABLE PUBLIC.ORDERS ADD NOTE'), hooks.buildDDL());
     });
   });
+
+  suite('Firebird 6 schemas — colour coding', function () {
+    test('a colour is assigned per schema, deterministically and without collisions', function () {
+      const schemas = ['PUBLIC', 'SALES'];
+      const a = hooks.schemaColor('PUBLIC', schemas);
+      const b = hooks.schemaColor('SALES', schemas);
+      assert.ok(a && b, `${a} / ${b}`);
+      assert.notStrictEqual(a, b, 'two schemas must not share a colour');
+      assert.strictEqual(hooks.schemaColor('PUBLIC', schemas), a, 'must be stable across calls');
+    });
+
+    test('assignment is by sorted position, so it does not depend on row order', function () {
+      // Hashing the name would risk two schemas colliding on one colour; position cannot.
+      assert.strictEqual(hooks.schemaColor('SALES', ['PUBLIC', 'SALES']), hooks.schemaColor('SALES', ['PUBLIC', 'SALES']));
+    });
+
+    test('an unknown schema gets no colour rather than a misleading one', function () {
+      assert.strictEqual(hooks.schemaColor('NOPE', ['PUBLIC']), null);
+    });
+
+    test('a single-schema diagram lists no legend — one colour explains nothing', function () {
+      hooks.handleSchemaData(schemaPayload({
+        graph: {
+          tables: [{ name: 'PUBLIC.ORDERS', displayName: 'ORDERS', schema: 'PUBLIC', columns: [col({ name: 'ID', type: 'INTEGER' })] }],
+          relationships: [],
+        },
+      }));
+      assert.deepStrictEqual(hooks.schemasInDraft(), ['PUBLIC']);
+    });
+
+    test('two schemas are both listed', function () {
+      hooks.handleSchemaData(schemaPayload({
+        graph: {
+          tables: [
+            { name: 'PUBLIC.ORDERS', displayName: 'ORDERS', schema: 'PUBLIC', columns: [col({ name: 'ID', type: 'INTEGER' })] },
+            { name: 'SALES.ORDERS', displayName: 'SALES.ORDERS', schema: 'SALES', columns: [col({ name: 'ID', type: 'INTEGER' })] },
+          ],
+          relationships: [],
+        },
+      }));
+      assert.deepStrictEqual(hooks.schemasInDraft(), ['PUBLIC', 'SALES']);
+    });
+
+    test('a pre-Firebird-6 graph has no schemas at all', function () {
+      hooks.handleSchemaData(schemaPayload({
+        graph: { tables: [{ name: 'ORDERS', columns: [col({ name: 'ID', type: 'INTEGER' })] }], relationships: [] },
+      }));
+      assert.deepStrictEqual(hooks.schemasInDraft(), []);
+    });
+  });
 });

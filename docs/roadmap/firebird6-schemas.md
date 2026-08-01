@@ -246,10 +246,20 @@ proc files: procedures/TOTALS.sql, procedures/SALES.TOTALS.sql
 
 The procedure line is the one to read twice: parameters are keyed by qualified name, so `PUBLIC.TOTALS` gets `M` and `SALES.TOTALS` gets `N`. Keyed by bare name — as before — each procedure collected *both* procedures' parameters, and the extracted DDL would have declared a signature that exists nowhere.
 
+## Phase 4 — colour-coded schemas in the designer (done)
+
+pgsql's presentation, and the thing that makes a multi-schema ER diagram readable: each schema's tables get a distinct header colour, with a legend saying which is which.
+
+- **Colour by sorted position, not by hashing the name.** A hash can collide, and two schemas sharing a colour would be worse than no colour at all. Position spreads hues evenly around the wheel with fixed saturation and lightness chosen to stay legible against both light and dark editor themes.
+- **Only when there is something to distinguish.** One schema means every box the same colour, which is noise, so both the colouring and the legend button stay hidden below two schemas — a pre-Firebird-6 database sees exactly what it saw before.
+- **The legend is a toggle**, not a permanent panel: it floats over the canvas, so it has to be dismissable. It re-renders with the diagram rather than only on load, so adding a table from another schema lights it up without a refresh.
+
+The data was already there — `buildSchemaGraph()` has carried `schema` per table since phase 1h — so this is presentation only, with `schemaColor()` and `schemasInDraft()` exported through the webview's existing `__test__` hook and covered by six tests.
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
 2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
 3. **Search path**: per-connection default schema, `SET SEARCH_PATH` on session open, "New Query in Schema", and search-path-aware completion ranking/qualification.
-4. **Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools so agent-written SQL is qualified too.
+4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
 5. **Lifecycle**: `CREATE`/`ALTER`/`DROP SCHEMA` actions, schema-level grants, per-schema folders in Database Projects, and schema-qualified schema-diff.

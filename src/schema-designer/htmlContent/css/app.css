@@ -288,3 +288,20 @@ body {
   white-space: pre;
   display: none;
 }
+
+/* Schema legend (Firebird 6). Hidden unless the database actually has more than one schema —
+   a single-schema diagram gains nothing from a legend with one entry in it. */
+#schema-legend {
+  position: absolute;
+  right: 12px;
+  top: 48px;
+  z-index: 5;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground);
+  font-size: 12px;
+}
+#schema-legend .fb-legend-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+#schema-legend .fb-legend-swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid var(--vscode-panel-border); }

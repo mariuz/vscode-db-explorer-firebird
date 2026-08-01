@@ -18,6 +18,8 @@
     btnRefresh: document.getElementById("btn-refresh"),
     btnAutoLayout: document.getElementById("btn-auto-layout"),
     btnFit: document.getElementById("btn-fit"),
+    btnSchemaLegend: document.getElementById("btn-schema-legend"),
+    schemaLegend: document.getElementById("schema-legend"),
     btnZoomIn: document.getElementById("btn-zoom-in"),
     btnZoomOut: document.getElementById("btn-zoom-out"),
     generateBtn: document.getElementById("generateBtn"),
@@ -159,7 +161,7 @@
       }));
       // `name` stays the qualified identity (it is what DDL and relationship endpoints use);
       // `displayName` is only what the box shows — see SchemaTable in schema-graph.ts.
-      return { id, name: t.name, displayName: t.displayName, isNew: false, columns, originalColumns };
+      return { id, name: t.name, displayName: t.displayName, schema: t.schema, isNew: false, columns, originalColumns };
     });
 
     pkConstraintNames = {};
@@ -344,6 +346,9 @@
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   function render() {
+    // Kept in step with the diagram it explains, rather than only on load: adding a table from
+    // another schema should light up the legend without a refresh.
+    renderSchemaLegend();
     clearDiagram();
     draftGraph.tables.forEach(renderTableNode);
     draftGraph.relationships.forEach(renderEdge);
@@ -368,6 +373,13 @@
 
     const header = document.createElementNS(SVG_NS, "rect");
     header.setAttribute("class", "fb-table-header");
+    // Only when there is something to distinguish: one schema means every box would be the same
+    // colour, which is noise rather than information.
+    const schemas = schemasInDraft();
+    if (schemas.length > 1 && table.schema) {
+      const colour = schemaColor(table.schema, schemas);
+      if (colour) { header.style.fill = colour; }
+    }
     header.setAttribute("width", pos.width);
     header.setAttribute("height", HEADER_HEIGHT);
     g.appendChild(header);
@@ -658,6 +670,10 @@
   }
 
   el.btnFit.addEventListener("click", fitToView);
+  // Toggle, not a permanent panel: the legend sits over the canvas, so it should be dismissable.
+  el.btnSchemaLegend.addEventListener("click", () => {
+    el.schemaLegend.hidden = !el.schemaLegend.hidden;
+  });
 
   el.btnAutoLayout.addEventListener("click", () => {
     runAutoLayout(null);
@@ -1178,11 +1194,62 @@
   }
 
   /**
+   * A stable colour per schema.
+   *
+   * Deterministic by *sorted position* rather than by hashing the name, so the same database
+   * always produces the same assignment and two schemas can never collide on one colour. Hues are
+   * spread evenly around the wheel; saturation and lightness are fixed at values that stay legible
+   * against both light and dark editor themes, which a random palette would not guarantee.
+   */
+  function schemaColor(schema, allSchemas) {
+    const index = allSchemas.indexOf(schema);
+    if (index < 0) { return null; }
+    const hue = Math.round((360 / Math.max(allSchemas.length, 1)) * index);
+    return `hsl(${hue}, 45%, 42%)`;
+  }
+
+  /** Distinct schemas in the draft, sorted — the input to schemaColor(). */
+  function schemasInDraft() {
+    return Array.from(new Set(draftGraph.tables.map(t => t.schema).filter(Boolean))).sort();
+  }
+
+  /**
    * What a table's box is labelled with: the display name when the graph supplied one (i.e. the
    * qualified name minus a redundant default-schema prefix), otherwise the name itself.
    */
   function tableTitle(table) {
     return table.displayName || table.name;
+  }
+
+  /** Renders the legend body; returns the schemas it listed, so callers can tell if it is useful. */
+  function renderSchemaLegend() {
+    const legend = document.getElementById("schema-legend");
+    const button = document.getElementById("btn-schema-legend");
+    const schemas = schemasInDraft();
+    if (!legend || !button) { return schemas; }
+
+    // The button appears only when a legend would say something — a single-schema database gets
+    // neither, exactly as before Firebird 6 existed.
+    button.hidden = schemas.length <= 1;
+    if (schemas.length <= 1) {
+      legend.hidden = true;
+      return schemas;
+    }
+
+    legend.innerHTML = "";
+    schemas.forEach(schema => {
+      const row = document.createElement("div");
+      row.className = "fb-legend-row";
+      const swatch = document.createElement("span");
+      swatch.className = "fb-legend-swatch";
+      swatch.style.background = schemaColor(schema, schemas);
+      row.appendChild(swatch);
+      const label = document.createElement("span");
+      label.textContent = schema;
+      row.appendChild(label);
+      legend.appendChild(row);
+    });
+    return schemas;
   }
 
   // Test-only hook: no-op in a real webview (there is no `module` global there), lets a
@@ -1191,6 +1258,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports.__test__ = {
       handleSchemaData, buildDDL, addTable, addRelationship, measureAll, render, tableTitle,
+      schemaColor, schemasInDraft, renderSchemaLegend,
       applyCopilotEdit, serializeSchemaSummary,
       getDraftGraph: () => draftGraph,
     };

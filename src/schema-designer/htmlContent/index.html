@@ -7,11 +7,13 @@
   <link type="text/css" rel="stylesheet" href="/css/app.css" media="screen,projection" />
 </head>
 <body>
+  <div id="schema-legend" hidden></div>
   <div id="toolbar">
     <button id="btn-add-table" title="Add a new table to the canvas">+ Add Table</button>
     <button id="btn-refresh" class="secondary" title="Reload the schema from the database (discards unsaved changes)">Refresh</button>
     <button id="btn-auto-layout" class="secondary" title="Recalculate table positions">Auto Layout</button>
     <button id="btn-fit" class="secondary" title="Zoom and center so every table is visible">Fit to View</button>
+    <button id="btn-schema-legend" class="secondary" title="Show which colour belongs to which schema" hidden>Schemas</button>
     <span class="zoom-controls">
       <button id="btn-zoom-out" class="secondary" title="Zoom out">−</button>
       <button id="btn-zoom-in" class="secondary" title="Zoom in">+</button>
