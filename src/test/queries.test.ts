@@ -37,7 +37,8 @@ import {
   fieldsQuery,
   getSchemasQuery,
   createSchemaQuery,
-  dropSchemaQuery} from '../shared/queries';
+  dropSchemaQuery,
+  setSearchPathQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -715,6 +716,21 @@ suite('schema lifecycle queries (Firebird 6)', function () {
     for (const bad of ['SALES; DROP DATABASE', "SALES'", 'SALES SCHEMA', '']) {
       assert.throws(() => createSchemaQuery(bad), `create accepted ${JSON.stringify(bad)}`);
       assert.throws(() => dropSchemaQuery(bad), `drop accepted ${JSON.stringify(bad)}`);
+    }
+  });
+});
+
+suite('setSearchPathQuery() (Firebird 6)', function () {
+  test('names the schema, and not SYSTEM', function () {
+    // Firebird appends SYSTEM to every search path itself. Listing it would suggest the caller
+    // controls something they do not — verified live: after SET SEARCH_PATH TO SALES, the session
+    // reports "SALES", "SYSTEM".
+    assert.strictEqual(setSearchPathQuery('SALES'), 'SET SEARCH_PATH TO SALES;');
+  });
+
+  test('refuses anything that is not a plain identifier', function () {
+    for (const bad of ['SALES, PUBLIC', 'SALES; DROP DATABASE', "SALES'", '']) {
+      assert.throws(() => setSearchPathQuery(bad), `accepted ${JSON.stringify(bad)}`);
     }
   });
 });

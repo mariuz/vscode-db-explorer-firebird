@@ -172,6 +172,18 @@ export function getSchemasQuery(includeSystem = false): string {
         ORDER BY 1;`;
 }
 
+/**
+ * `SET SEARCH_PATH` (Firebird 6+) — sets which schemas unqualified names resolve through for the
+ * rest of the session.
+ *
+ * `SYSTEM` is appended implicitly by the engine whether or not it is listed, so it is left out
+ * here: naming it would suggest the caller controls something they do not.
+ */
+export function setSearchPathQuery(schemaName: string): string {
+  assertValidIdentifier(schemaName, "schema name");
+  return `SET SEARCH_PATH TO ${schemaName};`;
+}
+
 /** `CREATE SCHEMA` (Firebird 6+). The name is validated by the caller before it reaches here. */
 export function createSchemaQuery(schemaName: string): string {
   assertValidIdentifier(schemaName, "schema name");

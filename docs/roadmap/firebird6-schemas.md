@@ -274,10 +274,28 @@ DROP SCHEMA   : ok      -> ["PUBLIC","SALES"]
 
 **Not done in this phase**: `ALTER SCHEMA` (its useful form is `DEFAULT CHARACTER SET`/`DEFAULT SQL SECURITY`, which needs its own small wizard) and schema-level grants in the privileges viewer, which reads `RDB$USER_PRIVILEGES` by object name and would need a schema variant.
 
+## Phase 3 — New Query in Schema (done); per-connection default schema (not done)
+
+**New Query in Schema…** — pgsql 1.21.0's own feature — opens an untitled SQL document already scoped to a schema you pick. What it does is worth showing rather than describing, verified live:
+
+```
+SET SEARCH_PATH TO SALES;
+  session reports    -> "SALES", "SYSTEM"
+  SELECT * FROM ORDERS -> {ID: 1, TOTAL: 999, CUST_ID: null}    <- SALES.ORDERS
+```
+
+Under the default path that same unqualified statement returns `{ID: 1, NOTE: "public-row"}` — `PUBLIC.ORDERS`. One line at the top of the document changes which table every unqualified name in it means.
+
+**It seeds the statement rather than configuring the connection**, and that is the design decision here. The search path is *session* state, and this extension runs queries over a pooled connection whose session the user does not control — so setting it out of band would be invisible, would not survive the pool handing out a different connection, and would silently change what an unrelated editor's query means. In the document, what runs is what you can see, and it travels with the file if it is saved or shared.
+
+`SYSTEM` is deliberately not named in the generated statement: Firebird appends it to every search path itself, so listing it would suggest the user controls something they do not.
+
+**Still not done — the per-connection default schema.** Storing a schema on the saved connection and applying it when the session opens needs a hook in connection creation that survives pooling; `isc_dpb_search_path` (the DPB item meant for exactly this) is not exposed by the pure-JS driver. That is a driver-level change, not a UI one, and is the remaining piece of this phase along with search-path-aware completion ranking.
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
 2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
-3. **Search path**: per-connection default schema, `SET SEARCH_PATH` on session open, "New Query in Schema", and search-path-aware completion ranking/qualification.
+3. **Search path**: ~~"New Query in Schema"~~ — **done**. The per-connection default schema and search-path-aware completion ranking remain; see phase 3 above for why the first is a driver-level change.
 4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
 5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5). `ALTER SCHEMA`, schema-level grants and per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).

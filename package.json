@@ -96,6 +96,11 @@
     ],
     "commands": [
       {
+        "command": "firebird.database.newQueryInSchema",
+        "title": "New Query in Schema...",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.database.dropSchema",
         "title": "Drop Schema...",
         "category": "Firebird"
@@ -1577,6 +1582,11 @@
           "command": "firebird.database.dropSchema",
           "when": "view == firebird-explorer && viewItem == database",
           "group": "firebird@9"
+        },
+        {
+          "command": "firebird.database.newQueryInSchema",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "firebird@8"
         }
       ]
     },

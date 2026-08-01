@@ -6,7 +6,7 @@ import {Options, FirebirdTree, ConnectionOptions} from "./interfaces";
 import {connectionPicker, pickConnectionOptions} from "./shared/connection-picker";
 import {getEngineMajorVersion} from "./shared/engine-version";
 import {supportsSchemas} from "./shared/schema-support";
-import {createSchemaQuery, dropSchemaQuery, getSchemasQuery} from "./shared/queries";
+import {createSchemaQuery, dropSchemaQuery, getSchemasQuery, setSearchPathQuery} from "./shared/queries";
 import {Driver} from "./shared/driver";
 import * as vscode from 'vscode';
 import {Global} from "./shared/global";
@@ -469,6 +469,40 @@ export function activate(context: ExtensionContext) {
         logger.error(err?.message ?? err);
         logger.showError(`Could not create the schema: ${err?.message ?? err}`);
       }
+    })
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.newQueryInSchema", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      const details = await requireSchemaSupport(node);
+      if (!details) { return; }
+
+      let schemas: string[];
+      try {
+        const rows = await Driver.runQuery(getSchemasQuery(), details);
+        schemas = (rows ?? []).map((r: any) => String(r.SCHEMA_NAME).trim());
+      } catch (err: any) {
+        logger.showError(`Could not list schemas: ${err?.message ?? err}`);
+        return;
+      }
+      if (schemas.length === 0) {
+        logger.showInfo("This database has no user schemas.");
+        return;
+      }
+
+      const picked = await window.showQuickPick(schemas, {
+        placeHolder: "Unqualified names in the new query will resolve in this schema",
+      });
+      if (!picked) { return; }
+
+      Global.activeConnection = details;
+      // Seeds the statement rather than configuring the connection: the search path is session
+      // state, and this extension's queries run over a pooled connection whose session the user
+      // does not control. Putting it in the document means what runs is what you can see — and it
+      // travels with the file if it is saved or shared.
+      await Driver.createSQLTextDocument(`${setSearchPathQuery(picked)}\n\n`);
     })
   );
 
