@@ -192,14 +192,26 @@ chore(deps): upgrade esbuild to 0.19
 
 ## Testing
 
-The project uses VS Code's built-in Mocha test runner. Tests are in `src/test/`.
+There are three independent test tiers (see `CLAUDE.md` for how they differ):
 
 ```bash
-# Run extension tests (requires VS Code)
-npm run test
+npm run test              # unit tests — plain Mocha, mocked `vscode`, no VS Code needed
+npm run test:e2e          # against a real Firebird server (configured via FIREBIRD_* env vars)
+npm run test:vscode-host  # inside a real Extension Development Host
 ```
 
-When adding new features, check whether existing tests cover the affected code paths and add tests if they don't.
+When adding new features, check whether existing tests cover the affected code paths and add tests if they don't. A new file under test must also be added to `tsconfig.test.json`'s `include` list, or the unit tier will not compile it.
+
+### Coverage
+
+```bash
+npm run test:coverage              # unit tier, via c8 -> coverage/unit/
+npm run test:vscode-host:coverage  # suite tier, via @vscode/test-cli -> coverage/suite/
+```
+
+Both use V8 coverage remapped to the TypeScript sources, so neither needs an instrumentation build step, and both emit `text-summary`, `lcov`, and `cobertura`. CI runs the unit tier's coverage on every push, prints the summary in the job summary, and uploads the report as an artifact. **There is no coverage threshold yet** — the numbers are informational.
+
+One caveat worth knowing before reading a percentage: the unit tier's report only includes files some test actually loads, so the `vscode`-API-heavy modules that tier deliberately does not reach (`extension.ts`, the tree provider, the webview hosts, the notebook, the Copilot integration) are *absent* from it rather than counted as 0 %. Those are the suite tier's job. See [`docs/roadmap/test-coverage-and-reporting.md`](docs/roadmap/test-coverage-and-reporting.md) for the full list and why `c8`'s `all` option cannot close the gap.
 
 ---
 

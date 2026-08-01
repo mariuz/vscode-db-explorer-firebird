@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/c8rc.json",
+  "src": ["out"],
+  "excludeAfterRemap": true,
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/test/**",
+    "src/interfaces/**",
+    "**/node_modules/**"
+  ],
+  "reporter": ["text-summary", "lcov", "cobertura"],
+  "reports-dir": "coverage/unit",
+  "temp-directory": "coverage/.tmp-unit"
+}

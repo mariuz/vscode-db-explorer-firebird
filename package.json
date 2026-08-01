@@ -44,8 +44,10 @@
     "watch": "npm run -S esbuild-base -- --sourcemap --watch",
     "tsc-watch": "node node_modules/typescript7/bin/tsc -watch -p ./",
     "test": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
+    "test:coverage": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; c8 mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
     "test:e2e": "node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000 --exit",
-    "test:vscode-host": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test"
+    "test:vscode-host": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test",
+    "test:vscode-host:coverage": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test --coverage"
   },
   "contributes": {
     "notebooks": [
@@ -1834,6 +1836,7 @@
     "@typescript-eslint/parser": "^5.52.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
+    "c8": "^12.0.0",
     "copy-folder-util": "^1.1.1",
     "esbuild": "^0.17.8",
     "eslint": "^8.34.0",

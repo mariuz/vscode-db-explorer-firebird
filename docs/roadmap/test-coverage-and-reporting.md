@@ -40,9 +40,28 @@ The three-tier setup is genuinely good, and one part of it is better than mssql'
 - **A scheduled Insiders run** of the suite tier (mssql's `version: "insiders"`), on a nightly cron rather than per PR, reported separately so an upstream breakage does not block merges.
 - **Decide and test Workspace Trust.** Declare `capabilities.untrustedWorkspaces` explicitly (almost certainly `supported: false` with a stated reason, given the external-process surface), and add a suite config that opens an untrusted folder to assert the extension degrades the way the declaration promises.
 
+## Phase 1 — coverage measurement (done)
+
+**The first measured baseline: 70.75 % of statements, 90.77 % of branches, 62.22 % of functions** (9 948/14 059 statements) across the **76 source files the unit tier loads**, from 1 438 passing tests. That denominator is the part that matters and is easy to misread, so it is stated here rather than left implicit — see "what the number does not cover" below.
+
+- **Unit tier**: `c8` (added as the one new devDependency) wrapping the existing Mocha invocation, configured in `.c8rc.json`. V8 coverage, no instrumentation step, and nothing about how the tests run changes — `c8` propagates Mocha's exit code, so a failing test still fails the job. `npm run test:coverage` locally; CI's existing "Run unit tests" step became "Run unit tests with coverage".
+- **Suite tier**: a `coverage` block in `.vscode-test.mjs`, using `@vscode/test-cli`'s own V8 coverage — **no new dependency, because it was already installed** (0.0.12 supports `--coverage`, `--coverage-output`, `--coverage-reporter` and a config-level `coverage` object; verified against the installed copy). It only activates with `--coverage`, so plain `npm run test:vscode-host` is unaffected; `npm run test:vscode-host:coverage` is the measured variant. **Not yet run end to end** — that tier needs a downloaded VS Code and a live Firebird server, so only the configuration is verified (via `vscode-test --list-configuration`), not the resulting number.
+- Both tiers emit `text-summary` + `lcov` + `cobertura` into `coverage/unit` and `coverage/suite`. CI writes the summary into the job's GitHub Step Summary and uploads the report as a 14-day artifact.
+- **No gate was set**, deliberately — see the note above about not copying mssql's thresholds. Phase 3 sets one from this baseline.
+
+### What the number does not cover
+
+**20 of the 96 non-test source files are outside the unit tier entirely** and are silently absent from the report rather than counted as 0 %. They are, without exception, the `vscode`-API-heavy modules the mocked-`vscode` tier was never meant to reach:
+
+`extension.ts`, `firebirdTreeDataProvider.ts`, `result-view/index.ts`, `result-view/queryResultsView.ts`, `schema-designer/index.ts`, `profiler/index.ts`, `query-plan-view/index.ts`, `sql-notebook/{index,controller,serializer,export}.ts`, `copilot/{copilot-chat-participant,lm-tools,ai-query-actions}.ts`, `language-server/{index,db-words.provider}.ts`, `mcp-server/server.ts`, `container-provisioning/index.ts`, `mock-data/mock-data.ts`, `shared/connection-picker.ts`.
+
+That absence is a property of the filter, not an oversight: coverage results are remapped through sourcemaps to `src/**/*.ts` (`excludeAfterRemap`), and a module no test ever `require`s has no V8 data to remap, so it drops out. `c8`'s `all: true` cannot fix it — it was tried and is a **no-op** under this configuration (identical output, 76 files either way), because pointing `all` at `out/` instead pulls the vendored webview JavaScript (jQuery, DataTables) and the esbuild bundle into the denominator, which inflated the figure to a meaningless 93.77 % over 102 904 statements. Clean filter, honest subset, documented gap — the right trade for a baseline.
+
+**The suite tier is what covers most of those 20 files**, which is precisely why phase 1 wired it up even though its number cannot be produced in an environment without a Firebird server. A combined figure only becomes meaningful once both tiers report.
+
 ## Suggested phases
 
-1. **Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate. Publish the first measured number in the PR description so the baseline is on record.
+1. ~~**Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate.~~ — **done**, see above, except the Codecov upload: it needs a `CODECOV_TOKEN` repository secret that does not exist yet, so CI publishes the summary and an artifact instead. Adding the upload is a two-line change once the token is configured.
 2. **Reporting**: JUnit XML from all tiers + `dorny/test-reporter` checks; source-map registration if sourcemaps are available.
 3. **Coverage gate** set from phase 1's actual baseline, patch target above project target.
 4. **Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.

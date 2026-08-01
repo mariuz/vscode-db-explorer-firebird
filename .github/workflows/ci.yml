@@ -31,5 +31,30 @@ jobs:
         # support yet, and it owns the .bin/tsc link. See CONTRIBUTING.md.
         run: node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false
 
-      - name: Run unit tests
-        run: ./node_modules/.bin/mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'
+      - name: Run unit tests with coverage
+        # c8 wraps mocha and propagates its exit code, so a failing test still fails the job.
+        # V8 coverage, remapped to the TypeScript sources via the sourcemaps tsconfig.test.json
+        # already emits — no instrumentation step, and nothing about how the tests run changes.
+        run: ./node_modules/.bin/c8 ./node_modules/.bin/mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Unit-test coverage'
+            echo
+            echo '```'
+            ./node_modules/.bin/c8 report --reporter=text-summary
+            echo '```'
+            echo
+            echo 'Scope: the source files the unit tier compiles (`tsconfig.test.json`), which is a subset of `src/`.'
+            echo 'The extension-host suite tier is measured separately by `npm run test:vscode-host:coverage`.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage/unit
+          retention-days: 14
