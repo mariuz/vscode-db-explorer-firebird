@@ -82,7 +82,7 @@ export default class ResultView extends QueryResultsView implements Disposable {
   private actualPlanCache = new Map<string, ActualPlanResult>();
 
   constructor(private extensionPath: string) {
-    super("resultview", "Firebird Query Results");
+    super("resultview", "Firebird Query Results", "table");
   }
 
   /** Display a single (legacy) result set. `tableName`, when known, pre-fills row editing. */

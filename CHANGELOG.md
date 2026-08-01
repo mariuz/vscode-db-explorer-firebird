@@ -4,6 +4,10 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ## Unreleased
 
+### Changed
+
+- **Firebird Studio's editor tabs now have their own icons.** Query results, the Schema Designer, the query plan, the profiler and mock data all opened with the generic editor icon, so having several of them open at once left a tab strip you had to read word by word. Each now shows a distinct icon that follows your colour theme.
+
 ### Added
 
 - **Copilot now knows Firebird's dialect everywhere, not just in `@firebird` chat.** Agent mode, inline chat and any other model could previously write `LIMIT 10`, `AUTO_INCREMENT` or `information_schema` against a Firebird database — all of which it rejects — because the dialect rules only ever reached the model through this extension's own chat participant. A dialect guide now ships with the extension and applies to any chat while you have a `.sql` or `.fbnb` file open: row limiting with `FIRST`/`SKIP`, `RDB$DATABASE` as the dummy table, identity columns and sequences, `EXECUTE BLOCK` and `SET TERM`, the `RDB$`/`MON$` catalogue, and qualifying names on Firebird 6 schemas.

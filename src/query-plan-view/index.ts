@@ -26,7 +26,7 @@ export class QueryPlanView extends QueryResultsView implements vscode.Disposable
   private lastRawPlan?: string;
 
   constructor(private readonly extensionPath: string) {
-    super("queryplanview", "Firebird Query Plan");
+    super("queryplanview", "Firebird Query Plan", "graph");
   }
 
   /** Both args are optional — Driver.getQueryPlan() resolves from the active editor/active connection itself, same as firebird.explainPlan. */

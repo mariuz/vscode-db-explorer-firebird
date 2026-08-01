@@ -1,4 +1,4 @@
-import { WebviewPanel, window, ViewColumn, Disposable, WebviewPanelOptions, WebviewOptions, Uri } from "vscode";
+import { WebviewPanel, window, ViewColumn, Disposable, WebviewPanelOptions, WebviewOptions, Uri, ThemeIcon} from "vscode";
 import { EventEmitter } from "events";
 import { dirname } from "path";
 import { readFile } from "fs";
@@ -17,7 +17,13 @@ export class QueryResultsView extends EventEmitter implements Disposable {
   // private resourcesPath: string;
   private panel: WebviewPanel | undefined;
   private htmlCache: { [path: string]: string };
-  constructor(private type: string, private title: string) {
+  /**
+   * @param icon Codicon id for the editor tab. Several of these panels can be open at once
+   *   (results, plan, designer, profiler) and they all showed the generic editor icon, which made
+   *   a busy tab strip unreadable. A `ThemeIcon` follows the theme, so unlike the light/dark PNG
+   *   pairs used elsewhere in this extension it needs no assets. Requires VS Code 1.110.
+   */
+  constructor(private type: string, private title: string, private icon?: string) {
     super();
     // this.resourcesPath = "";
     this.htmlCache = {};
@@ -48,6 +54,9 @@ export class QueryResultsView extends EventEmitter implements Disposable {
     };
 
     this.panel = window.createWebviewPanel(this.type, this.title, ViewColumn.Two, options);
+    if (this.icon) {
+      this.panel.iconPath = new ThemeIcon(this.icon);
+    }
     subscriptions.push(this.panel);
 
     subscriptions.push(this.panel.onDidDispose(() => this.dispose()));

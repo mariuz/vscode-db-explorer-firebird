@@ -74,10 +74,20 @@ What it covers, chosen as the differences that most often produce SQL Firebird r
 
 The VSIX smoke test gained a case for it. Instructions ship as plain Markdown outside `out/` and `src/`, so a broad ignore rule is exactly what would drop them — and their absence is silent, since chat simply stops receiving the rules with no error anywhere. That test is now 11 assertions and passed against the real packaged extension.
 
+## Phase 4a — themed webview tab icons (done)
+
+All five webview panels now set a `ThemeIcon` tab icon: results `table`, Schema Designer `type-hierarchy`, query plan `graph`, profiler `pulse`, mock data `beaker`. Four of them share `QueryResultsView`, so the icon is a constructor parameter there and each subclass names its own; mock data creates its panel directly and sets it inline.
+
+**Correction to this doc's own count**: it said *six* webviews. There are five panels. The SQL Notebook renderer is a notebook renderer, not a webview panel, and Data API Builder opens a text document rather than a webview at all.
+
+A `ThemeIcon` needs no assets and follows the active theme, unlike the light/dark PNG pairs this extension ships for tree items — which is the point of the 1.110 API.
+
+**Verified in a real VS Code**, not just type-checked: the Playwright tier now asserts `.tab .codicon-table` is visible after running a query. That is checkable there and essentially nowhere else — the unit tier's `vscode` mock would accept any string as a codicon id, so a typo would pass every other test and simply render nothing.
+
 ## Suggested phases
 
 1. ~~**Raise the floor**: `engines.vscode` and `@types/vscode` to `^1.110.0`.~~ — **done**.
 2. ~~**`secrets.keys()`**: activation-time reconciliation plus a "Clear All Saved Passwords" command.~~ — **done**, see above.
 3. ~~**`chatInstructions`** carrying the dialect rules, so agent mode writes Firebird SQL without going through `@firebird`.~~ — **done**; note the rules had to be written, not moved (see above).
-4. **Presentation**: `ThemeIcon` webview tab icons, then the QuickInput toggle/prompt refinements in object search and the Object Explorer filter.
+4. **Presentation**: ~~`ThemeIcon` webview tab icons~~ — **done** (phase 4a), then the QuickInput toggle/prompt refinements in object search and the Object Explorer filter.
 5. **Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.

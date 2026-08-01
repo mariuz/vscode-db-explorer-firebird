@@ -29,7 +29,7 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
   private copilotRequestCts?: vscode.CancellationTokenSource;
 
   constructor(private readonly extensionPath: string) {
-    super("schemadesigner", "Firebird Schema Designer");
+    super("schemadesigner", "Firebird Schema Designer", "type-hierarchy");
   }
 
   /** Opens the designer showing the whole schema — was SchemaVisualizer.open(). */

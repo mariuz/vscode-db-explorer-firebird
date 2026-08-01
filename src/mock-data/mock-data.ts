@@ -1,4 +1,4 @@
-import { Disposable, Uri, ViewColumn, WebviewPanel, WebviewPanelOptions, WebviewOptions, window } from "vscode";
+import { Disposable, Uri, ViewColumn, WebviewPanel, WebviewPanelOptions, WebviewOptions, window, ThemeIcon} from "vscode";
 import { dirname, join } from "path";
 import { readFile } from "fs";
 import { logger } from "../logger/logger";
@@ -67,6 +67,8 @@ export default class MockData implements Disposable {
     };
 
     this.panel = window.createWebviewPanel("mockdata", "Generate Mock Data", ViewColumn.Beside, options);
+    // A themed codicon rather than a light/dark asset pair — see QueryResultsView's constructor.
+    this.panel.iconPath = new ThemeIcon("beaker");
 
     subscriptions.push(
       this.panel,

@@ -46,4 +46,13 @@ test.describe("Query results grid", () => {
 
     await expectWebviewText(page, SENTINEL);
   });
+
+  test("the results tab carries its themed icon", async () => {
+    // docs/roadmap/vscode-api-adoption.md: the five webview panels all used to show the generic
+    // editor icon, making a tab strip with results + plan + designer open unreadable. A ThemeIcon
+    // renders as a codicon in the tab, which is checkable from here and nowhere else — the unit
+    // tier's `vscode` mock would happily accept any string.
+    const { page } = vscode;
+    await expect(page.locator('.tab .codicon-table').first()).toBeVisible({ timeout: 30_000 });
+  });
 });

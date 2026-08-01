@@ -32,7 +32,7 @@ export class ProfilerView extends QueryResultsView implements vscode.Disposable 
   private pendingInit: Message | undefined;
 
   constructor(private readonly extensionPath: string) {
-    super("profiler", "Firebird Connection Profiler");
+    super("profiler", "Firebird Connection Profiler", "pulse");
   }
 
   open(dbDetails: ConnectionOptions): void {
