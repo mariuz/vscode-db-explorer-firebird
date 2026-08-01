@@ -266,3 +266,32 @@ suite('buildSchemaGraph() — Firebird 6 schemas (docs/roadmap/firebird6-schemas
     assert.strictEqual(graph.relationships[0].refTable, 'PUBLIC.CUST');
   });
 });
+
+suite('buildSchemaGraph() — display name vs identity', function () {
+  const col = (schema: string | undefined, table: string, field: string) => ({
+    SCHEMA_NAME: schema, TABLE_NAME: table, FIELD_NAME: field,
+    FIELD_TYPE: 'INTEGER', FIELD_LENGTH: 4, NOT_NULL: 0, IS_PRIMARY_KEY: 0,
+  });
+
+  test('a default-schema table shows its bare name but keeps a qualified identity', function () {
+    // The identity feeds generated DDL and relationship endpoints, where relying on the search
+    // path is the bug; the label is what a human reads, and `PUBLIC.` on every box is just noise.
+    const [table] = buildSchemaGraph([col('PUBLIC', 'ORDERS', 'NOTE')] as any, []).tables;
+    assert.strictEqual(table.name, 'PUBLIC.ORDERS');
+    assert.strictEqual(table.displayName, 'ORDERS');
+    assert.strictEqual(table.schema, 'PUBLIC');
+  });
+
+  test('a table from another schema stays qualified in both', function () {
+    const [table] = buildSchemaGraph([col('SALES', 'ORDERS', 'TOTAL')] as any, []).tables;
+    assert.strictEqual(table.name, 'SALES.ORDERS');
+    assert.strictEqual(table.displayName, undefined, 'no separate label when it would equal the name');
+  });
+
+  test('pre-Firebird-6 rows carry neither, so consumers see exactly what they always did', function () {
+    const [table] = buildSchemaGraph([col(undefined, 'ORDERS', 'NOTE')] as any, []).tables;
+    assert.strictEqual(table.name, 'ORDERS');
+    assert.strictEqual(table.displayName, undefined);
+    assert.strictEqual(table.schema, undefined);
+  });
+});

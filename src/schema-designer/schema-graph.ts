@@ -4,7 +4,7 @@
  * free of any vscode/Driver dependency so it's unit-testable without a database.
  */
 
-import { schemaQualifiedName } from "../shared/schema-support";
+import { schemaDisplayName, schemaQualifiedName } from "../shared/schema-support";
 
 export interface SchemaColumn {
   name: string;
@@ -23,7 +23,21 @@ export interface SchemaColumn {
 }
 
 export interface SchemaTable {
+  /**
+   * The table's identity, and the name that goes into generated DDL — schema-qualified on
+   * Firebird 6 so nothing is left to the session's search path. Used as the key for positions,
+   * relationship endpoints and focus matching, so it must stay stable and unambiguous.
+   */
   name: string;
+  /**
+   * What to show on the diagram. Drops a redundant default-schema prefix, so a single-schema
+   * Firebird 6 database does not read `PUBLIC.` on every box, while a table from another schema
+   * stays qualified because that is the only thing telling two same-named tables apart. Absent
+   * when it would equal `name`.
+   */
+  displayName?: string;
+  /** The owning schema, when the server has them (Firebird 6+). */
+  schema?: string;
   columns: SchemaColumn[];
 }
 
@@ -93,7 +107,15 @@ export function buildSchemaGraph(columnRows: SchemaColumnRow[], fkRows: ForeignK
     const tableName = schemaQualifiedName(row.SCHEMA_NAME ?? undefined, row.TABLE_NAME);
     let table = tablesByName.get(tableName);
     if (!table) {
-      table = { name: tableName, columns: [] };
+      const schema = row.SCHEMA_NAME?.trim() || undefined;
+      const displayName = schemaDisplayName(schema, row.TABLE_NAME);
+      table = {
+        name: tableName,
+        // Only carried when it differs, so consumers can keep using `name` unchanged.
+        ...(displayName !== tableName ? { displayName } : {}),
+        ...(schema ? { schema } : {}),
+        columns: [],
+      };
       tablesByName.set(tableName, table);
     }
     table.columns.push({

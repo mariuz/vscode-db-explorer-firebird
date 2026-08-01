@@ -157,7 +157,9 @@
         name: c.name, type: c.type, length: c.length, notNull: c.notNull, isPrimaryKey: c.isPrimaryKey, dflt: c.dflt,
         original: originalColumns[i],
       }));
-      return { id, name: t.name, isNew: false, columns, originalColumns };
+      // `name` stays the qualified identity (it is what DDL and relationship endpoints use);
+      // `displayName` is only what the box shows — see SchemaTable in schema-graph.ts.
+      return { id, name: t.name, displayName: t.displayName, isNew: false, columns, originalColumns };
     });
 
     pkConstraintNames = {};
@@ -246,7 +248,7 @@
 
   function measureAll() {
     draftGraph.tables.forEach(table => {
-      let maxWidth = measureTextWidth(table.name, "fb-table-header-text") + 24;
+      let maxWidth = measureTextWidth(tableTitle(table), "fb-table-header-text") + 24;
       table.columns.forEach(col => {
         const w =
           measureTextWidth(columnLabel(col), "fb-col-text") +
@@ -374,7 +376,7 @@
     headerText.setAttribute("class", "fb-table-header-text");
     headerText.setAttribute("x", COL_PADDING);
     headerText.setAttribute("y", HEADER_HEIGHT / 2);
-    headerText.textContent = table.name + (table.isNew ? " (new)" : "");
+    headerText.textContent = tableTitle(table) + (table.isNew ? " (new)" : "");
     g.appendChild(headerText);
 
     table.columns.forEach((col, i) => {
@@ -1175,12 +1177,20 @@
     render();
   }
 
+  /**
+   * What a table's box is labelled with: the display name when the graph supplied one (i.e. the
+   * qualified name minus a redundant default-schema prefix), otherwise the name itself.
+   */
+  function tableTitle(table) {
+    return table.displayName || table.name;
+  }
+
   // Test-only hook: no-op in a real webview (there is no `module` global there), lets a
   // Node-based verification harness drive this script's internal state directly rather than
   // simulating raw mouse/SVG events for every interaction.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports.__test__ = {
-      handleSchemaData, buildDDL, addTable, addRelationship, measureAll, render,
+      handleSchemaData, buildDDL, addTable, addRelationship, measureAll, render, tableTitle,
       applyCopilotEdit, serializeSchemaSummary,
       getDraftGraph: () => draftGraph,
     };

@@ -155,7 +155,16 @@ Doing this required making `engine-version.ts` free of any `vscode` import — i
 
 Two things the tests had to learn. The version probe is a third statement on the same connection, so the existing "both metadata queries run on one connection" assertion became "three statements, one connection". And because the version is cached per connection id, a test reporting 5.0.1 pinned the shared fake connection to legacy behaviour for every test after it — `clearEngineVersionCache()` in a `setup()` hook keeps them order-independent, which is exactly what that seam exists for.
 
-**Known cosmetic consequence.** `buildSchemaGraph()` qualifies *always* (it feeds DDL generation and agents, where relying on the search path is the bug), so on a single-schema Firebird 6 database every Schema Designer box now reads `PUBLIC.X` rather than `X`. Correct but noisier than the tree, which hides the default schema. Separating a display name from the graph's identity key is the fix, and is a follow-up rather than something to bolt on here.
+### Phase 1h — display name vs identity in the graph (done)
+
+Phase 1g left every Schema Designer box reading `PUBLIC.X` on a single-schema database, because `buildSchemaGraph()` qualifies unconditionally. Both needs are real and they are not the same need, so the graph now carries both:
+
+```
+diagram labels : CAP_DEMO, SALES.CUST, CUST, SALES.ORDERS, ORDERS, ...
+DDL identities : PUBLIC.CAP_DEMO, SALES.CUST, PUBLIC.CUST, SALES.ORDERS, PUBLIC.ORDERS, ...
+```
+
+`name` stays the qualified identity — it keys positions, relationship endpoints and focus matching, and it is what generated DDL uses, where deferring to the search path is the whole bug. `displayName` is what the box shows, and is only set when it would actually differ, so every existing consumer that reads `name` is untouched and a pre-6 database produces neither field. The webview's `tableTitle()` is the one place that chooses, used for both the header text and the width measurement so the box is sized to what it displays.
 
 ### What is still missing, precisely
 - **No Schemas level in the tree**, which is the rest of phase 1.
