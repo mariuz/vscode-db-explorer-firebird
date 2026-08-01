@@ -999,6 +999,11 @@
       ],
       "view/item/context": [
         {
+          "command": "firebird.explorer.refresh",
+          "when": "view == firebird-explorer && (viewItem == host || viewItem == database || viewItem =~ /^folder\\./)",
+          "group": "inline"
+        },
+        {
           "command": "firebird.removeHost",
           "when": "view == firebird-explorer && viewItem == host",
           "group": "firebird@2"

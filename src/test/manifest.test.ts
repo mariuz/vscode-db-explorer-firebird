@@ -63,3 +63,27 @@ suite("package.json – Workspace Trust", function () {
     }
   });
 });
+
+suite('package.json – per-node tree refresh', function () {
+  test('Refresh is offered on individual tree nodes, not only in the view title', function () {
+    // `firebird.explorer.refresh` has always accepted a node argument and passed it to
+    // `refresh(node)` — but nothing ever supplied one, because the command was contributed only to
+    // view/title, which invokes it with undefined. The plumbing existed and was unused.
+    const items = packageJson?.contributes?.menus?.["view/item/context"] ?? [];
+    const entry = items.find((e: any) => e.command === "firebird.explorer.refresh");
+    assert.ok(entry, "Refresh should appear in the tree item context menu");
+    for (const context of ["viewItem == host", "viewItem == database", "folder"]) {
+      assert.ok(
+        String(entry.when).includes(context),
+        `Refresh should be offered on ${context}; when clause was: ${entry.when}`
+      );
+    }
+  });
+
+  test('the view-title Refresh is still there — the two are different operations', function () {
+    // Refreshing one node re-reads only that subtree; the title button re-reads every expanded
+    // node across every connection. Losing either would be a regression.
+    const titleItems = packageJson?.contributes?.menus?.["view/title"] ?? [];
+    assert.ok(titleItems.some((e: any) => e.command === "firebird.explorer.refresh"));
+  });
+});

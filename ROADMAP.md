@@ -124,7 +124,7 @@ The following features are adapted from Microsoft's [PostgreSQL extension for VS
 
 - [x] Generic "Script as Create" / "Script as Drop" — reverse-engineer any selected object's DDL from one tree action regardless of type, rather than only tables/procedures/views/triggers each having their own bespoke edit command
 - [x] Object privileges/grants viewer — show a selected object's grants (`RDB$USER_PRIVILEGES`) in a simple read-only panel, complementing "Script as Create" (which covers DDL, not privileges)
-- [ ] Deep refresh — refreshing a tree node re-reads all of its *expanded* descendants in place, so objects added or dropped elsewhere appear/disappear without collapsing the tree or reconnecting (pgsql 1.19.0's "Object Explorer refresh handling additions and deletions throughout subtrees"); today `refresh(element)` only fires the change event for that one node
+- [x] Deep refresh — **checked the premise first, and the deep part was already true.** VS Code's own `TreeDataProvider` docs state that firing `onDidChangeTreeData` "will trigger the view to update the changed element/root and its children **recursively (if shown)**", and this extension's nodes cache nothing — every `getChildren()` re-queries — so a refresh has always re-read every expanded descendant, additions and deletions included. What was genuinely missing was pgsql's "refresh *any* node": Refresh existed only in the view title, which re-queries every expanded node across every connection. It is now also an inline action on hosts, databases and category folders, so one subtree can be re-read on its own. `firebird.explorer.refresh` already accepted a node argument and passed it to `refresh(node)` — the plumbing existed and nothing ever supplied one
 
 ### Connectivity
 
