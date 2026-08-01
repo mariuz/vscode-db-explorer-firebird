@@ -36,6 +36,52 @@ export class CredentialStore {
     logger.debug(`Password deleted for connection ${connectionId}`);
   }
 
+  /**
+   * Every connection id this store currently holds a secret for, database or SSH.
+   *
+   * The reason this exists: passwords are stored per connection id and deleted only when the
+   * delete path runs. A connection removed while its delete failed, an id that changed shape
+   * across versions, or a `globalState` entry lost some other way leaves a password in
+   * SecretStorage permanently — with no way for the user *or* the extension to see it, let alone
+   * clear it. `secrets.keys()` (VS Code 1.105) is what makes that auditable at all.
+   */
+  static async listStoredConnectionIds(): Promise<{ passwords: string[]; sshPasswords: string[] }> {
+    const keys = await this.getContext().secrets.keys();
+    return {
+      passwords: keys.filter(k => k.startsWith(this.KEY_PREFIX)).map(k => k.slice(this.KEY_PREFIX.length)),
+      sshPasswords: keys
+        .filter(k => k.startsWith(this.SSH_KEY_PREFIX))
+        .map(k => k.slice(this.SSH_KEY_PREFIX.length)),
+    };
+  }
+
+  /**
+   * Deletes every secret whose connection id is not in `liveConnectionIds`, returning how many
+   * went. Takes the live ids rather than reading `globalState` itself so the caller owns the
+   * definition of "still exists" — and so this stays testable without a workspace.
+   */
+  static async deleteOrphans(liveConnectionIds: Iterable<string>): Promise<number> {
+    const live = new Set(liveConnectionIds);
+    const { passwords, sshPasswords } = await this.listStoredConnectionIds();
+    let removed = 0;
+    for (const id of passwords) {
+      if (!live.has(id)) {
+        await this.deletePassword(id);
+        removed++;
+      }
+    }
+    for (const id of sshPasswords) {
+      if (!live.has(id)) {
+        await this.deleteSshPassword(id);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      logger.info(`Removed ${removed} stored password(s) belonging to connections that no longer exist.`);
+    }
+    return removed;
+  }
+
   /** SSH tunnel password (authMethod "password") or private key passphrase (authMethod "privateKey") — same SecretStorage mechanism, a different key namespace so it's never confused with the database password. */
   static async storeSshPassword(connectionId: string, password: string): Promise<void> {
     await this.getContext().secrets.store(`${this.SSH_KEY_PREFIX}${connectionId}`, password);

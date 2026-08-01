@@ -120,6 +120,18 @@ export function activate(context: ExtensionContext) {
   /* initialise credential store with extension context for SecretStorage access */
   CredentialStore.setContext(context);
 
+  /**
+   * Drop stored passwords whose connection no longer exists.
+   *
+   * Secrets are written per connection id and removed only when the delete path runs, so a
+   * connection removed while that failed leaves a password in SecretStorage forever. Reconciling
+   * once at activation keeps the store honest without the user ever having to think about it.
+   * Deliberately not awaited: it is housekeeping, and activation should not wait on it.
+   */
+  void CredentialStore.deleteOrphans(
+    Object.keys(context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey) ?? {})
+  ).catch(err => logger.debug(`Could not reconcile stored passwords: ${err}`));
+
   /* "What's New" notification, shown once after an update (not on first install — the Getting
      Started walkthrough already covers that). */
   void showWhatsNewIfUpdated(context);
@@ -403,6 +415,29 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand("firebird.setActive", (databaseNode: NodeDatabase) => {
       databaseNode.setActive();
+    })
+  );
+
+  /* Forget every stored password — the only way to clear secrets the extension can now see. */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.clearStoredPasswords", async () => {
+      const stored = await CredentialStore.listStoredConnectionIds();
+      const total = new Set([...stored.passwords, ...stored.sshPasswords]).size;
+      if (total === 0) {
+        logger.showInfo("No stored Firebird passwords to clear.");
+        return;
+      }
+      const confirm = await window.showWarningMessage(
+        `Forget stored passwords for ${total} Firebird connection(s)? You'll be asked for them again next time you connect.`,
+        { modal: true },
+        "Forget Passwords"
+      );
+      if (confirm !== "Forget Passwords") {
+        return;
+      }
+      // An empty live set means "nothing is live", i.e. delete them all.
+      const removed = await CredentialStore.deleteOrphans([]);
+      logger.showInfo(`Cleared ${removed} stored password(s).`);
     })
   );
 

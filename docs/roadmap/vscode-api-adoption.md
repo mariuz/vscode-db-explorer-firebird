@@ -49,10 +49,23 @@ Each of these lines up with something this codebase does by hand, which is exact
 - **`MarkdownString` in `TreeItem` labels** (1.106) — codicons and formatting in Object Explorer labels, where type/constraint annotations are currently plain text.
 - **`extensions.supportAgentsWindow`** (1.120) — a setting by which extensions opt into the Agents window. Worth watching now that the Agents window is where multi-agent work happens; whether a database extension belongs there is an open question, not a given.
 
+## Phases 1–2 — the engine floor and `secrets.keys()` (done)
+
+`engines.vscode` and `@types/vscode` are now `^1.110.0` / `~1.110.0`, the floor that covers every finalized API on the adoptable list above. That is the only reason to raise it this far in one step — `secrets.keys()` alone needs just 1.105 — but the remaining items (`ThemeIcon` webview tab icons at 1.110, the QuickInput refinements at 1.108/1.109) are all planned, and moving the floor once is less disruptive than three times.
+
+**The credential leak is closed.** `CredentialStore` could store, read and delete a password per connection but not *enumerate* them, so a secret orphaned by a failed delete or a lost `globalState` entry stayed in SecretStorage permanently — invisible to the user and to the extension alike. Two additions:
+
+- **`listStoredConnectionIds()`** returns the database and SSH connection ids that currently have secrets, stripped of their key prefixes and ignoring keys belonging to anything else.
+- **`deleteOrphans(liveConnectionIds)`** removes every secret whose connection is not in the given set, and returns how many went. It takes the live ids rather than reading `globalState` itself, so the caller owns the definition of "still exists" and the function stays testable without a workspace.
+
+Both are used twice over. Activation reconciles against the saved connections — deliberately not awaited, since it is housekeeping and activation should not wait on it — and a new **Firebird: Clear All Stored Passwords** command passes an *empty* live set, which is the same operation meaning "nothing is live". The command confirms modally first and reports the count, and says so plainly when there is nothing to clear rather than silently doing nothing.
+
+Six unit tests cover it, including the cases that are easy to get wrong: an SSH secret surviving when its connection is live but has no database password, and keys from other extensions being left alone. The `vscode` mock gained `secrets.keys()`.
+
 ## Suggested phases
 
-1. **Raise the floor**: `engines.vscode` and `@types/vscode` to `^1.110.0` — the lowest version that covers every "adoptable today" item above. Do this alone, in its own change, and confirm the vscode-host suite still passes; everything else here depends on it.
-2. **`secrets.keys()`**: activation-time reconciliation against saved connections plus a "Clear All Saved Passwords" command, with unit coverage in the existing `vscode` mock (`src/test/mocks/vscode.ts` needs a `secrets.keys()` stub).
+1. ~~**Raise the floor**: `engines.vscode` and `@types/vscode` to `^1.110.0`.~~ — **done**.
+2. ~~**`secrets.keys()`**: activation-time reconciliation plus a "Clear All Saved Passwords" command.~~ — **done**, see above.
 3. **`chatInstructions`** carrying the dialect rules already in `prompts.ts`, so agent mode writes Firebird SQL without going through `@firebird`.
 4. **Presentation**: `ThemeIcon` webview tab icons, then the QuickInput toggle/prompt refinements in object search and the Object Explorer filter.
 5. **Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.

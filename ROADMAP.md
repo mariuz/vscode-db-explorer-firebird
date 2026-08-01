@@ -144,8 +144,8 @@ Firebird 6.0 is the first Firebird release with SQL schemas, which changes the o
 
 `engines.vscode` is `^1.101.0` while VS Code stable is 1.131 — the extension runs fine, but the type floor hides ~13 months of API additions, several of which replace code written by hand here. Reviewed release by release; Marketplace-publishable work only (proposed APIs are tracked as a watch list in the design doc) ([design doc](docs/roadmap/vscode-api-adoption.md)).
 
-- [ ] Raise `engines.vscode`/`@types/vscode` to `^1.110.0` — the floor that covers every finalized API below
-- [ ] `context.secrets.keys()` (1.105) to reconcile stored passwords against saved connections and back a "Clear All Saved Passwords" command — `CredentialStore` can store, read, and delete a password but cannot enumerate them, so a secret orphaned by a failed delete stays in SecretStorage permanently and invisibly
+- [x] Raise `engines.vscode`/`@types/vscode` to `^1.110.0` — the floor that covers every finalized API below
+- [x] `context.secrets.keys()` (1.105) to reconcile stored passwords against saved connections and back a **Firebird: Clear All Stored Passwords** command — `CredentialStore` could store, read and delete a password but not enumerate them, so a secret orphaned by a failed delete stayed in SecretStorage permanently and invisibly. Reconciliation runs at activation (unawaited housekeeping); the command reuses the same code path with an empty live set
 - [ ] Ship the Firebird dialect rules already in `src/copilot/prompts.ts` as a `contributes.chatInstructions` file (1.105), so agent mode and inline chat write Firebird-correct SQL instead of only the `@firebird` participant — the missing half of the existing Language Model Tools work
 - [ ] `ThemeIcon` webview/custom-editor tab icons (1.110) for the six webviews that currently share the default editor tab icon
 - [ ] `QuickInputButton.toggle`/`.location` and `QuickPick.prompt`/`QuickPickItem.resourceUri` (1.108/1.109) in the Object Explorer filter, object search, and connection picker

@@ -317,6 +317,9 @@ export function createMockContext() {
       get: (key: string) => Promise.resolve(secretsStore.get(key)),
       store: (key: string, value: string) => { secretsStore.set(key, value); return Promise.resolve(); },
       delete: (key: string) => { secretsStore.delete(key); return Promise.resolve(); },
+      // VS Code 1.105+. Present here so CredentialStore's orphan reconciliation is testable
+      // outside a real extension host.
+      keys: () => Promise.resolve([...secretsStore.keys()]),
       onDidChange: (_handler: any) => ({ dispose: () => { /* no-op */ } }),
     },
   };
