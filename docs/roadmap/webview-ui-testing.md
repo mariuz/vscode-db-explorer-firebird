@@ -83,9 +83,13 @@ Every one of these produced a silent or misleading failure, and each is now a co
 
 `firebird.database.setPassword` takes a `NodeDatabase` argument, so it is **not invocable from the Command Palette** — the only way to give a workspace connection (`.vscode/firebird.json`, which by design cannot carry a password) its password is the tree's context menu. The spec works around this by using the wizard's paste-a-connection-string path instead. A palette-invocable variant that falls back to the existing `connection-picker.ts` would be a small usability improvement in its own right, and would make workspace connections testable directly. Not done here — it is a product change, not a testing one.
 
-## Phase 3 — Schema Designer and plan view (attempted, not done)
+## Phase 3 — Schema Designer and plan view (Schema Designer now done)
 
-**Not delivered.** Specs for both were written and neither could be made to pass, so neither was kept — a spec that does not pass is worse than no spec, and one that passes for the wrong reason is worse still. What was kept is the harness work that came out of the attempt: `addConnection()`, `runQueryInEditor()` and `expectWebviewText()` are now shared helpers in the fixture, and `results-grid.spec.ts` uses them.
+**Update.** The Schema Designer half is now covered, and what unblocked it was not a testing change at all: `firebird.schemaVisualizer.open` learned to fall back to the connection picker when invoked without a tree node, so the Command Palette can reach it. Lead 2 below diagnosed the blockage correctly — the command was tree-only — but treated it as something the test had to work around rather than something the product should fix. Making it palette-invocable removed the problem entirely, and `schema-designer.spec.ts` now drives the real designer and asserts a table name appears inside the webview, which is the first time `render()`/`measureAll()` have run in any test.
+
+The plan view half is still open; lead 3 stands.
+
+**Originally recorded as not delivered:** Specs for both were written and neither could be made to pass, so neither was kept — a spec that does not pass is worse than no spec, and one that passes for the wrong reason is worse still. What was kept is the harness work that came out of the attempt: `addConnection()`, `runQueryInEditor()` and `expectWebviewText()` are now shared helpers in the fixture, and `results-grid.spec.ts` uses them.
 
 `expectWebviewText()` is worth keeping regardless of phase 3. Asserting straight through the two-deep `frameLocator` chain while a webview is still being created reports `element(s) not found` and never recovers, even with a 60-second timeout — the chain resolves against a frame tree that is still changing underneath it. Waiting for the outer `iframe.webview` *element* to be attached first makes the lookup deterministic.
 
@@ -101,5 +105,5 @@ The value here is still real: the Schema Designer's `render()`/`measureAll()` ar
 
 1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
 2. ~~**Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.~~ — **done**, see above.
-3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG — the two places the stub DOM explicitly cannot reach. **Attempted and not achieved** — see the phase 3 section above for the three specific blockers found.
+3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG. **Schema Designer done**, once its command became palette-invocable; the plan view remains — see phase 3 above.
 4. **Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.

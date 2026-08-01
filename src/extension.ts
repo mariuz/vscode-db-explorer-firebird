@@ -3,7 +3,7 @@ import {Constants, getOptions} from "./config";
 import {FirebirdTreeDataProvider} from "./firebirdTreeDataProvider";
 import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeUser, NodeIndex, NodeIndexFolder, NodeCategoryFolder} from "./nodes";
 import {Options, FirebirdTree, ConnectionOptions} from "./interfaces";
-import {connectionPicker} from "./shared/connection-picker";
+import {connectionPicker, pickConnectionOptions} from "./shared/connection-picker";
 import {Driver} from "./shared/driver";
 import * as vscode from 'vscode';
 import {Global} from "./shared/global";
@@ -441,10 +441,25 @@ export function activate(context: ExtensionContext) {
     })
   );
 
+  /**
+   * A NodeDatabase for a command that may have been invoked from the Command Palette.
+   *
+   * Tree context-menu invocations pass the node; the palette passes nothing, which used to mean
+   * these commands simply threw. Falling back to the connection picker makes them reachable
+   * without a tree click — and, incidentally, testable, since the palette is the only entry point
+   * an automated UI test can drive.
+   */
+  const resolveDatabaseNode = async (node?: NodeDatabase): Promise<NodeDatabase | undefined> => {
+    if (node) { return node; }
+    const picked = await pickConnectionOptions(context);
+    return picked ? new NodeDatabase(picked) : undefined;
+  };
+
   /* DB ITEM: set/update the stored password for this connection */
   context.subscriptions.push(
-    commands.registerCommand("firebird.database.setPassword", (databaseNode: NodeDatabase) => {
-      databaseNode.setPassword().catch(err => logger.error(err));
+    commands.registerCommand("firebird.database.setPassword", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      node?.setPassword().catch(err => logger.error(err));
     })
   );
 
@@ -1220,8 +1235,10 @@ export function activate(context: ExtensionContext) {
 
   /* DB: fuzzy-search every object by name, then jump to its most useful action */
   context.subscriptions.push(
-    commands.registerCommand("firebird.database.searchObjects", (databaseNode: NodeDatabase) => {
-      databaseNode.searchObjects(firebirdQueryResults).catch(err => {
+    commands.registerCommand("firebird.database.searchObjects", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      node.searchObjects(firebirdQueryResults).catch(err => {
         logger.error(err?.message ?? err);
         logger.showError("Object Search failed. Check logs for details.", ["Show Logs"]).then(sel => {
           if (sel === "Show Logs") { logger.showOutput(); }
@@ -1362,8 +1379,9 @@ export function activate(context: ExtensionContext) {
 
   /* DB ITEM: visualize schema — entity-relationship diagram for a database */
   context.subscriptions.push(
-    commands.registerCommand("firebird.schemaVisualizer.open", (databaseNode: NodeDatabase) => {
-      databaseNode.openSchemaDesigner(firebirdSchemaDesigner);
+    commands.registerCommand("firebird.schemaVisualizer.open", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      node?.openSchemaDesigner(firebirdSchemaDesigner);
     })
   );
 
