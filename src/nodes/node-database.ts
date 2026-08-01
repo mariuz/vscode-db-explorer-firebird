@@ -8,6 +8,8 @@ import {Global} from "../shared/global";
 import {CredentialStore} from "../shared/credential-store";
 import {FirebirdTreeDataProvider} from "../firebirdTreeDataProvider";
 import {getMaxParallelWorkersQuery, databaseInfoQry, getTablesQuery, getViewsQuery, getStoredProceduresQuery, getTriggersQuery, getGeneratorsQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getSystemTablesQuery, getUsersQuery} from "../shared/queries";
+import {getEngineMajorVersion} from "../shared/engine-version";
+import {supportsSchemas} from "../shared/schema-support";
 import {logger} from "../logger/logger";
 import {getDatabaseFileName} from "../shared/utils";
 import {getObjectFilter, matchesObjectFilter} from "../shared/object-explorer-filter";
@@ -124,10 +126,22 @@ export class NodeDatabase implements FirebirdTree {
   }
 
   private async getTableChildren(): Promise<FirebirdTree[]> {
-    const tablesQry = getTablesQuery(getOptions().maxTablesCount);
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+
+    // Firebird 6 put every object in a schema. Asking a pre-6 server for RDB$SCHEMA_NAME is a hard
+    // SQL error, not a degradation, so the column is only requested once the server has said it is
+    // new enough — and a version probe that fails reports 0, i.e. legacy behaviour.
+    const engineMajorVersion = await getEngineMajorVersion(resolved, sql =>
+      Driver.client.queryPromise<any>(connection, sql)
+    );
+    const withSchemas = supportsSchemas(engineMajorVersion);
+
+    const tablesQry = getTablesQuery(getOptions().maxTablesCount, withSchemas);
     const tables = await Driver.client.queryPromise<any>(connection, tablesQry);
-    return this.filterRows(tables, "tables", t => t.TABLE_NAME).map<NodeTable>(table => new NodeTable(this.dbDetails, table.TABLE_NAME));
+    return this.filterRows(tables, "tables", t => t.TABLE_NAME).map<NodeTable>(
+      table => new NodeTable(this.dbDetails, table.TABLE_NAME, withSchemas ? table.SCHEMA_NAME : undefined)
+    );
   }
 
   private async getViewChildren(): Promise<FirebirdTree[]> {

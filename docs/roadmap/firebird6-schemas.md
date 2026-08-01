@@ -41,9 +41,37 @@ From [`doc/sql.extensions/README.schemas.md`](https://github.com/FirebirdSQL/fir
 - **`PUBLIC` is droppable**, so "the default schema" cannot be hardcoded — read the actual search path with `RDB$GET_CONTEXT('SYSTEM','SEARCH_PATH')` instead of assuming.
 - **Firebird 6 is not released yet** (this targets the snapshot CI already builds against). Phase 1 is worth doing regardless — it is what stops the tree from being *wrong* — but phases 4–5 should track the final release notes rather than the current snapshot.
 
+## Phase 1a — engine detection and schema-aware tables (done)
+
+The first slice of phase 1, scoped to the Tables category. Verified against a **live Firebird 6.0.0 server** (`RDB$GET_CONTEXT('SYSTEM','ENGINE_VERSION')` = `6.0.0`, `RDB$SCHEMAS` holding `PUBLIC` and `SYSTEM`, search path `"PUBLIC", "SYSTEM"`), with the collision this feature exists for reproduced deliberately: a `SALES` schema created alongside `PUBLIC`, each holding an `ORDERS` table with different columns.
+
+**The bug is now demonstrated rather than asserted.** Against that database:
+
+```
+SALES.ORDERS   -> [{"ID":1,"TOTAL":999}]
+PUBLIC.ORDERS  -> [{"ID":1,"NOTE":"public-row"}]
+ORDERS         -> [{"ID":1,"NOTE":"public-row"}]   <-- what the old code sent
+```
+
+The unqualified name the tree used to emit resolves through the search path to `PUBLIC.ORDERS`, so clicking the *other* `ORDERS` node ran against the wrong table and showed the wrong columns, with nothing on screen to indicate it.
+
+What landed:
+
+- **`src/shared/schema-support.ts`** (pure, 16 unit tests): `supportsSchemas()` (>= 6, with 0 — the "could not detect" value — correctly treated as legacy), `schemaDisplayName()` and `schemaQualifiedName()`. The asymmetry between those two is the design: the tree hides a redundant `PUBLIC.` prefix so a single-schema database looks exactly as it did before, while generated SQL qualifies *always*, because leaving it to the search path is the failure above.
+- **`src/shared/engine-version.ts`**: the version probe, cached per connection id. Cached per connection rather than globally because one workspace routinely holds connections to servers of different versions, and getting that wrong means sending Firebird 6 SQL to a Firebird 5 server. A failed probe returns 0 and is *not* cached, so a transient failure cannot pin a connection to legacy behaviour for the session.
+- **`getTablesQuery(maxTableCount, withSchemas)`**: selects `RDB$SCHEMA_NAME` only when asked. The pre-6 form is byte-identical to what it always emitted — asserted by a test, since `RDB$SCHEMA_NAME` on a pre-6 server is a hard SQL error, not a degradation.
+- **`NodeTable`** carries an optional schema: `getTableName()` returns the qualified name (used by Select All Records, Drop Table, and drag-into-editor), `getRelationName()` returns the bare one for metadata lookups that match on `RDB$RELATION_NAME`.
+
+### What is still missing, precisely
+
+- **Only the Tables category is schema-aware.** Views, procedures, triggers, generators, domains, roles and exceptions still list unqualified, so the same collision remains visible for them.
+- **Column metadata is still schema-blind.** `tableInfoQuery()` filters on `RDB$RELATION_NAME` alone, so expanding either `ORDERS` node lists the columns of *both* — that lookup needs an `RDB$SCHEMA_NAME` predicate on Firebird 6.
+- **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
+- Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
+
 ## Suggested phases
 
-1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first.
+1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
 2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
 3. **Search path**: per-connection default schema, `SET SEARCH_PATH` on session open, "New Query in Schema", and search-path-aware completion ranking/qualification.
 4. **Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools so agent-written SQL is qualified too.

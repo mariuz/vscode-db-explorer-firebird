@@ -54,6 +54,8 @@
     "src/copilot/json-extraction.ts",
     "src/language-server/completionProvider.ts",
     "src/language-server/firebird-reserved.ts",
+    "src/shared/schema-support.ts",
+    "src/shared/engine-version.ts",
     "src/interfaces/**/*.ts",
     "src/test/**/*.ts"
   ],

@@ -515,3 +515,25 @@ suite('selectAllRecordsQuery() — the firebird.maxResultRows server-side cap', 
     assert.strictEqual(selectAllRecordsQuery('T', NaN), 'SELECT * FROM T;');
   });
 });
+
+suite('getTablesQuery() — Firebird 6 schema awareness', function () {
+  test('without schemas the SQL is unchanged, so a pre-6 server sees no difference', function () {
+    const legacy = getTablesQuery(0);
+    assert.ok(!legacy.includes('RDB$SCHEMA_NAME'), 'must not ask a pre-6 server for a column it does not have');
+    assert.ok(legacy.includes('RDB$RELATION_NAME TABLE_NAME'));
+    assert.strictEqual(getTablesQuery(0), getTablesQuery(0, false));
+  });
+
+  test('with schemas it selects the schema alongside the name', function () {
+    const fb6 = getTablesQuery(0, true);
+    assert.ok(fb6.includes('RDB$SCHEMA_NAME SCHEMA_NAME'));
+    assert.ok(fb6.includes('RDB$RELATION_NAME TABLE_NAME'));
+    assert.ok(fb6.includes('ORDER BY 1, 2'), 'schema first, so same-named tables sit together');
+  });
+
+  test('the row cap still applies in both forms', function () {
+    assert.ok(getTablesQuery(10).includes('FIRST 10'));
+    assert.ok(getTablesQuery(10, true).includes('FIRST 10'));
+    assert.ok(!getTablesQuery(0, true).includes('FIRST'));
+  });
+});

@@ -1,19 +1,31 @@
 import { assertValidIdentifier } from "./row-edit";
 
-export function getTablesQuery(maxTableCount: number): string {
-  if (maxTableCount !== 0) {
-    return `SELECT FIRST ${Math.abs(maxTableCount)} RDB$RELATION_NAME TABLE_NAME
+/**
+ * Lists user tables.
+ *
+ * `withSchemas` must only be true on Firebird 6+ (`supportsSchemas()`): `RDB$SCHEMA_NAME` does not
+ * exist before then, and selecting it is a hard SQL error rather than a graceful degradation. The
+ * pre-Firebird-6 SQL below is deliberately byte-identical to what this function has always
+ * emitted, so a server without schemas sees no change whatsoever.
+ */
+export function getTablesQuery(maxTableCount: number, withSchemas = false): string {
+  const first = maxTableCount !== 0 ? `FIRST ${Math.abs(maxTableCount)} ` : "";
+
+  if (withSchemas) {
+    // Ordered by schema first so same-named tables from different schemas sit together rather
+    // than interleaved with unrelated ones.
+    return `SELECT ${first}RDB$SCHEMA_NAME SCHEMA_NAME, RDB$RELATION_NAME TABLE_NAME
               FROM RDB$RELATIONS
              WHERE RDB$VIEW_BLR IS NULL
                AND (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
-          ORDER BY 1;`;
-  } else {
-    return `SELECT RDB$RELATION_NAME TABLE_NAME
-              FROM RDB$RELATIONS
-             WHERE RDB$VIEW_BLR IS NULL
-               AND (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
-          ORDER BY 1;`;
+          ORDER BY 1, 2;`;
   }
+
+  return `SELECT ${first}RDB$RELATION_NAME TABLE_NAME
+              FROM RDB$RELATIONS
+             WHERE RDB$VIEW_BLR IS NULL
+               AND (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
+          ORDER BY 1;`;
 }
 
 /**

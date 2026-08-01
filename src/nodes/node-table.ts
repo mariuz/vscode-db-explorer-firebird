@@ -4,6 +4,7 @@ import {NodeField, NodeInfo, NodeIndexFolder} from ".";
 import {ConnectionOptions, FirebirdTree, Options} from "../interfaces";
 import {selectAllRecordsQuery, tableInfoQuery, dropTableQuery, getForeignKeysQuery, getObjectPrivilegesQuery} from "../shared/queries";
 import {getOptions} from "../config";
+import {schemaDisplayName, schemaQualifiedName} from "../shared/schema-support";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {logger} from "../logger/logger";
@@ -13,19 +14,40 @@ import {tableInfoRowsToTable} from "../script-as/ddl-builders";
 import {buildTableCreateDDL, buildForeignKeyDDL} from "../database-projects/project-model";
 
 export class NodeTable implements FirebirdTree {
-  constructor(private readonly dbDetails: ConnectionOptions, private readonly table: string) {}
+  /**
+   * @param schema Firebird 6+ only, and only when the server reported one. Left undefined on
+   *   pre-6 servers, where schemas do not exist — which keeps every name this class produces
+   *   byte-identical to what it produced before schemas were understood at all.
+   */
+  constructor(
+    private readonly dbDetails: ConnectionOptions,
+    private readonly table: string,
+    private readonly schema?: string
+  ) {}
 
+  /**
+   * The name to put in SQL. Qualified whenever a schema is known, including `PUBLIC`: leaving it
+   * to the session's search path is exactly how an action ends up hitting the wrong one of two
+   * same-named tables.
+   */
   public getTableName(): string {
+    return schemaQualifiedName(this.schema, this.table);
+  }
+
+  /** Bare relation name, for metadata lookups that match on `RDB$RELATION_NAME`. */
+  public getRelationName(): string {
     return this.table.trim();
   }
 
   public getDragIdentifier(): string {
-    return this.table.trim();
+    return this.getTableName();
   }
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: this.table.trim(),
+      // Objects in the default schema keep their bare name so a single-schema database (which is
+      // every Firebird 6 database until someone runs CREATE SCHEMA) looks exactly as before.
+      label: schemaDisplayName(this.schema, this.table),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "table",
       tooltip: `[TABLE] ${this.table}`,
@@ -74,7 +96,7 @@ export class NodeTable implements FirebirdTree {
   public async selectAllRecords() {
     logger.info("Custom Query: Select All Records");
 
-    const qry = selectAllRecordsQuery(this.table.trim(), getOptions().maxResultRows);
+    const qry = selectAllRecordsQuery(this.getTableName(), getOptions().maxResultRows);
     Global.activeConnection = this.dbDetails;
 
     return Driver.runQuery(qry, this.dbDetails)
@@ -89,7 +111,7 @@ export class NodeTable implements FirebirdTree {
   public async dropTable() {
     logger.info("Custom Query: Drop Table");
 
-    const qry = dropTableQuery(this.table.trim());
+    const qry = dropTableQuery(this.getTableName());
     Global.activeConnection = this.dbDetails;
 
     Driver.runQuery(qry, this.dbDetails)
@@ -139,7 +161,7 @@ export class NodeTable implements FirebirdTree {
 
   /** Generic "Script as Drop". */
   public async scriptAsDrop(): Promise<void> {
-    await Driver.createSQLTextDocument(dropTableQuery(this.table.trim()));
+    await Driver.createSQLTextDocument(dropTableQuery(this.getTableName()));
   }
 
   /** Shows this table's grants (RDB$USER_PRIVILEGES) in the results grid. */
