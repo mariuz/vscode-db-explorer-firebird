@@ -173,7 +173,18 @@ export function selectAllFieldRecordsQuery(fieldName: string, tableName: string)
   return `SELECT ${fieldName} FROM ${tableName}`;
 }
 
-export function getViewsQuery(): string {
+/**
+ * Lists user views. `withSchemas` must only be true on Firebird 6+ — see `getTablesQuery()` for
+ * why the pre-6 form is kept byte-identical.
+ */
+export function getViewsQuery(withSchemas = false): string {
+  if (withSchemas) {
+    return `SELECT TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME, TRIM(RDB$RELATION_NAME) AS VIEW_NAME
+            FROM RDB$RELATIONS
+           WHERE RDB$VIEW_BLR IS NOT NULL
+             AND (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
+        ORDER BY 1, 2;`;
+  }
   return `SELECT TRIM(RDB$RELATION_NAME) AS VIEW_NAME
             FROM RDB$RELATIONS
            WHERE RDB$VIEW_BLR IS NOT NULL
@@ -181,7 +192,13 @@ export function getViewsQuery(): string {
         ORDER BY 1;`;
 }
 
-export function viewColumnsQuery(viewName: string): string {
+/**
+ * Column metadata for one view. `schema` is Firebird 6+ only; without it the lookup matches on the
+ * relation name alone and would merge same-named views from different schemas, exactly as
+ * `tableInfoQuery()` did before it grew the same predicate.
+ */
+export function viewColumnsQuery(viewName: string, schema?: string): string {
+  const viewSchemaPredicate = schema?.trim() ? `\n        AND r.RDB$SCHEMA_NAME = '${schema.trim()}'` : "";
   return `SELECT TRIM(r.RDB$FIELD_NAME) AS FIELD_NAME,
          CASE f.RDB$FIELD_TYPE
            WHEN 261 THEN 'BLOB'
@@ -205,7 +222,7 @@ export function viewColumnsQuery(viewName: string): string {
             r.RDB$FIELD_POSITION AS FIELD_POSITION
        FROM RDB$RELATION_FIELDS r
   LEFT JOIN RDB$FIELDS f ON r.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
-      WHERE r.RDB$RELATION_NAME = '${viewName}'
+      WHERE r.RDB$RELATION_NAME = '${viewName}'${viewSchemaPredicate}
    ORDER BY r.RDB$FIELD_POSITION;`;
 }
 
@@ -438,11 +455,14 @@ export function getTriggerBodyQuery(triggerName: string): string {
            WHERE TRIM(RDB$TRIGGER_NAME) = '${triggerName}';`;
 }
 
-export function getViewDefinitionQuery(viewName: string): string {
+export function getViewDefinitionQuery(viewName: string, schema?: string): string {
+  // Without the schema predicate this returns one row per same-named view across schemas, and the
+  // caller reads row 0 — i.e. it would show, and let you edit, the wrong view's source.
+  const schemaPredicate = schema?.trim() ? `\n             AND RDB$SCHEMA_NAME = '${schema.trim()}'` : "";
   return `SELECT TRIM(RDB$RELATION_NAME) AS VIEW_NAME,
                  CAST(RDB$VIEW_SOURCE AS VARCHAR(${MAX_SOURCE_CAST_LENGTH}) CHARACTER SET UTF8) AS VIEW_SOURCE
             FROM RDB$RELATIONS
-           WHERE TRIM(RDB$RELATION_NAME) = '${viewName}';`;
+           WHERE TRIM(RDB$RELATION_NAME) = '${viewName}'${schemaPredicate};`;
 }
 
 /**

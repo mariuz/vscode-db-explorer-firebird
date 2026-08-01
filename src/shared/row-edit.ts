@@ -38,9 +38,23 @@ export function quoteSqlValue(value: string): string {
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
-/** Throws if `name` isn't a safe, unquoted Firebird identifier — the only kind these builders accept. */
+/**
+ * Throws if `name` isn't a safe, unquoted Firebird identifier — the only kind these builders
+ * accept. This is the injection guard for every statement they generate, so it stays deliberately
+ * strict: no quotes, no whitespace, no semicolons, nothing that could close a literal.
+ *
+ * A **two-part** `SCHEMA.OBJECT` name is accepted on the same terms, with each half validated
+ * independently against the same rule. Firebird 6 tables outside the default schema have to be
+ * qualified to be addressed at all (see docs/roadmap/firebird6-schemas.md), and rejecting the dot
+ * would mean row editing failing with "Invalid table name" on exactly those tables. Splitting on
+ * the *first* dot and requiring both halves to match keeps the guarantee intact: a name with two
+ * dots, an empty half, or anything unsafe in either half is still rejected.
+ */
 export function assertValidIdentifier(name: string, what: string): void {
-  if (!IDENTIFIER_RE.test(name)) {
+  const parts = name.split(".");
+  const valid =
+    parts.length <= 2 && parts.length > 0 && parts.every(part => IDENTIFIER_RE.test(part));
+  if (!valid) {
     throw new Error(`Invalid ${what}: "${name}". Only alphanumeric identifiers are allowed.`);
   }
 }

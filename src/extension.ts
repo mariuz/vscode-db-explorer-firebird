@@ -52,7 +52,14 @@ import {editConnectionSharingPermissions} from "./connection-sharing/permissions
 import {runBuildProject, runPublishProject, runGenerateMigrationScript} from "./database-projects";
 import {runContainerProvisionWizard} from "./container-provisioning";
 
-/** Matches shared/row-edit.ts's assertValidIdentifier() — used for inline input-box validation before that throws. */
+/**
+ * Inline input-box validation for names the user is *creating* (a new index, a new column, ...).
+ *
+ * Deliberately stricter than `shared/row-edit.ts`'s `assertValidIdentifier()`, which also accepts a
+ * two-part `SCHEMA.OBJECT` name so Firebird 6 tables outside the default schema can be addressed:
+ * an object being created belongs to one schema and is named with one identifier, so a dot here is
+ * a mistake rather than a qualification.
+ */
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 function poolingOptions(config: Options): { maxSize: number; idleTimeoutMs: number } | undefined {

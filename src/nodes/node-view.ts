@@ -3,6 +3,7 @@ import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {viewColumnsQuery, selectAllRecordsQuery, getViewDefinitionQuery, dropViewQuery, createViewScaffold, getObjectPrivilegesQuery} from "../shared/queries";
 import {getOptions} from "../config";
+import {schemaDisplayName, schemaQualifiedName} from "../shared/schema-support";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {NodeInfo} from "./node-info";
@@ -11,19 +12,31 @@ import {withTruncationWarning} from "../shared/utils";
 import {buildViewCreateDDL} from "../database-projects/project-model";
 
 export class NodeView implements FirebirdTree {
-  constructor(private readonly dbDetails: ConnectionOptions, private readonly viewName: string) {}
+  /** @param schema Firebird 6+ only — see NodeTable for why it is left undefined on older servers. */
+  constructor(
+    private readonly dbDetails: ConnectionOptions,
+    private readonly viewName: string,
+    private readonly schema?: string
+  ) {}
 
+  /** The name to put in SQL: qualified whenever a schema is known, never left to the search path. */
   public getViewName(): string {
+    return schemaQualifiedName(this.schema, this.viewName);
+  }
+
+  /** Bare relation name, for metadata lookups that match on `RDB$RELATION_NAME`. */
+  public getRelationName(): string {
     return this.viewName.trim();
   }
 
   public getDragIdentifier(): string {
-    return this.viewName.trim();
+    return this.getViewName();
   }
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: this.viewName.trim(),
+      // Bare name in the default schema, qualified elsewhere — see schemaDisplayName().
+      label: schemaDisplayName(this.schema, this.viewName),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "view",
       tooltip: `[VIEW] ${this.viewName.trim()}`,
@@ -35,7 +48,7 @@ export class NodeView implements FirebirdTree {
   }
 
   public async getChildren(): Promise<FirebirdTree[]> {
-    const qry = viewColumnsQuery(this.viewName.trim());
+    const qry = viewColumnsQuery(this.viewName.trim(), this.schema);
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
       const columns = await Driver.client.queryPromise<any[]>(connection, qry);
@@ -48,7 +61,7 @@ export class NodeView implements FirebirdTree {
 
   public async selectAllRecords() {
     logger.info("Custom Query: Select All View Records");
-    const qry = selectAllRecordsQuery(this.viewName.trim(), getOptions().maxResultRows);
+    const qry = selectAllRecordsQuery(this.getViewName(), getOptions().maxResultRows);
     Global.activeConnection = this.dbDetails;
     return Driver.runQuery(qry, this.dbDetails)
       .then(result => result)
@@ -66,7 +79,7 @@ export class NodeView implements FirebirdTree {
     logger.info("Edit View: open definition for editing");
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
-      const rows = await Driver.client.queryPromise<any>(connection, getViewDefinitionQuery(this.viewName.trim()));
+      const rows = await Driver.client.queryPromise<any>(connection, getViewDefinitionQuery(this.viewName.trim(), this.schema));
       const source = rows[0]?.VIEW_SOURCE ?? "";
       const scaffold = source
         ? withTruncationWarning(source, `ALTER VIEW ${this.viewName.trim()} AS\n${source.trim()}`)
@@ -80,7 +93,7 @@ export class NodeView implements FirebirdTree {
 
   public async dropView() {
     logger.info("Drop View");
-    Driver.runQuery(dropViewQuery(this.viewName.trim()), this.dbDetails)
+    Driver.runQuery(dropViewQuery(this.getViewName()), this.dbDetails)
       .then(results => {
         logger.info(results[0].message);
         logger.showInfo(results[0].message);
@@ -96,7 +109,7 @@ export class NodeView implements FirebirdTree {
   public async scriptAsCreate(): Promise<void> {
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
-      const rows = await Driver.client.queryPromise<any>(connection, getViewDefinitionQuery(this.viewName.trim()));
+      const rows = await Driver.client.queryPromise<any>(connection, getViewDefinitionQuery(this.viewName.trim(), this.schema));
       const source = rows[0]?.VIEW_SOURCE ?? "";
       await Driver.createSQLTextDocument(buildViewCreateDDL({ name: this.viewName.trim(), source }));
     } catch (err: any) {
@@ -107,7 +120,7 @@ export class NodeView implements FirebirdTree {
 
   /** Generic "Script as Drop". */
   public async scriptAsDrop(): Promise<void> {
-    await Driver.createSQLTextDocument(dropViewQuery(this.viewName.trim()));
+    await Driver.createSQLTextDocument(dropViewQuery(this.getViewName()));
   }
 
   /** Shows this view's grants (RDB$USER_PRIVILEGES) in the results grid. */

@@ -74,9 +74,24 @@ PUBLIC                     -> ID, NOTE
 
 The old lookup returned the union of both tables' columns — a table that does not exist — and expanding either `ORDERS` node showed it. The index join is scoped to the same schema for the same reason: `RDB$INDICES` carries `RDB$SCHEMA_NAME` on Firebird 6 (confirmed against a live server), so joining on the relation name alone would attach another schema's indexes to these columns. Without a schema the SQL is unchanged, asserted by a test.
 
+### Phase 1c — views, and the two-part identifier guard (done)
+
+Views got the same treatment: `getViewsQuery(withSchemas)`, a schema predicate on `viewColumnsQuery()` and on `getViewDefinitionQuery()`, and an optional schema on `NodeView` feeding its label, `SELECT`, `DROP` and drag identifier. Verified live against two views both named `ACTIVE`:
+
+```
+view labels                -> ACTIVE | SALES.ACTIVE
+columns for (old behaviour) -> ID, ID, TOTAL, NOTE
+columns for SALES           -> ID, TOTAL
+columns for PUBLIC          -> ID, NOTE
+```
+
+Views were worse than tables: the merged lookup returned a **duplicated** `ID`. `getViewDefinitionQuery()` matters for a different reason — its callers read row 0, so with two same-named views the "Edit View Source" action would show, and let you edit, whichever the server returned first.
+
+**`assertValidIdentifier()` had to learn about two-part names**, and this is the part to be careful with. It is the injection guard for every statement the row-edit builders generate, and its regex rejected the dot — so qualifying a table name would have made row editing fail with `Invalid table name: "SALES.ORDERS"` on exactly the tables this feature exists to address. It now splits on the *first* dot and requires **both** halves to match the same strict rule, so `A.B.C`, `.ORDERS`, `SALES.`, `SALES.ORDERS'` and `ORDERS; DROP TABLE T` are all still rejected — six new tests cover precisely those. The mirrored regex in `extension.ts` deliberately stays single-part: it validates names the user is *creating* (a new index, a new column), where a dot is a mistake rather than a qualification, and its comment now says so instead of claiming the two match.
+
 ### What is still missing, precisely
 
-- **Only the Tables category is schema-aware.** Views, procedures, triggers, generators, domains, roles and exceptions still list unqualified, so the same collision remains visible for them.
+- **Procedures, triggers, generators, domains, roles and exceptions still list unqualified**, so the same collision remains visible for them.
 - **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 

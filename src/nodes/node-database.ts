@@ -145,9 +145,15 @@ export class NodeDatabase implements FirebirdTree {
   }
 
   private async getViewChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const views = await Driver.client.queryPromise<any>(connection, getViewsQuery());
-    return this.filterRows(views, "views", v => v.VIEW_NAME).map<NodeView>(view => new NodeView(this.dbDetails, view.VIEW_NAME));
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = supportsSchemas(
+      await getEngineMajorVersion(resolved, sql => Driver.client.queryPromise<any>(connection, sql))
+    );
+    const views = await Driver.client.queryPromise<any>(connection, getViewsQuery(withSchemas));
+    return this.filterRows(views, "views", v => v.VIEW_NAME).map<NodeView>(
+      view => new NodeView(this.dbDetails, view.VIEW_NAME, withSchemas ? view.SCHEMA_NAME : undefined)
+    );
   }
 
   private async getProcedureChildren(): Promise<FirebirdTree[]> {

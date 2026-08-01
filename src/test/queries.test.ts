@@ -25,8 +25,9 @@ import {
   rollbackTransactionQuery,
   tableInfoQuery,
   getTablesQuery,
-  selectAllRecordsQuery
-} from '../shared/queries';
+  selectAllRecordsQuery,
+  getViewsQuery,
+  viewColumnsQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -562,5 +563,29 @@ suite('tableInfoQuery() — Firebird 6 schema filtering', function () {
   test('an empty or whitespace schema is treated as absent rather than emitted as a broken predicate', function () {
     assert.ok(!tableInfoQuery('ORDERS', '').includes('RDB$SCHEMA_NAME'));
     assert.ok(!tableInfoQuery('ORDERS', '   ').includes('RDB$SCHEMA_NAME'));
+  });
+});
+
+suite('view queries — Firebird 6 schema awareness', function () {
+  test('getViewsQuery() is unchanged without schemas and selects one with them', function () {
+    assert.ok(!getViewsQuery().includes('RDB$SCHEMA_NAME'));
+    assert.strictEqual(getViewsQuery(), getViewsQuery(false));
+    const fb6 = getViewsQuery(true);
+    assert.ok(fb6.includes('RDB$SCHEMA_NAME'));
+    assert.ok(fb6.includes('ORDER BY 1, 2'));
+  });
+
+  test('viewColumnsQuery() scopes to a schema when given one', function () {
+    // Verified live: without this, a lookup for a view named ACTIVE existing in two schemas
+    // returned ID, ID, TOTAL, NOTE — duplicated and merged.
+    assert.ok(viewColumnsQuery('ACTIVE', 'SALES').includes("r.RDB$SCHEMA_NAME = 'SALES'"));
+    assert.ok(!viewColumnsQuery('ACTIVE').includes('RDB$SCHEMA_NAME'));
+  });
+
+  test('getViewDefinitionQuery() scopes to a schema, since its caller reads row 0', function () {
+    // Two same-named views would otherwise return two rows and the caller would show — and let
+    // you edit — whichever came first.
+    assert.ok(getViewDefinitionQuery('ACTIVE', 'SALES').includes("RDB$SCHEMA_NAME = 'SALES'"));
+    assert.ok(!getViewDefinitionQuery('ACTIVE').includes('RDB$SCHEMA_NAME'));
   });
 });

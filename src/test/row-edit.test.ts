@@ -245,3 +245,31 @@ suite('buildStatementForChange', function () {
     assert.throws(() => buildStatementForChange('PRODUCTS', columns, ['ID'], change), /requires originalRow/);
   });
 });
+
+suite('assertValidIdentifier() — two-part names (docs/roadmap/firebird6-schemas.md)', function () {
+  test('accepts a schema-qualified name, which Firebird 6 tables outside PUBLIC require', function () {
+    assert.doesNotThrow(() => assertValidIdentifier('SALES.ORDERS', 'table name'));
+    assert.doesNotThrow(() => assertValidIdentifier('ORDERS', 'table name'));
+  });
+
+  test('still rejects everything unsafe, in either half', function () {
+    // The point of this guard is that these builders interpolate the name straight into SQL.
+    for (const bad of [
+      "ORDERS; DROP TABLE T",
+      "SALES.ORDERS; DROP TABLE T",
+      "SALES.ORDERS'",
+      "'SALES'.ORDERS",
+      "SALES ORDERS",
+      "SALES.ORDERS EXTRA",
+    ]) {
+      assert.throws(() => assertValidIdentifier(bad, 'table name'), `expected "${bad}" to be rejected`);
+    }
+  });
+
+  test('rejects more than two parts, and empty halves', function () {
+    assert.throws(() => assertValidIdentifier('A.B.C', 'table name'));
+    assert.throws(() => assertValidIdentifier('.ORDERS', 'table name'));
+    assert.throws(() => assertValidIdentifier('SALES.', 'table name'));
+    assert.throws(() => assertValidIdentifier('', 'table name'));
+  });
+});
