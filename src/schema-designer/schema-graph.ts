@@ -4,6 +4,8 @@
  * free of any vscode/Driver dependency so it's unit-testable without a database.
  */
 
+import { schemaQualifiedName } from "../shared/schema-support";
+
 export interface SchemaColumn {
   name: string;
   type: string;
@@ -40,6 +42,8 @@ export interface SchemaGraph {
 
 /** Row shape returned by getSchemaColumnsQuery(). */
 export interface SchemaColumnRow {
+  /** Firebird 6+ only, and only when the query was asked for it. */
+  SCHEMA_NAME?: string | null;
   TABLE_NAME: string;
   FIELD_NAME: string;
   FIELD_TYPE: string;
@@ -55,6 +59,9 @@ export interface SchemaColumnRow {
 
 /** Row shape returned by getForeignKeysQuery(). */
 export interface ForeignKeyRow {
+  /** Firebird 6+ only. Each side carries its own, since a key may cross schemas. */
+  SCHEMA_NAME?: string | null;
+  REF_SCHEMA_NAME?: string | null;
   TABLE_NAME: string;
   COLUMN_NAME: string;
   CONSTRAINT_NAME: string;
@@ -79,7 +86,11 @@ export function buildSchemaGraph(columnRows: SchemaColumnRow[], fkRows: ForeignK
   const tablesByName = new Map<string, SchemaTable>();
 
   for (const row of columnRows) {
-    const tableName = row.TABLE_NAME.trim();
+    // Keyed by the *qualified* name when the rows carry a schema (Firebird 6+). Keying by the bare
+    // name merges SALES.ORDERS and PUBLIC.ORDERS into a single box holding the union of their
+    // columns — a table that exists nowhere. Rows without a schema keep their bare name, so every
+    // pre-6 server and every caller that has not opted in behaves exactly as before.
+    const tableName = schemaQualifiedName(row.SCHEMA_NAME ?? undefined, row.TABLE_NAME);
     let table = tablesByName.get(tableName);
     if (!table) {
       table = { name: tableName, columns: [] };
@@ -100,9 +111,11 @@ export function buildSchemaGraph(columnRows: SchemaColumnRow[], fkRows: ForeignK
 
   const relationships: SchemaRelationship[] = fkRows.map(row => ({
     constraintName: row.CONSTRAINT_NAME.trim(),
-    table: row.TABLE_NAME.trim(),
+    // Both ends qualified independently: a foreign key may reference another schema's table, so
+    // the two sides can legitimately differ.
+    table: schemaQualifiedName(row.SCHEMA_NAME ?? undefined, row.TABLE_NAME),
     column: row.COLUMN_NAME.trim(),
-    refTable: row.REF_TABLE_NAME.trim(),
+    refTable: schemaQualifiedName(row.REF_SCHEMA_NAME ?? undefined, row.REF_TABLE_NAME),
     refColumn: row.REF_COLUMN_NAME.trim(),
   }));
 

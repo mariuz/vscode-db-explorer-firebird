@@ -5,6 +5,8 @@ import { ConnectionOptions } from "../interfaces";
 import { Driver, BatchResult } from "../shared/driver";
 import { getSchemaColumnsQuery, getForeignKeysQuery, getAllPrimaryKeyConstraintNamesQuery } from "../shared/queries";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow } from "./schema-graph";
+import { getEngineMajorVersion } from "../shared/engine-version";
+import { supportsSchemas } from "../shared/schema-support";
 import { extractJson } from "../copilot/json-extraction";
 import { logger } from "../logger/logger";
 
@@ -149,9 +151,20 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
       return;
     }
     try {
+      // Firebird 6 keeps every object in a schema, and the graph is keyed by table name — so
+      // without asking for the schema, SALES.ORDERS and PUBLIC.ORDERS merge into one box holding
+      // the union of their columns. Asking a pre-6 server for the column is a hard SQL error, so
+      // the flag comes from the cached version probe.
+      const withSchemas = supportsSchemas(
+        await getEngineMajorVersion(this.dbDetails, async sql => {
+          const [row] = await Driver.runBatch(sql, this.dbDetails!);
+          return (row?.rows ?? []) as any[];
+        })
+      );
+
       // Three SELECTs over one connection (runBatch also resolves the connection's stored
       // password automatically, the same as every other Driver-backed query in the extension).
-      const sql = `${getSchemaColumnsQuery()}\n${getForeignKeysQuery()}\n${getAllPrimaryKeyConstraintNamesQuery()}`;
+      const sql = `${getSchemaColumnsQuery(withSchemas)}\n${getForeignKeysQuery(withSchemas)}\n${getAllPrimaryKeyConstraintNamesQuery()}`;
       const results = await Driver.runBatch(sql, this.dbDetails);
       const [columnsResult, fkResult, pkResult] = results;
       if (columnsResult?.error) {

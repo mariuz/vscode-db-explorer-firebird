@@ -228,3 +228,41 @@ suite('buildSchemaGraph', function () {
     assert.strictEqual(orders.columns.length, 2);
   });
 });
+
+suite('buildSchemaGraph() — Firebird 6 schemas (docs/roadmap/firebird6-schemas.md)', function () {
+  const col = (schema: string | undefined, table: string, field: string) => ({
+    SCHEMA_NAME: schema,
+    TABLE_NAME: table,
+    FIELD_NAME: field,
+    FIELD_TYPE: 'INTEGER',
+    FIELD_LENGTH: 4,
+    NOT_NULL: 0,
+    IS_PRIMARY_KEY: 0,
+  });
+
+  test('same-named tables in different schemas stay separate boxes', function () {
+    // Verified live: keyed by bare name, SALES.ORDERS and PUBLIC.ORDERS merged into one box
+    // holding the union of their columns — a table that exists nowhere.
+    const graph = buildSchemaGraph(
+      [col('SALES', 'ORDERS', 'TOTAL'), col('PUBLIC', 'ORDERS', 'NOTE')] as any,
+      []
+    );
+    assert.deepStrictEqual(graph.tables.map(t => t.name).sort(), ['PUBLIC.ORDERS', 'SALES.ORDERS']);
+    assert.deepStrictEqual(graph.tables.find(t => t.name === 'SALES.ORDERS')!.columns.map(c => c.name), ['TOTAL']);
+  });
+
+  test('rows without a schema keep their bare name, so pre-6 servers are unaffected', function () {
+    const graph = buildSchemaGraph([col(undefined, 'ORDERS', 'NOTE')] as any, []);
+    assert.deepStrictEqual(graph.tables.map(t => t.name), ['ORDERS']);
+  });
+
+  test('each end of a relationship is qualified independently', function () {
+    // A foreign key may reference a table in another schema, so the two sides can differ.
+    const graph = buildSchemaGraph([], [{
+      SCHEMA_NAME: 'SALES', TABLE_NAME: 'ORDERS', COLUMN_NAME: 'CUST_ID',
+      CONSTRAINT_NAME: 'FK', REF_SCHEMA_NAME: 'PUBLIC', REF_TABLE_NAME: 'CUST', REF_COLUMN_NAME: 'ID',
+    }] as any);
+    assert.strictEqual(graph.relationships[0].table, 'SALES.ORDERS');
+    assert.strictEqual(graph.relationships[0].refTable, 'PUBLIC.CUST');
+  });
+});

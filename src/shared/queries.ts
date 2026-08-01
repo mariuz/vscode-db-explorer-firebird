@@ -706,8 +706,29 @@ export function getAllPrimaryKeyConstraintNamesQuery(): string {
  * flag and default value — used by the Schema Designer to build its whole-database graph in a
  * single round trip instead of one tableInfoQuery() per table.
  */
-export function getSchemaColumnsQuery(): string {
-  return `SELECT TRIM(r.RDB$RELATION_NAME) AS TABLE_NAME,
+/**
+ * Every user table's columns, for the Schema Designer's whole-database graph.
+ *
+ * `withSchemas` (Firebird 6+ only) adds the owning schema, without which `buildSchemaGraph()`
+ * keys tables by bare name and merges same-named tables from different schemas into one box
+ * holding the union of their columns.
+ */
+export function getSchemaColumnsQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(r.RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  // Every join here matches on names that repeat per schema on Firebird 6, so each one needs
+  // scoping too — otherwise a column row multiplies by the number of schemas holding a
+  // same-named relation, index or primary key. Verified live: without these, one table's four
+  // columns came back as sixteen rows.
+  const relJoin = withSchemas ? `
+                                          AND rel.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME` : "";
+  const fieldJoin = withSchemas ? `
+                                     AND f.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME` : "";
+  const pkInnerJoin = withSchemas ? `
+                                                    AND s.RDB$SCHEMA_NAME = rc.RDB$SCHEMA_NAME` : "";
+  const pkSchemaColumn = withSchemas ? ", rc.RDB$SCHEMA_NAME" : "";
+  const pkJoin = withSchemas ? `
+                        AND pk.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME` : "";
+  return `SELECT ${schemaColumn}TRIM(r.RDB$RELATION_NAME) AS TABLE_NAME,
                  TRIM(r.RDB$FIELD_NAME) AS FIELD_NAME,
                  CASE f.RDB$FIELD_TYPE
                    WHEN 261 THEN 'BLOB'
@@ -735,14 +756,14 @@ export function getSchemaColumnsQuery(): string {
                  CASE WHEN pk.RDB$FIELD_NAME IS NOT NULL THEN 1 ELSE 0 END AS IS_PRIMARY_KEY,
                  CAST(r.RDB$DEFAULT_SOURCE AS VARCHAR(100) CHARACTER SET UTF8) AS DFLT_VALUE
             FROM RDB$RELATION_FIELDS r
-            JOIN RDB$RELATIONS rel ON rel.RDB$RELATION_NAME = r.RDB$RELATION_NAME
-       LEFT JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = r.RDB$FIELD_SOURCE
+            JOIN RDB$RELATIONS rel ON rel.RDB$RELATION_NAME = r.RDB$RELATION_NAME${relJoin}
+       LEFT JOIN RDB$FIELDS f ON f.RDB$FIELD_NAME = r.RDB$FIELD_SOURCE${fieldJoin}
        LEFT JOIN (
-                 SELECT s.RDB$FIELD_NAME, rc.RDB$RELATION_NAME
+                 SELECT s.RDB$FIELD_NAME, rc.RDB$RELATION_NAME${pkSchemaColumn}
                    FROM RDB$RELATION_CONSTRAINTS rc
-                   JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
+                   JOIN RDB$INDEX_SEGMENTS s ON s.RDB$INDEX_NAME = rc.RDB$INDEX_NAME${pkInnerJoin}
                   WHERE rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY'
-               ) pk ON pk.RDB$RELATION_NAME = r.RDB$RELATION_NAME AND pk.RDB$FIELD_NAME = r.RDB$FIELD_NAME
+               ) pk ON pk.RDB$RELATION_NAME = r.RDB$RELATION_NAME AND pk.RDB$FIELD_NAME = r.RDB$FIELD_NAME${pkJoin}
            WHERE rel.RDB$VIEW_BLR IS NULL
              AND (rel.RDB$SYSTEM_FLAG IS NULL OR rel.RDB$SYSTEM_FLAG = 0)
         ORDER BY TABLE_NAME, r.RDB$FIELD_POSITION;`;

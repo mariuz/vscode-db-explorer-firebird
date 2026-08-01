@@ -654,3 +654,20 @@ suite('getForeignKeysQuery() — Firebird 6 schema scoping', function () {
     assert.ok(fb6.includes('AS REF_SCHEMA_NAME'));
   });
 });
+
+suite('getSchemaColumnsQuery() — Firebird 6 schema scoping', function () {
+  test('unchanged without schemas', function () {
+    assert.ok(!getSchemaColumnsQuery().includes('RDB$SCHEMA_NAME'));
+    assert.strictEqual(getSchemaColumnsQuery(), getSchemaColumnsQuery(false));
+  });
+
+  test('scopes every join, not just the relation one', function () {
+    // Verified live: without these, one table's four columns came back as sixteen rows, because
+    // the relation, domain and primary-key joins all match names that repeat per schema.
+    const fb6 = getSchemaColumnsQuery(true);
+    assert.ok(fb6.includes('rel.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'), 'relation join');
+    assert.ok(fb6.includes('f.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'), 'domain join');
+    assert.ok(fb6.includes('s.RDB$SCHEMA_NAME = rc.RDB$SCHEMA_NAME'), 'primary-key index join');
+    assert.ok(fb6.includes('pk.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'), 'primary-key outer join');
+  });
+});

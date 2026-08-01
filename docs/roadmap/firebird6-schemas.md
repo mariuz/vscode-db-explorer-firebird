@@ -125,9 +125,24 @@ Two foreign keys became an eight-row cross product, with no column in the result
 
 **Script as Create** now names the table as it actually is (`CREATE TABLE SALES.ORDERS`, not `CREATE TABLE ORDERS`, which would recreate it wherever the search path points), filters foreign keys by schema as well as name, and qualifies each side of a foreign key independently from the row's own `SCHEMA_NAME`/`REF_SCHEMA_NAME`. It infers schema support from `this.schema` being set, which only happens on Firebird 6+, rather than re-probing the version.
 
+### Phase 1f — the Schema Designer's ER graph (done)
+
+`buildSchemaGraph()` keys tables by name, so on Firebird 6 the whole-database diagram merged same-named tables into a single box holding the union of their columns. Verified live, and the numbers show two separate bugs:
+
+```
+old behaviour : 5 tables; ORDERS -> ID,ID,ID,ID,ID,ID,ID,ID,TOTAL,TOTAL,NOTE,NOTE,CUST_ID,CUST_ID,CUST_ID,CUST_ID
+schema-aware  : 7 tables; SALES.ORDERS -> ID*,TOTAL,CUST_ID | PUBLIC.ORDERS -> ID*,NOTE,CUST_ID
+```
+
+The merge was the obvious one. The **duplication** was not: `getSchemaColumnsQuery()` joins `RDB$RELATIONS`, `RDB$FIELDS` and a primary-key subquery over `RDB$RELATION_CONSTRAINTS`/`RDB$INDEX_SEGMENTS`, and every one of those matches on a name that repeats per schema — so each column row multiplied by the number of schemas holding a same-named relation, domain or index. One table's four columns came back as sixteen rows. Scoping all four joins fixes it, exactly as with the foreign-key query.
+
+`buildSchemaGraph()` itself now qualifies from the rows: tables by `SCHEMA_NAME`, and each end of a relationship independently from `SCHEMA_NAME`/`REF_SCHEMA_NAME`, since a foreign key may cross schemas. Rows without a schema keep their bare name, so pre-6 servers and callers that have not opted in are untouched.
+
+**Only the Schema Designer opted in.** `data-api-builder`, `database-projects` and the MCP server also call `buildSchemaGraph()` and still pass no flag, so they behave exactly as before — deliberately, since qualified table names would flow into generated REST specs, project files and agent-visible schema output, each of which deserves its own decision rather than being changed as a side effect.
+
 ### What is still missing, precisely
-- **The Schema Designer and Database Projects remain schema-blind.** `schema-graph.ts` calls `getForeignKeysQuery()` without the flag and `getSchemaColumnsQuery()` has no schema column at all, so a multi-schema ER diagram still merges same-named tables into one box. That is phase 4 of this doc.
-- **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
+- **No Schemas level in the tree**, which is the rest of phase 1.
+- **Data API Builder, Database Projects and the MCP server still build schema-blind graphs** — see phase 1f for why that was left as a deliberate choice rather than swept along. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 
 ## Suggested phases
