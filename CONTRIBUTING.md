@@ -202,6 +202,8 @@ npm run test:vscode-host  # inside a real Extension Development Host
 
 When adding new features, check whether existing tests cover the affected code paths and add tests if they don't. A new file under test must also be added to `tsconfig.test.json`'s `include` list, or the unit tier will not compile it.
 
+Every tier writes JUnit XML into `test-reports/` alongside its normal console output (configured in `.mocharc.json`/`mocha-reporters.json`, and in `.vscode-test.mjs` for the extension-host tier). CI turns that into an annotated check run naming any failing test. Stack traces point at the `.ts` sources rather than compiled `out/` JavaScript, via Node's `--enable-source-maps`.
+
 ### Coverage
 
 ```bash

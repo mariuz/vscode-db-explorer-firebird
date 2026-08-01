@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Required by dorny/test-reporter to publish the test results as a check run.
+      checks: write
 
     env:
       FIREBIRD_HOST: localhost
@@ -124,3 +126,23 @@ jobs:
         run: xvfb-run -a npx vscode-test
         env:
           DISPLAY: ":99.0"
+
+      - name: Publish extension host test report
+        # See ci.yml for why `fail-on-error: false` and why the parser is called `jest-junit`.
+        # The XML comes from the reporter configured in .vscode-test.mjs (this tier does not
+        # read .mocharc.json — its Mocha runs inside the Extension Development Host).
+        if: always()
+        uses: dorny/test-reporter@v3
+        with:
+          name: Extension host tests
+          path: test-reports/suite.xml
+          reporter: jest-junit
+          fail-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-host-test-results
+          path: test-reports
+          retention-days: 14

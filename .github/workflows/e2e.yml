@@ -109,6 +109,19 @@ jobs:
           FIREBIRD_USER: sysdba
           FIREBIRD_PASSWORD: masterkey
 
+      - name: Upload test results
+        # JUnit XML only, deliberately no dorny/test-reporter check run here: this job is a
+        # 12-entry matrix, and one check run per combination would bury the pull request's
+        # check list. The XML is uploaded so a failing combination can still be read without
+        # scrolling the log, and the per-job name keeps the twelve artifacts distinct
+        # (upload-artifact v4 rejects duplicate names).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-node${{ matrix.node }}-fb${{ matrix.firebird }}${{ matrix.wirecrypt && '-wirecrypt' || '' }}
+          path: test-reports
+          retention-days: 14
+
       - name: Show Firebird container log on failure
         if: failure()
         run: |

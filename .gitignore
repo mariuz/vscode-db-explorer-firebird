@@ -2,6 +2,7 @@ out
 node_modules
 .vscode-test/
 coverage
+test-reports
 *.vsix
 temp
 .directory

@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Required by dorny/test-reporter to publish the test results as a check run.
+      checks: write
 
     steps:
       - name: Checkout repository
@@ -37,6 +39,23 @@ jobs:
         # already emits — no instrumentation step, and nothing about how the tests run changes.
         run: ./node_modules/.bin/c8 ./node_modules/.bin/mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'
 
+      - name: Publish unit test report
+        # Turns a failure into an annotated check run naming the failing test, instead of a line
+        # to find in the job log. Reads the JUnit XML that .mocharc.json's reporter always writes,
+        # so nothing about the test command above changes.
+        #
+        # `fail-on-error: false` on purpose: a pull request from a fork gets a read-only
+        # GITHUB_TOKEN and cannot create check runs, and that must not fail an otherwise green
+        # build — the test step itself is what gates. `jest-junit` is the right parser for
+        # mocha-junit-reporter's output despite the name; both emit plain JUnit XML.
+        if: always()
+        uses: dorny/test-reporter@v3
+        with:
+          name: Unit tests
+          path: test-reports/mocha.xml
+          reporter: jest-junit
+          fail-on-error: false
+
       - name: Publish coverage summary
         if: always()
         run: |
@@ -51,10 +70,12 @@ jobs:
             echo 'The extension-host suite tier is measured separately by `npm run test:vscode-host:coverage`.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload coverage report
+      - name: Upload coverage report and test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-coverage
-          path: coverage/unit
+          path: |
+            coverage/unit
+            test-reports
           retention-days: 14
