@@ -198,7 +198,7 @@ Phase 2 as written ("qualified names on every write path") turns out to be large
 | Schema Designer / Table Designer DDL | qualified — the webview builds DDL from the graph's `name`, which is the qualified identity. Now pinned by two tests asserting `ALTER TABLE SALES.ORDERS …` and `ALTER TABLE PUBLIC.ORDERS …` rather than the bare forms |
 | Drag identifier into editor | qualified — `getDragIdentifier()` returns the SQL name |
 | **schema-diff** | done — snapshots are keyed by schema + name (see below) |
-| **Database Projects** extract/publish | done for the graph half (see below); view/procedure/trigger *sources* still come from name-only queries |
+| **Database Projects** extract/publish | done — tables, views, procedures and triggers all qualified |
 
 So what remains of phase 2 is exactly the two consumers already listed as outstanding, rather than a separate sweep. The remaining phases are 3 (search path), 4 (designer colour-coding), and 5 (schema lifecycle DDL).
 
@@ -235,7 +235,16 @@ A single-schema Firebird 6 database therefore keeps `tables/ORDERS.sql` rather t
 
 Per-schema folders (`schemas/SALES/tables/…`) remain the tidier long-term layout, but they are now a refinement rather than a prerequisite for correctness.
 
-**Still name-only**: views, procedures and triggers reach a project through `getAllViewSourcesQuery()` and friends, which have no schema variant. Their *sources* are extracted by name, so two same-named procedures in different schemas would still collide. That is the remaining piece of this phase.
+**Now complete.** `getAllViewSourcesQuery()`, `getAllProcedureSourcesQuery()`, `getAllTriggerSourcesQuery()` and `getAllProcedureParametersQuery()` all gained the same optional schema column, and the snapshot qualifies each object. Verified live:
+
+```
+views     : PUBLIC.ACTIVE, SALES.ACTIVE
+procedures: PUBLIC.TOTALS(M), SALES.TOTALS(N)
+view files: views/ACTIVE.sql, views/SALES.ACTIVE.sql
+proc files: procedures/TOTALS.sql, procedures/SALES.TOTALS.sql
+```
+
+The procedure line is the one to read twice: parameters are keyed by qualified name, so `PUBLIC.TOTALS` gets `M` and `SALES.TOTALS` gets `N`. Keyed by bare name — as before — each procedure collected *both* procedures' parameters, and the extracted DDL would have declared a signature that exists nowhere.
 
 ## Suggested phases
 

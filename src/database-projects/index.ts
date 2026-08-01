@@ -9,7 +9,7 @@ import {
   getAllPrimaryKeyConstraintNamesQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getUsersQuery,
 } from "../shared/queries";
 import { getEngineMajorVersion } from "../shared/engine-version";
-import { supportsSchemas } from "../shared/schema-support";
+import { supportsSchemas, schemaQualifiedName, schemaDisplayName } from "../shared/schema-support";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, normalizeDefault } from "../schema-designer/schema-graph";
 import { buildProjectFiles, MANIFEST_FILE_NAME, ProjectInput, ProcedureParameter } from "./project-model";
 import { diffProjects, buildPublishScript } from "./publish-model";
@@ -38,13 +38,20 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
     })
   );
 
+  /** Object identity: qualified where the server has schemas, bare otherwise. */
+  const qualify = (schema: unknown, name: unknown) =>
+    schemaQualifiedName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
+  /** File-facing name: drops a redundant default-schema prefix — see project-model's table files. */
+  const display = (schema: unknown, name: unknown) =>
+    schemaDisplayName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
+
   const sql = [
     getSchemaColumnsQuery(withSchemas),
     getForeignKeysQuery(withSchemas),
-    getAllViewSourcesQuery(),
-    getAllProcedureSourcesQuery(),
-    getAllProcedureParametersQuery(),
-    getAllTriggerSourcesQuery(),
+    getAllViewSourcesQuery(withSchemas),
+    getAllProcedureSourcesQuery(withSchemas),
+    getAllProcedureParametersQuery(withSchemas),
+    getAllTriggerSourcesQuery(withSchemas),
     getGeneratorsQuery(),
     getAllPrimaryKeyConstraintNamesQuery(),
     getDomainsQuery(),
@@ -69,7 +76,7 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
 
   const parametersByProcedure = new Map<string, ProcedureParameter[]>();
   for (const row of (procParamsResult?.rows ?? []) as any[]) {
-    const procName = row.PROCEDURE_NAME.trim();
+    const procName = qualify(row.SCHEMA_NAME, row.PROCEDURE_NAME);
     const list = parametersByProcedure.get(procName) ?? [];
     list.push({
       name: row.PARAM_NAME.trim(),
@@ -106,14 +113,24 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
       dflt: normalizeDefault(r.DEFAULT_SOURCE),
       check: (r.CHECK_SOURCE ?? "").trim() || undefined,
     })),
-    views: ((viewsResult?.rows ?? []) as any[]).map(r => ({ name: r.VIEW_NAME.trim(), source: r.VIEW_SOURCE ?? "" })),
+    views: ((viewsResult?.rows ?? []) as any[]).map(r => ({
+      name: qualify(r.SCHEMA_NAME, r.VIEW_NAME),
+      displayName: display(r.SCHEMA_NAME, r.VIEW_NAME),
+      source: r.VIEW_SOURCE ?? "",
+    })),
     procedures: ((proceduresResult?.rows ?? []) as any[]).map(r => {
-      const name = r.PROCEDURE_NAME.trim();
-      return { name, source: r.PROCEDURE_SOURCE ?? "", parameters: parametersByProcedure.get(name) ?? [] };
+      const name = qualify(r.SCHEMA_NAME, r.PROCEDURE_NAME);
+      return {
+        name,
+        displayName: display(r.SCHEMA_NAME, r.PROCEDURE_NAME),
+        source: r.PROCEDURE_SOURCE ?? "",
+        parameters: parametersByProcedure.get(name) ?? [],
+      };
     }),
     triggers: ((triggersResult?.rows ?? []) as any[]).map(r => ({
-      name: r.TRIGGER_NAME.trim(),
-      table: (r.TABLE_NAME ?? "").trim(),
+      name: qualify(r.SCHEMA_NAME, r.TRIGGER_NAME),
+      displayName: display(r.SCHEMA_NAME, r.TRIGGER_NAME),
+      table: r.TABLE_NAME ? qualify(r.SCHEMA_NAME, r.TABLE_NAME) : "",
       inactive: !!r.INACTIVE,
       type: r.TRIGGER_TYPE ?? 0,
       source: r.TRIGGER_SOURCE ?? "",

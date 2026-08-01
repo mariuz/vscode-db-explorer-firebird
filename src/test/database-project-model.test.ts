@@ -436,3 +436,45 @@ suite('buildProjectFiles() — Firebird 6 schema names', function () {
     assert.strictEqual(files.find(f => f.path.startsWith('tables/'))!.path, 'tables/ORDERS.sql');
   });
 });
+
+suite('buildProjectFiles() — source objects across schemas', function () {
+  const base = {
+    graph: { tables: [], relationships: [] },
+    views: [], procedures: [], triggers: [], generators: [], domains: [], roles: [], exceptions: [], users: [],
+    pkConstraintNames: {},
+  };
+
+  test('same-named views in two schemas get separate files', function () {
+    // Verified live: before this, both were extracted under one name and the second overwrote
+    // the first.
+    const files = buildProjectFiles({
+      ...base,
+      views: [
+        { name: 'PUBLIC.ACTIVE', displayName: 'ACTIVE', source: 'SELECT 1 FROM RDB$DATABASE' },
+        { name: 'SALES.ACTIVE', displayName: 'SALES.ACTIVE', source: 'SELECT 2 FROM RDB$DATABASE' },
+      ],
+    } as any);
+    const paths = files.filter(f => f.path.startsWith('views/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['views/ACTIVE.sql', 'views/SALES.ACTIVE.sql']);
+  });
+
+  test('same-named procedures too, each keeping its own file name', function () {
+    const files = buildProjectFiles({
+      ...base,
+      procedures: [
+        { name: 'PUBLIC.TOTALS', displayName: 'TOTALS', source: 'BEGIN END', parameters: [] },
+        { name: 'SALES.TOTALS', displayName: 'SALES.TOTALS', source: 'BEGIN END', parameters: [] },
+      ],
+    } as any);
+    const paths = files.filter(f => f.path.startsWith('procedures/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['procedures/SALES.TOTALS.sql', 'procedures/TOTALS.sql']);
+  });
+
+  test('without a display name — every pre-Firebird-6 database — nothing changes', function () {
+    const files = buildProjectFiles({
+      ...base,
+      views: [{ name: 'ACTIVE', source: 'SELECT 1 FROM RDB$DATABASE' }],
+    } as any);
+    assert.strictEqual(files.find(f => f.path.startsWith('views/'))!.path, 'views/ACTIVE.sql');
+  });
+});

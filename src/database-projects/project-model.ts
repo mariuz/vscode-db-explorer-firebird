@@ -24,6 +24,8 @@ export interface ProcedureParameter {
 
 export interface ProcedureSource {
   name: string;
+  /** Firebird 6+ only: the name minus a redundant default-schema prefix, used for file names. */
+  displayName?: string;
   source: string;
   /**
    * Input/output parameters, in declaration order — RDB$PROCEDURE_SOURCE excludes the parameter
@@ -37,6 +39,8 @@ export interface ProcedureSource {
 
 export interface TriggerSource {
   name: string;
+  /** Firebird 6+ only: the name minus a redundant default-schema prefix, used for file names. */
+  displayName?: string;
   table: string;
   inactive: boolean;
   /** RDB$TRIGGER_TYPE — simple single-event encoding only (1-6); see describeTriggerType(). */
@@ -64,6 +68,8 @@ export function describeTriggerType(type: number): string {
 
 export interface ViewSource {
   name: string;
+  /** Firebird 6+ only: the name minus a redundant default-schema prefix, used for file names. */
+  displayName?: string;
   source: string;
 }
 
@@ -393,15 +399,15 @@ export function buildProjectFiles(input: ProjectInput): ProjectFile[] {
   });
 
   input.views.forEach(view => {
-    files.push({ path: `views/${sanitizeFileName(view.name)}.sql`, content: buildViewCreateDDL(view) });
+    files.push({ path: `views/${sanitizeFileName(view.displayName ?? view.name)}.sql`, content: buildViewCreateDDL(view) });
   });
 
   input.procedures.forEach(proc => {
-    files.push({ path: `procedures/${sanitizeFileName(proc.name)}.sql`, content: buildProcedureCreateDDL(proc) });
+    files.push({ path: `procedures/${sanitizeFileName(proc.displayName ?? proc.name)}.sql`, content: buildProcedureCreateDDL(proc) });
   });
 
   input.triggers.forEach(trigger => {
-    files.push({ path: `triggers/${sanitizeFileName(trigger.name)}.sql`, content: buildTriggerCreateDDL(trigger) });
+    files.push({ path: `triggers/${sanitizeFileName(trigger.displayName ?? trigger.name)}.sql`, content: buildTriggerCreateDDL(trigger) });
   });
 
   input.roles.forEach(role => {

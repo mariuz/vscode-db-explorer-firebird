@@ -498,8 +498,10 @@ export function getViewDefinitionQuery(viewName: string, schema?: string): strin
  * same CAST(...) truncation-safe pattern as getProcedureBodyQuery(), just for all procedures in
  * one round trip instead of one query per procedure.
  */
-export function getAllProcedureSourcesQuery(): string {
-  return `SELECT TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
+/** `withSchemas` is Firebird 6+ only — see `getTablesQuery()`. */
+export function getAllProcedureSourcesQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
                  CAST(RDB$PROCEDURE_SOURCE AS VARCHAR(${MAX_SOURCE_CAST_LENGTH}) CHARACTER SET UTF8) AS PROCEDURE_SOURCE
             FROM RDB$PROCEDURES
            WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
@@ -513,8 +515,10 @@ export function getAllProcedureSourcesQuery(): string {
  * is 0 for an input parameter, 1 for an output one; ordered so input params come back in
  * declaration order followed by output params in declaration order.
  */
-export function getAllProcedureParametersQuery(): string {
-  return `SELECT TRIM(pp.RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
+/** `withSchemas` is Firebird 6+ only; the schema is needed to key parameters to the right procedure. */
+export function getAllProcedureParametersQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(pp.RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(pp.RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
                  TRIM(pp.RDB$PARAMETER_NAME) AS PARAM_NAME,
                  pp.RDB$PARAMETER_TYPE AS PARAM_TYPE,
                  CASE f.RDB$FIELD_TYPE
@@ -545,8 +549,10 @@ export function getAllProcedureParametersQuery(): string {
 }
 
 /** Every non-system trigger's full source, one round trip — see getAllProcedureSourcesQuery(). */
-export function getAllTriggerSourcesQuery(): string {
-  return `SELECT TRIM(RDB$TRIGGER_NAME) AS TRIGGER_NAME,
+/** `withSchemas` is Firebird 6+ only. */
+export function getAllTriggerSourcesQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$TRIGGER_NAME) AS TRIGGER_NAME,
                  TRIM(RDB$RELATION_NAME) AS TABLE_NAME,
                  RDB$TRIGGER_TYPE AS TRIGGER_TYPE,
                  CASE WHEN RDB$TRIGGER_INACTIVE = 1 THEN 1 ELSE 0 END AS INACTIVE,
@@ -557,8 +563,10 @@ export function getAllTriggerSourcesQuery(): string {
 }
 
 /** Every non-system view's full source, one round trip — see getAllProcedureSourcesQuery(). */
-export function getAllViewSourcesQuery(): string {
-  return `SELECT TRIM(RDB$RELATION_NAME) AS VIEW_NAME,
+/** `withSchemas` is Firebird 6+ only. */
+export function getAllViewSourcesQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$RELATION_NAME) AS VIEW_NAME,
                  CAST(RDB$VIEW_SOURCE AS VARCHAR(${MAX_SOURCE_CAST_LENGTH}) CHARACTER SET UTF8) AS VIEW_SOURCE
             FROM RDB$RELATIONS
            WHERE RDB$VIEW_BLR IS NOT NULL
