@@ -32,6 +32,12 @@
   },
   "publisher": "AdrianMariusPopa",
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Firebird Studio runs external programs — isql, gbak and docker — whose locations come from the firebird.isqlPath, firebird.gbakPath and firebird.dockerPath settings, and it reads database connection definitions from .vscode/firebird.json. In an untrusted folder, both are attacker-controlled: opening the folder could run an arbitrary executable or connect to an arbitrary server. Trust the folder to enable the extension."
+    }
+  },
   "scripts": {
     "tsc-compile": "node node_modules/typescript7/bin/tsc -p ./",
     "vscode:prepublish": "npm run compile",

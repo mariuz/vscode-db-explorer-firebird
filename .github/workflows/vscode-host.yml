@@ -5,6 +5,19 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+  # Nightly early warning against VS Code Insiders. `engines.vscode` is well behind current
+  # stable (see docs/roadmap/vscode-api-adoption.md), so a breaking platform change would
+  # otherwise reach users before this repository noticed. Scheduled runs cannot block a merge,
+  # which is the point: it reports, it does not gate.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      code_version:
+        description: "VS Code version to test against"
+        type: choice
+        default: stable
+        options: [stable, insiders]
 
 jobs:
   extension-host-tests:
@@ -123,9 +136,13 @@ jobs:
         run: node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false
 
       - name: Run extension host tests (headless)
-        run: xvfb-run -a npx vscode-test
+        # Scheduled runs test against Insiders; everything else against stable. A manual run can
+        # pick either via the workflow_dispatch input. `--code-version` is @vscode/test-cli's own
+        # flag, so .vscode-test.mjs needs no version pinned in it.
+        run: xvfb-run -a npx vscode-test --code-version "$CODE_VERSION"
         env:
           DISPLAY: ":99.0"
+          CODE_VERSION: ${{ inputs.code_version || (github.event_name == 'schedule' && 'insiders' || 'stable') }}
 
       - name: Publish extension host test report
         # See ci.yml for why `fail-on-error: false` and why the parser is called `jest-junit`.
@@ -134,7 +151,9 @@ jobs:
         if: always()
         uses: dorny/test-reporter@v3
         with:
-          name: Extension host tests
+          # Version in the name so a nightly Insiders failure is distinguishable at a glance
+          # from a stable one, and so the two never overwrite each other's check run.
+          name: Extension host tests (${{ inputs.code_version || (github.event_name == 'schedule' && 'insiders' || 'stable') }})
           path: test-reports/suite.xml
           reporter: jest-junit
           fail-on-error: false

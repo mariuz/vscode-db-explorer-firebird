@@ -125,10 +125,30 @@ Artifacts and check runs are named per platform (`unit-coverage-<os>`, `Unit tes
 
 **Not verified by running.** The Windows and macOS jobs cannot be exercised from a Linux development environment; only the workflow's structure was checked. The first CI run is the verification, and it may well surface genuine pre-existing platform bugs — that is the item working as intended, not the matrix being broken.
 
+## Phase 5 — Insiders early warning and Workspace Trust (done)
+
+### Nightly Insiders run
+
+`vscode-host.yml` gained a `schedule` trigger (03:00 UTC) and a `workflow_dispatch` input. Scheduled runs test against **Insiders**; pushes and pull requests keep testing stable; a manual run can pick either. The version is passed with `@vscode/test-cli`'s own `--code-version` flag, so nothing is pinned inside `.vscode-test.mjs`, and it appears in the check-run name so a nightly Insiders failure is distinguishable at a glance from a stable one.
+
+A scheduled run cannot block a merge, which is exactly the intent: this reports, it does not gate. With `engines.vscode` well behind current stable ([vscode-api-adoption.md](vscode-api-adoption.md)), it is the cheapest available warning that a platform change has broken something.
+
+### Workspace Trust: `supported: false`, declared
+
+The declaration was missing entirely, and **the default for a missing declaration is already "disabled in Restricted Mode"** — so this changes no behaviour. What it changes is that the user now sees *why*, instead of an extension that silently does not load.
+
+The decision itself is not a formality. Three settings — `firebird.isqlPath`, `firebird.gbakPath`, `firebird.dockerPath` — carry no explicit `scope`, so they default to `window` scope and **can be set from a repository's own `.vscode/settings.json`**. Combined with `.vscode/firebird.json` supplying connection targets, opening an untrusted folder could point the extension at an arbitrary executable or an arbitrary server. That is precisely the threat Restricted Mode exists for, so `supported: false` is the honest answer rather than a cautious one.
+
+**`supported: "limited"` is the interesting future option, and it has a concrete prerequisite**: those three settings would have to become `machine`- or `machine-overridable`-scoped so a workspace cannot override them, at which point `restrictedConfigurations` could list them and the extension could usefully run read-only in an untrusted folder — browsing a database while reviewing someone else's repository is a real workflow. Worth doing only as a deliberate piece of work, not as a side effect of this phase.
+
+**Why there is no end-to-end untrusted-mode test.** VS Code's testing guidance suggests separate trusted/untrusted test configurations, but that advice applies to extensions with `limited` support, which still *load* in Restricted Mode. A `supported: false` extension does not load at all — and the extension-host suite runs *as* this extension, so there would be nothing left running to make an assertion from. `@vscode/test-electron` also passes `--disable-workspace-trust` when launching (verified in `out/runTest.js`), so the suite tier is always trusted regardless. What is testable is the manifest itself, and that is what `src/test/manifest.test.ts` (unit tier, so it runs on all three platforms) now does: the declaration exists, it is `false` rather than silently widened, it carries a non-empty description, and the settings that description names still exist — that last one keeps the stated justification from quietly going stale if a setting is renamed.
+
 ## Suggested phases
 
 1. ~~**Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate.~~ — **done**, see above, except the Codecov upload: it needs a `CODECOV_TOKEN` repository secret that does not exist yet, so CI publishes the summary and an artifact instead. Adding the upload is a two-line change once the token is configured.
 2. ~~**Reporting**: JUnit XML from all tiers + `dorny/test-reporter` checks; source-map registration if sourcemaps are available.~~ — **done**, see above; source mapping via Node's built-in `--enable-source-maps` rather than the `source-map-support` dependency the doc originally proposed.
 3. ~~**Coverage gate** set from phase 1's actual baseline, patch target above project target.~~ — **done** for the project-level floor (see above). The *patch* target is not done and cannot be with `c8` alone: diff coverage needs Codecov, which needs the `CODECOV_TOKEN` secret.
 4. ~~**Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.~~ — **done**, though the stated rationale turned out to be wrong: that logic takes an injected platform parameter and was already tested for Windows from Linux. See phase 4 above for what the matrix actually buys.
-5. **Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.
+5. ~~**Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.~~ — **done**, except the "test config" half, which is not achievable for a `supported: false` extension and is replaced by manifest-level tests. See phase 5 above.
+
+All five phases of this doc are complete. What remains open, tracked here so it is not lost: **patch/diff coverage** (needs a `CODECOV_TOKEN` secret), and **`supported: "limited"` Workspace Trust** (needs the executable-path settings to become machine-scoped first).

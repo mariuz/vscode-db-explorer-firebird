@@ -2,6 +2,12 @@
 
 All notable changes to the "vscode-firebird-studio" extension will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- **Opening an untrusted folder now tells you why Firebird Studio is unavailable**, instead of the extension simply not appearing. Its behaviour in VS Code's Restricted Mode is unchanged — it was already disabled there, because an extension that doesn't declare a Workspace Trust capability is disabled by default — but that was a default nobody had chosen and nothing explained. The extension now states the reason: it runs `isql`, `gbak`, and `docker` from paths that `firebird.isqlPath`/`firebird.gbakPath`/`firebird.dockerPath` can set, and reads connection definitions from `.vscode/firebird.json`, both of which a folder you haven't trusted controls. Trusting the folder enables the extension as before.
+
 ## 0.2.2 - 2026-07-31
 
 ### Fixed
