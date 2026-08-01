@@ -110,7 +110,7 @@ export class NodeDatabase implements FirebirdTree {
   public async getChildren(): Promise<FirebirdTree[]> {
     const schemas = await this.userSchemas();
     if (schemas.length > 1) {
-      return schemas.map(schema => new NodeSchema(schema, (s: string) => this.categoryFolders(s)));
+      return schemas.map(schema => new NodeSchema(schema, (s: string) => this.categoryFolders(s), this.dbDetails));
     }
     return this.categoryFolders();
   }

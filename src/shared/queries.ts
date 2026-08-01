@@ -695,15 +695,56 @@ export function generatorCurrentValueQuery(generatorName: string): string {
 }
 
 /**
- * Grants recorded against a table/view/procedure/role, read from RDB$USER_PRIVILEGES — confirmed
- * directly against a live Firebird server that RDB$RELATION_NAME (despite its name) holds the
- * securable object's name for all of these object types, not just relations, so one query by name
- * works regardless of which kind of object it is. RDB$PRIVILEGE is a single-letter code (S=SELECT,
- * I=INSERT, U=UPDATE, D=DELETE, R=REFERENCES, X=EXECUTE, M=role membership) mapped here to a
- * friendly name; RDB$FIELD_NAME is only non-null for a column-level grant (e.g. UPDATE on one column).
+ * `RDB$OBJECT_TYPE` for a Firebird 6 SQL schema, used to tell a schema's grants apart from those of
+ * a table that happens to share its name.
+ *
+ * Hardcoded because the catalogue cannot supply it: `RDB$TYPES` documents `RDB$OBJECT_TYPE` values
+ * 0–19 and 37 on Firebird 6.0.0 and stops there, so 38 appears in `RDB$USER_PRIVILEGES` rows without
+ * ever being named. Established empirically — `GRANT USAGE ON SCHEMA SALES TO PUBLIC` against a live
+ * 6.0.0 server writes a row with object type 38.
  */
-export function getObjectPrivilegesQuery(objectName: string): string {
+export const SCHEMA_OBJECT_TYPE = 38;
+
+export interface ObjectPrivilegeScope {
+  /**
+   * Firebird 6+ only: the schema owning the object, which disambiguates two same-named tables in
+   * different schemas. Omit on pre-6 servers — `RDB$RELATION_SCHEMA_NAME` does not exist there, so
+   * naming it would make the query fail to prepare rather than return nothing.
+   */
+  schema?: string;
+  /**
+   * `RDB$OBJECT_TYPE` to restrict to. Needed for securables that share the name space of a table:
+   * without it, a schema named `SALES` and a table named `SALES` return each other's grants.
+   */
+  objectType?: number;
+}
+
+/**
+ * Grants recorded against a table/view/procedure/role/schema, read from RDB$USER_PRIVILEGES —
+ * confirmed directly against a live Firebird server that RDB$RELATION_NAME (despite its name) holds
+ * the securable object's name for all of these object types, not just relations, so one query by
+ * name works regardless of which kind of object it is.
+ *
+ * RDB$PRIVILEGE is a single-letter code, mapped here to a friendly name. S/I/U/D/R/X/M are the
+ * classic set; G (USAGE) covers Firebird 4+ grants on generators, exceptions and — since 6 — schemas,
+ * and C/L/O are the DDL privileges (`GRANT CREATE TABLE TO …`), all three of which turn up in an
+ * ordinary database's catalogue and would otherwise be shown as bare letters.
+ *
+ * RDB$FIELD_NAME is only non-null for a column-level grant (e.g. UPDATE on one column).
+ */
+export function getObjectPrivilegesQuery(objectName: string, scope: ObjectPrivilegeScope = {}): string {
   assertValidIdentifier(objectName, "object name");
+  if (scope.schema !== undefined) {
+    assertValidIdentifier(scope.schema, "schema name");
+  }
+  // A schema grant records RDB$RELATION_SCHEMA_NAME as NULL (the schema *is* the object, it is not
+  // in one), so callers pass an object type for those rather than a schema.
+  const schemaFilter = scope.schema === undefined
+    ? ""
+    : `\n             AND TRIM(p.RDB$RELATION_SCHEMA_NAME) = '${scope.schema}'`;
+  const typeFilter = scope.objectType === undefined
+    ? ""
+    : `\n             AND p.RDB$OBJECT_TYPE = ${Number(scope.objectType)}`;
   return `SELECT TRIM(p.RDB$USER) AS GRANTEE,
                  TRIM(p.RDB$GRANTOR) AS GRANTOR,
                  CASE p.RDB$PRIVILEGE
@@ -714,12 +755,16 @@ export function getObjectPrivilegesQuery(objectName: string): string {
                    WHEN 'R' THEN 'REFERENCES'
                    WHEN 'X' THEN 'EXECUTE'
                    WHEN 'M' THEN 'MEMBER OF'
+                   WHEN 'G' THEN 'USAGE'
+                   WHEN 'C' THEN 'CREATE'
+                   WHEN 'L' THEN 'ALTER'
+                   WHEN 'O' THEN 'DROP'
                    ELSE p.RDB$PRIVILEGE
                  END AS PRIVILEGE,
                  CASE WHEN p.RDB$GRANT_OPTION = 1 THEN 'YES' ELSE 'NO' END AS GRANT_OPTION,
                  TRIM(p.RDB$FIELD_NAME) AS COLUMN_NAME
             FROM RDB$USER_PRIVILEGES p
-           WHERE TRIM(p.RDB$RELATION_NAME) = '${objectName}'
+           WHERE TRIM(p.RDB$RELATION_NAME) = '${objectName}'${schemaFilter}${typeFilter}
         ORDER BY GRANTEE, PRIVILEGE, COLUMN_NAME;`;
 }
 

@@ -133,7 +133,7 @@ export class NodeProcedure implements FirebirdTree {
   public async showPrivileges() {
     logger.info("Custom Query: Show Object Privileges");
     Global.activeConnection = this.dbDetails;
-    return Driver.runQuery(getObjectPrivilegesQuery(this.procedureName.trim()), this.dbDetails)
+    return Driver.runQuery(getObjectPrivilegesQuery(this.procedureName.trim(), {schema: this.schema}), this.dbDetails)
       .then(result => result)
       .catch(err => {
         logger.error(err);

@@ -87,3 +87,32 @@ suite('package.json – per-node tree refresh', function () {
     assert.ok(titleItems.some((e: any) => e.command === "firebird.explorer.refresh"));
   });
 });
+
+suite('package.json – schema-level privileges', function () {
+  test('Show Object Privileges is offered on a schema node', function () {
+    // NodeSchema implements showPrivileges(), but the generic `firebird.showPrivileges` command is
+    // reachable only from a `view/item/context` entry matching the node's contextValue — the method
+    // alone is dead code, and nothing else in the test tiers would notice.
+    const items = packageJson?.contributes?.menus?.["view/item/context"] ?? [];
+    const entry = items.find(
+      (e: any) => e.command === "firebird.showPrivileges" && String(e.when).includes("viewItem == schema")
+    );
+    assert.ok(
+      entry,
+      "firebird.showPrivileges should be contributed for viewItem == schema; contributed for: " +
+        items.filter((e: any) => e.command === "firebird.showPrivileges").map((e: any) => e.when).join(", ")
+    );
+  });
+
+  test('it sits in the same menu group as the other objects\' privileges', function () {
+    const items = packageJson?.contributes?.menus?.["view/item/context"] ?? [];
+    const groups = new Set(
+      items.filter((e: any) => e.command === "firebird.showPrivileges").map((e: any) => e.group)
+    );
+    assert.strictEqual(
+      groups.size,
+      1,
+      `Show Object Privileges should appear in one group for every node type, found: ${[...groups].join(", ")}`
+    );
+  });
+});

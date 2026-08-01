@@ -21,6 +21,7 @@ import {
   alterDomainScaffold,
   profilerActivityQuery,
   getObjectPrivilegesQuery,
+  SCHEMA_OBJECT_TYPE,
   killAttachmentQuery,
   rollbackTransactionQuery,
   tableInfoQuery,
@@ -311,6 +312,45 @@ suite('getObjectPrivilegesQuery', function () {
 
   test('rejects an unsafe object name instead of interpolating it unescaped', function () {
     assert.throws(() => getObjectPrivilegesQuery('BAD; DROP TABLE X'), /Invalid object name/);
+  });
+
+  test('names no schema column by default — pre-6 servers do not have one', function () {
+    // RDB$RELATION_SCHEMA_NAME does not exist before Firebird 6, so mentioning it unconditionally
+    // would make the statement fail to *prepare* rather than simply return nothing.
+    const sql = getObjectPrivilegesQuery('CUSTOMERS');
+    assert.ok(!sql.includes('RDB$RELATION_SCHEMA_NAME'), sql);
+    assert.ok(!sql.includes('RDB$OBJECT_TYPE'), sql);
+  });
+
+  test('restricts to one schema when given one', function () {
+    // Two schemas may both hold an ORDERS table; without this the grid silently merges their
+    // grants, which reads as one table having contradictory permissions.
+    const sql = getObjectPrivilegesQuery('ORDERS', {schema: 'SALES'});
+    assert.ok(sql.includes("TRIM(p.RDB$RELATION_SCHEMA_NAME) = 'SALES'"), sql);
+  });
+
+  test('restricts by object type when given one', function () {
+    const sql = getObjectPrivilegesQuery('SALES', {objectType: SCHEMA_OBJECT_TYPE});
+    assert.ok(sql.includes('p.RDB$OBJECT_TYPE = 38'), sql);
+    // A schema's grants record no owning schema, so a schema filter must not be added alongside.
+    assert.ok(!sql.includes('RDB$RELATION_SCHEMA_NAME'), sql);
+  });
+
+  test('maps the privilege codes that only appear on Firebird 4+', function () {
+    // USAGE covers generators, exceptions and (on 6) schemas; C/L/O are the DDL privileges. All
+    // four occur in an ordinary database's catalogue and were previously shown as bare letters.
+    const sql = getObjectPrivilegesQuery('SALES', {objectType: SCHEMA_OBJECT_TYPE});
+    assert.ok(sql.includes("WHEN 'G' THEN 'USAGE'"), sql);
+    assert.ok(sql.includes("WHEN 'C' THEN 'CREATE'"), sql);
+    assert.ok(sql.includes("WHEN 'L' THEN 'ALTER'"), sql);
+    assert.ok(sql.includes("WHEN 'O' THEN 'DROP'"), sql);
+  });
+
+  test('rejects an unsafe schema name', function () {
+    assert.throws(
+      () => getObjectPrivilegesQuery('ORDERS', {schema: "X' OR '1'='1"}),
+      /Invalid schema name/
+    );
   });
 });
 

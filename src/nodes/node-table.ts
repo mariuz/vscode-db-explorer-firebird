@@ -178,7 +178,7 @@ export class NodeTable implements FirebirdTree {
   public async showPrivileges() {
     logger.info("Custom Query: Show Object Privileges");
     Global.activeConnection = this.dbDetails;
-    return Driver.runQuery(getObjectPrivilegesQuery(this.table.trim()), this.dbDetails)
+    return Driver.runQuery(getObjectPrivilegesQuery(this.table.trim(), {schema: this.schema}), this.dbDetails)
       .then(result => result)
       .catch(err => {
         logger.error(err);

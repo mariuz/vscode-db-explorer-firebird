@@ -15,6 +15,9 @@ import { NodeDatabase, NodeHost, NodeTable } from '../../nodes';
 import { FirebirdTree } from '../../interfaces';
 import { getTestConnectionOptions } from './firebird-test-env';
 import { setObjectFilter, clearObjectFilter } from '../../shared/object-explorer-filter';
+import { getObjectPrivilegesQuery, SCHEMA_OBJECT_TYPE } from '../../shared/queries';
+import { getEngineMajorVersion } from '../../shared/engine-version';
+import { supportsSchemas } from '../../shared/schema-support';
 
 const EXTENSION_ID = 'AdrianMariusPopa.vscode-firebird-studio';
 
@@ -113,5 +116,75 @@ suite('Tree nodes – real Firebird integration (extension host)', function () {
       const item = await tablesFolder.getTreeItem(fakeContext);
       assert.strictEqual(item.label, 'Tables');
     });
+  });
+});
+
+/**
+ * Schema-level grants (docs/roadmap/firebird6-schemas.md, phase 6).
+ *
+ * These pin two catalogue facts that no amount of reading the code can establish, and that the
+ * documentation does not state: that a `GRANT USAGE ON SCHEMA` is recorded in RDB$USER_PRIVILEGES
+ * under `RDB$OBJECT_TYPE = 38` with privilege code `G`, and that such a row leaves
+ * RDB$RELATION_SCHEMA_NAME null. `RDB$TYPES` names object types 0–19 and 37 on Firebird 6.0.0 and
+ * stops there, so 38 cannot be looked up — if a later Firebird renumbers it, this test is what says
+ * so, rather than the schema privileges silently coming back empty.
+ */
+suite('Schema privileges – real Firebird 6 integration (extension host)', function () {
+  this.timeout(20000);
+
+  let major = 0;
+
+  suiteSetup(async function () {
+    Driver.client = new NodeClient();
+    major = await getEngineMajorVersion(
+      'suite-schema-privileges',
+      sql => Driver.runQuery(sql, getTestConnectionOptions())
+    );
+  });
+
+  test('the PUBLIC schema has USAGE grants recorded against object type 38', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip(); // pre-6 server: schemas do not exist, and neither does the grant
+    }
+    const rows = await Driver.runQuery(
+      getObjectPrivilegesQuery('PUBLIC', {objectType: SCHEMA_OBJECT_TYPE}),
+      getTestConnectionOptions()
+    );
+    assert.ok(rows.length > 0, 'expected at least the owner grant on the PUBLIC schema');
+    assert.ok(
+      rows.every((r: any) => String(r.PRIVILEGE).trim() === 'USAGE'),
+      `expected every schema grant to map to USAGE, got ${JSON.stringify(rows.map((r: any) => r.PRIVILEGE))}`
+    );
+  });
+
+  test('the object-type filter is what separates a schema from a same-named table', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip();
+    }
+    // Without the filter the query answers for any securable called PUBLIC; with it, only the
+    // schema. Asserting the SQL differs is not enough — this checks the server agrees.
+    const unfiltered = await Driver.runQuery(
+      getObjectPrivilegesQuery('PUBLIC'),
+      getTestConnectionOptions()
+    );
+    const filtered = await Driver.runQuery(
+      getObjectPrivilegesQuery('PUBLIC', {objectType: SCHEMA_OBJECT_TYPE}),
+      getTestConnectionOptions()
+    );
+    assert.ok(filtered.length <= unfiltered.length);
+    assert.ok(filtered.length > 0);
+  });
+
+  test('a schema-qualified object query prepares on a real Firebird 6 server', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip();
+    }
+    // RDB$RELATION_SCHEMA_NAME is the column that does not exist before 6; naming it on a server
+    // that lacks it fails at prepare time, so this is the check that the guard is on the right side.
+    const rows = await Driver.runQuery(
+      getObjectPrivilegesQuery('PRODUCTS', {schema: 'PUBLIC'}),
+      getTestConnectionOptions()
+    );
+    assert.ok(Array.isArray(rows));
   });
 });

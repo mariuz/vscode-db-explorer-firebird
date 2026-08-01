@@ -1449,6 +1449,11 @@
           "group": "script@2"
         },
         {
+          "command": "firebird.showPrivileges",
+          "when": "view == firebird-explorer && viewItem == schema",
+          "group": "script@2"
+        },
+        {
           "command": "firebird.scriptAsCreate",
           "when": "view == firebird-explorer && viewItem == exception",
           "group": "script@0"

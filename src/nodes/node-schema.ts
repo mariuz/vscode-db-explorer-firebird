@@ -1,5 +1,9 @@
 import {ExtensionContext, ThemeIcon, TreeItem, TreeItemCollapsibleState} from "vscode";
-import {FirebirdTree} from "../interfaces";
+import {ConnectionOptions, FirebirdTree} from "../interfaces";
+import {getObjectPrivilegesQuery, SCHEMA_OBJECT_TYPE} from "../shared/queries";
+import {Driver} from "../shared/driver";
+import {Global} from "../shared/global";
+import {logger} from "../logger/logger";
 
 /**
  * A Firebird 6 SQL schema, sitting between a database and its object categories.
@@ -16,7 +20,8 @@ import {FirebirdTree} from "../interfaces";
 export class NodeSchema implements FirebirdTree {
   constructor(
     private readonly schemaName: string,
-    private readonly categoryFactory: (schema: string) => FirebirdTree[]
+    private readonly categoryFactory: (schema: string) => FirebirdTree[],
+    private readonly dbDetails?: ConnectionOptions
   ) {}
 
   public getSchemaName(): string {
@@ -37,5 +42,28 @@ export class NodeSchema implements FirebirdTree {
 
   public async getChildren(): Promise<FirebirdTree[]> {
     return this.categoryFactory(this.schemaName);
+  }
+
+  /**
+   * Shows who may use this schema — `GRANT USAGE ON SCHEMA`, recorded in RDB$USER_PRIVILEGES like
+   * any other grant.
+   *
+   * Restricted by object type rather than by schema: a schema's own grant rows leave
+   * RDB$RELATION_SCHEMA_NAME null (the schema *is* the object, it is not in one), and without the
+   * type filter a table sharing the schema's name would answer instead.
+   */
+  public async showPrivileges() {
+    if (!this.dbDetails) {
+      return;
+    }
+    logger.info("Custom Query: Show Object Privileges");
+    Global.activeConnection = this.dbDetails;
+    return Driver.runQuery(
+      getObjectPrivilegesQuery(this.schemaName.trim(), {objectType: SCHEMA_OBJECT_TYPE}),
+      this.dbDetails
+    ).catch(err => {
+      logger.error(err);
+      logger.showError(`Failed to fetch privileges: ${err}`);
+    });
   }
 }

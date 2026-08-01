@@ -283,7 +283,7 @@ ALTER SCHEMA SALES SET DEFAULT CHARACTER SET UTF8    -> accepted; RDB$CHARACTER_
 
 `CREATE SCHEMA` takes `DEFAULT …`; `ALTER SCHEMA` takes `SET DEFAULT …`. Guessing from the create syntax — which is what the design doc's own summary would have led to — produces a statement the server rejects.
 
-**Not done**: schema-level grants in the privileges viewer. `RDB$USER_PRIVILEGES` has no rows naming a schema on a database where one was created and dropped, so which object-type code records them (if any) needs catalogue research rather than a guess.
+Schema-level grants in the privileges viewer were left open here pending catalogue research; that research is done — see phase 6.
 
 ## Phase 3 — New Query in Schema (done); per-connection default schema (not done)
 
@@ -325,10 +325,29 @@ The Object Explorer nests *database → schema → categories* when a database h
 
 The fix is one convention throughout a project: **display-form identity** — bare in the default schema, qualified elsewhere — for file names, for diffing, and in generated DDL. A display name is still qualified for any schema other than the default, so nothing becomes ambiguous, and a single-schema database produces byte-identical output to before schemas existed.
 
+## Phase 6 — schema-level grants (done)
+
+**Show Object Privileges** now works on a schema node, and the answer to the research this was blocked on is two catalogue facts that are not written down anywhere:
+
+- A `GRANT USAGE ON SCHEMA` is recorded in `RDB$USER_PRIVILEGES` like any other grant, under **`RDB$OBJECT_TYPE = 38`** with privilege code **`G`**.
+- Such a row leaves **`RDB$RELATION_SCHEMA_NAME` null** — the schema *is* the object, it is not in one.
+
+38 has to be hardcoded, because the catalogue cannot supply it: `RDB$TYPES` documents `RDB$OBJECT_TYPE` values 0–19 and 37 on Firebird 6.0.0 and simply stops, so 38 appears in privilege rows without ever being named. The earlier note in phase 2 — that a database which had a schema created and dropped showed no rows naming it — was true and misleading: the rows exist while the schema does.
+
+**Filtering by object type is not a nicety.** A schema and a table may share a name, and `RDB$RELATION_NAME` holds both. On a live 6.0.0 database with a `SALES` schema and a `PUBLIC.SALES` table, asking for "the grants on SALES" without the type filter returns nine rows — `SELECT`, `INSERT`, `DELETE` and the rest of the table's grants mixed in with the schema's two `USAGE` rows. With it, two.
+
+### A bug schemas had already introduced elsewhere
+
+The same query backs the table, view and procedure nodes, and it matched on name alone. On Firebird 6 that silently merges: the live multi-schema database has an `ORDERS` table in *both* `PUBLIC` and `SALES`, each with five grants, so **Show Object Privileges on either one listed all ten** — one table appearing to hold contradictory permissions. Those three callers now pass their schema, and the query adds `RDB$RELATION_SCHEMA_NAME` only when given one, because that column does not exist before Firebird 6 and naming it unconditionally would make the statement fail to *prepare* rather than return nothing.
+
+Four privilege codes were also being displayed as bare letters: `G` (USAGE, Firebird 4+ on generators and exceptions, and now schemas) and `C`/`L`/`O` (the DDL privileges behind `GRANT CREATE TABLE TO …`). All four occur in an ordinary database's catalogue — the live database has 375 `G` rows on generators alone.
+
+Covered at three levels, because each catches something the others cannot: the SQL shape in unit tests, the **manifest** entry (a `showPrivileges()` method with no `view/item/context` contribution is dead code that nothing else would notice), and the two catalogue facts above as extension-host tests against a real 6.0.0 server — if a later Firebird renumbers object type 38, that suite says so instead of the viewer quietly coming back empty.
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
 2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
 3. **Search path**: ~~"New Query in Schema"~~ — **done**. The per-connection default schema and search-path-aware completion ranking remain; see phase 3 above for why the first is a driver-level change.
 4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
-5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5). `ALTER SCHEMA`, schema-level grants and per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).
+5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5); ~~`ALTER SCHEMA`~~ — **done**; ~~schema-level grants~~ — **done** (phase 6). Per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).
