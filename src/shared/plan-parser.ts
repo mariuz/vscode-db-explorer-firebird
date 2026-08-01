@@ -194,7 +194,21 @@ export function parsePlan(planText: string): PlanNode[] {
  * just throw on it anyway, but checking first lets callers show a clearer, more actionable
  * message than a parse error.
  */
-export const PLAN_FALLBACK_PREFIXES = ["-- PLAN not available", "-- Firebird Index Metadata"];
+/**
+ * Every shape `renderIndexMetadataPlan()` can return.
+ *
+ * It has three return paths — no tables, tables but no index rows, and tables with index rows —
+ * and this list originally covered only the first and third. A table without indexes therefore
+ * reached the parser and produced `Couldn't parse the plan: Expected "PLAN" but found "--"`,
+ * exactly the confusing error the prefix check exists to prevent. Found by the Playwright tier
+ * against a real server; `src/test/plan-parser.test.ts` now drives all three straight out of
+ * `renderIndexMetadataPlan()` so the two cannot drift apart again.
+ */
+export const PLAN_FALLBACK_PREFIXES = [
+  "-- PLAN not available",
+  "-- Firebird Index Metadata",
+  "-- No index information found",
+];
 
 export type PlanInterpretation =
   | { blocks: PlanNode[]; raw: string }

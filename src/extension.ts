@@ -1808,7 +1808,18 @@ export function activate(context: ExtensionContext) {
   /* COMMAND: show the graphical (diagram) query plan for the active SQL */
   context.subscriptions.push(
     commands.registerCommand("firebird.showEstimatedPlan", () => {
-      firebirdQueryPlanView.open();
+      // Capture the editor's SQL *before* the webview opens.
+      //
+      // The plan is fetched when the webview reports "ready", by which point the webview itself is
+      // the active editor — `window.activeTextEditor` is undefined for a non-text editor — so
+      // resolving the SQL then produced "No SQL document opened!" even with a .sql file right
+      // there. Found by the Playwright tier (docs/roadmap/webview-ui-testing.md); it had been
+      // written off as a test limitation before that.
+      const editor = window.activeTextEditor;
+      const sql = editor?.document.languageId === "sql"
+        ? (editor.selection.isEmpty ? editor.document.getText() : editor.document.getText(editor.selection))
+        : undefined;
+      firebirdQueryPlanView.open(sql);
     })
   );
 

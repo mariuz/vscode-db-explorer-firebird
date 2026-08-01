@@ -4,6 +4,11 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ## Unreleased
 
+### Fixed
+
+- **Show Graphical Query Plan said "No SQL document opened!" even with a SQL file open.** The plan was looked up after the plan window had already taken focus, at which point VS Code no longer reports a text editor as active. It now reads the query before opening the window.
+- **A table with no indexes made the plan view show a parser error.** On the default (pure-JS) driver Firebird Studio cannot produce a real execution plan and is meant to say so — "Graphical plans need the native driver" — but for a table without indexes it instead showed `Couldn't parse the plan: Expected "PLAN" but found "--"`.
+
 ### Changed
 
 - **Set Connection Password, Visualize Schema and Search Objects now work from the Command Palette.** All three previously did nothing there — they were only reachable by right-clicking a database in the tree, which is not obvious and is awkward when the tree is scrolled or collapsed. Run them from the palette and they ask which connection you mean.
@@ -32,6 +37,10 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 ## 0.2.2 - 2026-07-31
 
 ### Fixed
+
+- **Show Graphical Query Plan said "No SQL document opened!" even with a SQL file open.** The plan was looked up after the plan window had already taken focus, at which point VS Code no longer reports a text editor as active. It now reads the query before opening the window.
+- **A table with no indexes made the plan view show a parser error.** On the default (pure-JS) driver Firebird Studio cannot produce a real execution plan and is meant to say so — "Graphical plans need the native driver" — but for a table without indexes it instead showed `Couldn't parse the plan: Expected "PLAN" but found "--"`.
+
 
 - **Hardened the checks that detect `isql`, `gbak`, and `docker` on your machine.** These were four separately hand-written copies of the same logic, and the one bug already fixed in 0.1.96 (a working `isql` being reported as missing because the check hung waiting on standard input) could just as easily have been introduced into any of the others. They now share a single implementation that always closes standard input and, where it matters, confirms the tool identifies itself — so `isql` isn't confused with unixODBC's unrelated tool of the same name. No change in behavior when your tools are already detected correctly.
 

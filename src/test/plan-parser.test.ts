@@ -5,6 +5,7 @@
  * why, and the two assumptions that captured evidence corrected.
  */
 
+import { renderIndexMetadataPlan } from '../shared/sql-analysis';
 import * as assert from 'assert';
 import { parsePlan, PlanNode, interpretPlanText } from '../shared/plan-parser';
 
@@ -141,4 +142,30 @@ suite('interpretPlanText()', function () {
       assert.strictEqual(result.raw, 'PLAN (EMP)');
     }
   });
+});
+
+suite('interpretPlanText() — every pure-JS fallback shape is recognised', function () {
+  // Driven straight out of renderIndexMetadataPlan() rather than from hand-copied strings: the
+  // original prefix list was written against two of its three return paths, and the third — a
+  // table with no indexes — reached the parser and produced a confusing syntax error instead of
+  // the intended "enable the native driver" message.
+  const cases: [string, string][] = [
+    ['no tables in the statement', renderIndexMetadataPlan('SELECT 1 FROM RDB$DATABASE', [], [])],
+    ['a table with no indexes', renderIndexMetadataPlan('SELECT * FROM CAP_DEMO', ['CAP_DEMO'], [])],
+    ['a table with indexes', renderIndexMetadataPlan('SELECT * FROM T', ['T'], [
+      { TABLE_NAME: 'T', INDEX_NAME: 'PK_T', FIELD_NAME: 'ID', UNIQUE_FLAG: 1 },
+    ])],
+  ];
+
+  for (const [label, text] of cases) {
+    test(`${label} is reported as needing the native driver, not as a parse error`, function () {
+      const result = interpretPlanText(text) as any;
+      assert.ok(result.error, `expected an explanatory error for: ${text.slice(0, 60)}`);
+      assert.ok(
+        /native driver/i.test(result.error),
+        `expected the native-driver message, got: ${result.error}`
+      );
+      assert.ok(!/couldn't parse|expected "PLAN"/i.test(result.error), result.error);
+    });
+  }
 });
