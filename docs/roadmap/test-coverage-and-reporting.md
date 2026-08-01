@@ -97,10 +97,38 @@ Two limits of this gate, stated so nobody reads more into a green check than it 
 - **It measures the unit tier only**, so the 20 `vscode`-heavy files listed under phase 1 are outside it entirely. A change that only touches those files cannot move this number in either direction.
 - **Phase 4's platform matrix will interact with this.** Some covered branches are platform-dependent (`process.platform` in the external-tool probes), so the same commit can legitimately produce slightly different coverage on Windows or macOS. When that matrix lands, either enforce the gate on the Linux job only or lower the floor to the minimum across platforms — decide it then, with real numbers, rather than guessing now.
 
+## Phase 4 — the platform matrix (done)
+
+The unit tier now runs on `ubuntu-latest`, `windows-latest`, and `macos-latest` (`fail-fast: false`, so one platform failing does not cancel the others — knowing *which* platforms differ requires every job to finish). Every step runs under `bash`, which the Windows runner provides as Git Bash: PowerShell cannot execute `./node_modules/.bin/<tool>` (extensionless shell scripts) and the coverage-summary step is a POSIX brace group, so a single shell keeps one command working everywhere.
+
+**The premise of this item was partly wrong, and the correction matters more than the matrix.** This doc and the roadmap both claimed the platform-specific logic — `executable-probe.ts`, `isql-terminal.ts`, `gbak-options.ts` — was only exercised on Linux. It is not. Every one of those functions takes an **injected platform parameter** defaulting to `process.platform`:
+
+```ts
+export function gbakCandidates(platform: NodeJS.Platform = process.platform): string[]
+export function isqlCandidates(platform: NodeJS.Platform = process.platform): string[]
+export function dockerCandidates(platform: NodeJS.Platform = process.platform): string[]
+export function quoteShellArgument(value: string, platform: NodeJS.Platform = process.platform): string
+```
+
+and the tests pass `'win32'`/`'darwin'`/`'linux'` explicitly — 34 such call sites across `gbak-options.test.ts`, `docker-discovery.test.ts`, `isql-terminal.test.ts`, and `ssh-tunnel.test.ts`. Windows path candidates and Windows argument quoting have therefore been under test all along, from a Linux runner. That is good design, and it means this matrix is **not** the safety net the item implied.
+
+What running on three platforms genuinely adds, which is narrower but real:
+
+- **Actual process spawning.** `executable-probe.test.ts` and `docker-discovery.test.ts` spawn real Node processes rather than stubbing `child_process`. Windows spawn semantics differ in exactly the areas that have already produced two shipped bugs — the `isql -z` stdin hang (0.1.96) and `gbak -z`'s untrustworthy exit code (0.2.2) — and `probeExecutable`'s "always close stdin" rule is a `child_process` behavior, not a string-building one.
+- **The default-argument branch.** Because tests inject a platform, `process.platform`'s own branch of those four functions has only ever run as `'linux'`. On these runners it finally runs as `'win32'` and `'darwin'`.
+- **Real filesystem and line-ending behavior**: the streaming flat-file parser and `workspace-config.ts` touch real paths, and a Windows checkout can hand them CRLF where a Linux one does not.
+- **`ssh-tunnel.test.ts` already contains a `process.platform === 'win32'` branch** (the Pageant fallback) that no CI run has ever taken.
+
+**The coverage gate stays Linux-only** (`if: matrix.os == 'ubuntu-latest'`). This is the decision phase 3 deliberately deferred, now made with the above in hand: those four `process.platform` defaults mean each runner covers a slightly different branch set, so a single ratchet enforced everywhere would either drift or have to be pinned to the cross-platform minimum. One authoritative platform keeps the number deterministic; the other two still publish their coverage in the job summary, so a divergence is visible without being load-bearing.
+
+Artifacts and check runs are named per platform (`unit-coverage-<os>`, `Unit tests (<os>)`) — `upload-artifact` v4 rejects duplicate names across matrix jobs, and a Windows-only failure deserves its own visible check rather than three check runs fighting over one name.
+
+**Not verified by running.** The Windows and macOS jobs cannot be exercised from a Linux development environment; only the workflow's structure was checked. The first CI run is the verification, and it may well surface genuine pre-existing platform bugs — that is the item working as intended, not the matrix being broken.
+
 ## Suggested phases
 
 1. ~~**Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate.~~ — **done**, see above, except the Codecov upload: it needs a `CODECOV_TOKEN` repository secret that does not exist yet, so CI publishes the summary and an artifact instead. Adding the upload is a two-line change once the token is configured.
 2. ~~**Reporting**: JUnit XML from all tiers + `dorny/test-reporter` checks; source-map registration if sourcemaps are available.~~ — **done**, see above; source mapping via Node's built-in `--enable-source-maps` rather than the `source-map-support` dependency the doc originally proposed.
 3. ~~**Coverage gate** set from phase 1's actual baseline, patch target above project target.~~ — **done** for the project-level floor (see above). The *patch* target is not done and cannot be with `c8` alone: diff coverage needs Codecov, which needs the `CODECOV_TOKEN` secret.
-4. **Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.
+4. ~~**Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.~~ — **done**, though the stated rationale turned out to be wrong: that logic takes an injected platform parameter and was already tested for Windows from Linux. See phase 4 above for what the matrix actually buys.
 5. **Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.

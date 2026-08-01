@@ -8,18 +8,32 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
+    name: Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
       # Required by dorny/test-reporter to publish the test results as a check run.
       checks: write
 
+    strategy:
+      # One platform failing should not cancel the others — the whole point of this matrix is
+      # to see *which* platforms differ, which needs every job to finish.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    defaults:
+      run:
+        # bash on every platform (Git Bash on the Windows runner) so one command works
+        # everywhere: PowerShell would not run `./node_modules/.bin/<tool>` (extensionless
+        # shell scripts), and the coverage-summary step below is a POSIX brace group.
+        shell: bash
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -42,7 +56,9 @@ jobs:
       - name: Publish unit test report
         # Turns a failure into an annotated check run naming the failing test, instead of a line
         # to find in the job log. Reads the JUnit XML that .mocharc.json's reporter always writes,
-        # so nothing about the test command above changes.
+        # so nothing about the test command above changes. Named per platform so a
+        # Windows-only or macOS-only failure gets its own visible check rather than three
+        # check runs fighting over one name.
         #
         # `fail-on-error: false` on purpose: a pull request from a fork gets a read-only
         # GITHUB_TOKEN and cannot create check runs, and that must not fail an otherwise green
@@ -51,7 +67,7 @@ jobs:
         if: always()
         uses: dorny/test-reporter@v3
         with:
-          name: Unit tests
+          name: Unit tests (${{ matrix.os }})
           path: test-reports/mocha.xml
           reporter: jest-junit
           fail-on-error: false
@@ -60,7 +76,7 @@ jobs:
         if: always()
         run: |
           {
-            echo '### Unit-test coverage'
+            echo '### Unit-test coverage (${{ matrix.os }})'
             echo
             echo '```'
             ./node_modules/.bin/c8 report --reporter=text-summary
@@ -71,6 +87,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce coverage thresholds
+        # Linux only, deliberately. Coverage is not identical across platforms: the handful of
+        # functions that branch on `process.platform` (isqlCandidates, gbakCandidates,
+        # dockerCandidates, quoteShellArgument) cover a different default branch on each runner,
+        # so a single ratchet enforced everywhere would either drift or need to be set to the
+        # cross-platform minimum. One authoritative platform keeps the number deterministic;
+        # the other two still report their coverage in the summary above.
+        #
         # Thresholds live in .c8rc.json (statements/branches/functions/lines) but are inert
         # there: `check-coverage` is deliberately NOT set in the config, so only a command that
         # passes --check-coverage enforces them. That keeps the summary step above (and a local
@@ -80,13 +103,16 @@ jobs:
         # — see docs/roadmap/test-coverage-and-reporting.md for the numbers and how to raise
         # them. Note this reads the coverage data the test step already wrote; it does not
         # re-run the tests.
+        if: matrix.os == 'ubuntu-latest'
         run: ./node_modules/.bin/c8 report --check-coverage --reporter=text-summary
 
       - name: Upload coverage report and test results
+        # Per-platform artifact name: upload-artifact v4 rejects duplicate names across
+        # matrix jobs.
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-coverage
+          name: unit-coverage-${{ matrix.os }}
           path: |
             coverage/unit
             test-reports
