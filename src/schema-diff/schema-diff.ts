@@ -7,6 +7,8 @@ import {
   getStoredProceduresQuery,
   getTriggersQuery,
 } from '../shared/queries';
+import { getEngineMajorVersion } from "../shared/engine-version";
+import { supportsSchemas, schemaQualifiedName } from "../shared/schema-support";
 
 export interface SchemaSnapshot {
   tables: TableSnapshot[];
@@ -57,13 +59,27 @@ export interface ModifiedTable {
 export async function fetchSchemaSnapshot(conn: ConnectionOptions, maxTables: number): Promise<SchemaSnapshot> {
   const connection = await Driver.client.createConnection(conn);
   try {
+    // Firebird 6 keeps every object in a schema. Without asking for it, two same-named tables in
+    // different schemas collapse into one snapshot entry whose columns are the union of both — so
+    // a diff would report phantom added/removed columns for a table that does not exist. Gated on
+    // the server version, since RDB$SCHEMA_NAME is a hard error before Firebird 6.
+    const withSchemas = supportsSchemas(
+      await getEngineMajorVersion(conn.id, (sql: string) => Driver.client.queryPromise<any>(connection, sql))
+    );
+    /** Snapshot key and display name: qualified when the server has schemas, bare otherwise. */
+    const qualify = (schema: unknown, name: unknown) =>
+      schemaQualifiedName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
+
     // Tables
-    const tableRows: any[] = await Driver.client.queryPromise(connection, getTablesQuery(maxTables));
-    const tableNames = (tableRows ?? []).map(r => r.TABLE_NAME.trim());
+    const tableRows: any[] = await Driver.client.queryPromise(connection, getTablesQuery(maxTables, withSchemas));
+    const tableNames = (tableRows ?? []).map(r => qualify(r.SCHEMA_NAME, r.TABLE_NAME));
 
     let columns: any[] = [];
     if (tableNames.length > 0) {
-      columns = await Driver.client.queryPromise(connection, fieldsQuery(tableNames));
+      // The IN list matches on bare relation names; rows are then keyed by schema + name below,
+      // which is what keeps two same-named tables apart.
+      const bareNames = (tableRows ?? []).map(r => String(r.TABLE_NAME).trim());
+      columns = await Driver.client.queryPromise(connection, fieldsQuery(bareNames, withSchemas));
     }
 
     const tableMap: Record<string, ColumnSnapshot[]> = {};
@@ -71,7 +87,7 @@ export async function fetchSchemaSnapshot(conn: ConnectionOptions, maxTables: nu
       tableMap[name] = [];
     }
     for (const col of (columns ?? [])) {
-      const tbl = col.TBL.trim();
+      const tbl = qualify(col.SCHEMA_NAME, col.TBL);
       if (tableMap[tbl]) {
         tableMap[tbl].push({
           name: col.FIELD.trim(),
@@ -88,18 +104,18 @@ export async function fetchSchemaSnapshot(conn: ConnectionOptions, maxTables: nu
     }));
 
     // Views
-    const viewRows: any[] = await Driver.client.queryPromise(connection, getViewsQuery());
-    const views = (viewRows ?? []).map(r => r.VIEW_NAME.trim());
+    const viewRows: any[] = await Driver.client.queryPromise(connection, getViewsQuery(withSchemas));
+    const views = (viewRows ?? []).map(r => qualify(r.SCHEMA_NAME, r.VIEW_NAME));
 
     // Procedures
-    const procRows: any[] = await Driver.client.queryPromise(connection, getStoredProceduresQuery());
-    const procedures = (procRows ?? []).map(r => r.PROCEDURE_NAME.trim());
+    const procRows: any[] = await Driver.client.queryPromise(connection, getStoredProceduresQuery(withSchemas));
+    const procedures = (procRows ?? []).map(r => qualify(r.SCHEMA_NAME, r.PROCEDURE_NAME));
 
     // Triggers
-    const trigRows: any[] = await Driver.client.queryPromise(connection, getTriggersQuery());
+    const trigRows: any[] = await Driver.client.queryPromise(connection, getTriggersQuery(withSchemas));
     const triggers: TriggerSnapshot[] = (trigRows ?? []).map(r => ({
-      name: r.TRIGGER_NAME.trim(),
-      table: r.TABLE_NAME ? r.TABLE_NAME.trim() : '',
+      name: qualify(r.SCHEMA_NAME, r.TRIGGER_NAME),
+      table: r.TABLE_NAME ? qualify(r.SCHEMA_NAME, r.TABLE_NAME) : '',
       type: r.TRIGGER_TYPE ?? 0,
       inactive: !!r.INACTIVE,
     }));

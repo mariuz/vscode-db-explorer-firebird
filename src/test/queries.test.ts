@@ -33,7 +33,8 @@ import {
   getGeneratorsQuery,
   getDomainsQuery,
   getExceptionsQuery,
-  procedureParametersQuery} from '../shared/queries';
+  procedureParametersQuery,
+  fieldsQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -669,5 +670,26 @@ suite('getSchemaColumnsQuery() — Firebird 6 schema scoping', function () {
     assert.ok(fb6.includes('f.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'), 'domain join');
     assert.ok(fb6.includes('s.RDB$SCHEMA_NAME = rc.RDB$SCHEMA_NAME'), 'primary-key index join');
     assert.ok(fb6.includes('pk.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'), 'primary-key outer join');
+  });
+});
+
+suite('fieldsQuery() — Firebird 6 schema awareness', function () {
+  test('unchanged without schemas', function () {
+    assert.ok(!fieldsQuery(['T']).includes('RDB$SCHEMA_NAME'));
+    assert.strictEqual(fieldsQuery(['T']), fieldsQuery(['T'], false));
+  });
+
+  test('with schemas it returns the owning schema alongside each column', function () {
+    // schema-diff keys its snapshot by schema + table; without the column, two same-named tables
+    // collapse into one entry whose columns are the union of both.
+    const fb6 = fieldsQuery(['T'], true);
+    assert.ok(fb6.includes('RDB$SCHEMA_NAME'));
+    assert.ok(fb6.includes('GROUP BY SCHEMA_NAME,'), fb6);
+  });
+
+  test('the name match stays name-only, by design', function () {
+    // Callers pass bare relation names and key by schema + name themselves, which is simpler than
+    // threading qualified names through an IN list.
+    assert.ok(fieldsQuery(['ORDERS'], true).includes("IN ('ORDERS')"));
   });
 });

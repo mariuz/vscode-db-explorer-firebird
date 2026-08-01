@@ -197,10 +197,28 @@ Phase 2 as written ("qualified names on every write path") turns out to be large
 | Row editing (`UPDATE`/`INSERT`/`DELETE`) | qualified — the results view receives the qualified name, and `assertValidIdentifier()` accepts two-part names (phase 1c) |
 | Schema Designer / Table Designer DDL | qualified — the webview builds DDL from the graph's `name`, which is the qualified identity. Now pinned by two tests asserting `ALTER TABLE SALES.ORDERS …` and `ALTER TABLE PUBLIC.ORDERS …` rather than the bare forms |
 | Drag identifier into editor | qualified — `getDragIdentifier()` returns the SQL name |
-| **schema-diff** | **not done** — still compares bare names, so a table moving between schemas reads as an unrelated drop-and-create |
+| **schema-diff** | done — snapshots are keyed by schema + name (see below) |
 | **Database Projects** extract/publish | **not done** — see the note above about its per-object file layout |
 
 So what remains of phase 2 is exactly the two consumers already listed as outstanding, rather than a separate sweep. The remaining phases are 3 (search path), 4 (designer colour-coding), and 5 (schema lifecycle DDL).
+
+## Phase 2a — schema-diff (done)
+
+`fetchSchemaSnapshot()` keyed everything by bare name, so on Firebird 6 two same-named tables collapsed into a single snapshot entry whose columns were the union of both — and a diff against another database would then report phantom added and removed columns for a table that exists in neither. Verified live against the two-schema database:
+
+```
+tables in snapshot: PUBLIC.CAP_DEMO, PUBLIC.CUST, PUBLIC.ORDERS, PUBLIC.PW_DIAGRAM_DEMO,
+                    PUBLIC.PW_PLAN_DEMO, SALES.CUST, SALES.ORDERS
+  PUBLIC.ORDERS -> ID,NOTE,CUST_ID
+  SALES.ORDERS  -> ID,TOTAL,CUST_ID
+views: PUBLIC.ACTIVE, SALES.ACTIVE
+```
+
+Tables, views, procedures and triggers are all qualified now, so `diffSchemas()` compares like with like without any change to the comparison logic itself — the fix is entirely in what the snapshot is keyed by.
+
+`fieldsQuery()` gained the same optional schema column. Its **name match deliberately stays name-only**: callers pass bare relation names and key the rows by schema + name themselves, which is simpler than threading qualified names through an `IN` list and produces the same result.
+
+One consequence worth stating: a table that genuinely *moves* between schemas will read as a drop plus an add rather than a move, because the name is the identity. That is defensible — the two are different objects to every statement that references them — but it is a behaviour, not an oversight.
 
 ## Suggested phases
 

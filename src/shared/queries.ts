@@ -103,9 +103,17 @@ export function tableInfoQuery(tableName: string, schema?: string): string {
    ORDER BY FIELD_POSITION;`;
 }
 
-export function fieldsQuery(tables: string[]): string {
+/**
+ * Columns for a set of tables, matched by relation name.
+ *
+ * `withSchemas` (Firebird 6+) adds the owning schema to each row. The name match deliberately
+ * stays name-only even then — callers pass bare relation names and key the result by
+ * schema + name themselves, which is simpler than threading qualified names into an IN list.
+ */
+export function fieldsQuery(tables: string[], withSchemas = false): string {
   const string = tables.join("','");
-  return `SELECT TRIM(r.RDB$FIELD_NAME) AS Field,
+  const schemaColumn = withSchemas ? "TRIM(r.RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n       " : "";
+  return `SELECT ${schemaColumn}TRIM(r.RDB$FIELD_NAME) AS Field,
        TRIM(r.RDB$RELATION_NAME) AS Tbl,
   CASE WHEN r.RDB$NULL_FLAG = 1 THEN '1' ELSE '0' END AS NOTNULL,
             r.RDB$DEFAULT_VALUE AS DFLT_VALUE,
@@ -132,7 +140,7 @@ export function fieldsQuery(tables: string[]): string {
       left join RDB$FIELDS f on f.RDB$FIELD_NAME = r.RDB$FIELD_SOURCE
       WHERE (r.rdb$system_flag IS NULL OR r.rdb$system_flag = 0) 
         AND r.RDB$RELATION_NAME IN ('${string}')
-   GROUP BY Field, Tbl, NOTNULL, DFLT_VALUE, Pos, FIELD_TYPE, FIELD_LENGTH
+   GROUP BY ${withSchemas ? "SCHEMA_NAME, " : ""}Field, Tbl, NOTNULL, DFLT_VALUE, Pos, FIELD_TYPE, FIELD_LENGTH
    ORDER BY Tbl, Pos;`;
 }
 
