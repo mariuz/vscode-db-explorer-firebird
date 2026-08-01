@@ -71,10 +71,36 @@ A failing test used to be a line to find in a job log. It is now an annotated Gi
 
 Known limitation, worth recording so it isn't rediscovered: the `file=` attribute `mocha-junit-reporter` writes on each `<testsuite>` is the absolute path of the compiled `out/**/*.js` file, so the check run's *inline annotations* cannot always bind to a source file in the repo. The failure message and its source-mapped stack are still shown in the check's summary, which is where the value is. Fixing the attribute would mean post-processing the XML — not worth it unless inline annotations turn out to matter.
 
+## Phase 3 — the coverage gate (done)
+
+CI now fails if unit-tier coverage drops below a floor. The floor is **the measured baseline rounded down to whole percentages**, not an aspiration:
+
+| Metric | Measured | Threshold |
+| --- | --- | --- |
+| Statements | 70.75 % | **70** |
+| Branches | 90.77 % | **90** |
+| Functions | 62.22 % | **62** |
+| Lines | 70.75 % | **70** |
+
+That is a ratchet: roughly 0.2–0.8 points of headroom, enough that ordinary refactoring does not trip it, tight enough that deleting a test or landing a sizeable untested module does. **Raise the numbers when the real figure rises** — that is the mechanism by which this gate is supposed to become demanding, rather than by picking an ambitious number now and suppressing it later.
+
+Implementation details worth knowing before changing any of it:
+
+- **Thresholds live in `.c8rc.json` but are inert there.** The four keys (`statements`/`branches`/`functions`/`lines`) are read by `c8`, but `check-coverage` is deliberately *not* set in the config, so only a command that explicitly passes `--check-coverage` enforces them. This is what keeps `npm run test:coverage` and CI's summary step purely informational — one number, one place, enforcement confined to a single step that can fail.
+- **Use `c8 report --check-coverage`, not `c8 check-coverage`.** The standalone `check-coverage` subcommand **silently passes** under this configuration — verified directly: `c8 check-coverage --statements 99` against a 70.75 % baseline exits 0 and prints nothing, while `c8 report --check-coverage --statements 99` correctly exits 1 with `ERROR: Coverage for statements (70.75%) does not meet global threshold (99%)`. Both the negative and positive cases were checked before wiring it up.
+- **Specify all four thresholds.** Any metric left unset defaults to **90**, which is not a neutral default: passing only `--statements 70` also silently enforces `lines >= 90` and fails.
+- **The gate reads the data the test step already wrote**; it does not re-run the tests. `npm run test:coverage:check` is the local equivalent (runs the tests, then checks).
+
+Two limits of this gate, stated so nobody reads more into a green check than it means:
+
+- **It is project-level, not patch-level.** `c8` has no notion of diff coverage, so a pull request that adds a large untested file passes as long as the *overall* percentage stays above the floor. Patch coverage is genuinely useful and is what mssql's Codecov `patch: 70 %` target provides — that remains blocked on a `CODECOV_TOKEN` repository secret, and is the reason the Codecov item stayed open in phase 1.
+- **It measures the unit tier only**, so the 20 `vscode`-heavy files listed under phase 1 are outside it entirely. A change that only touches those files cannot move this number in either direction.
+- **Phase 4's platform matrix will interact with this.** Some covered branches are platform-dependent (`process.platform` in the external-tool probes), so the same commit can legitimately produce slightly different coverage on Windows or macOS. When that matrix lands, either enforce the gate on the Linux job only or lower the floor to the minimum across platforms — decide it then, with real numbers, rather than guessing now.
+
 ## Suggested phases
 
 1. ~~**Coverage, measurement only**: `coverage` in `.vscode-test.mjs`, `c8` for the unit tier, both reports uploaded to Codecov under flags, no gate.~~ — **done**, see above, except the Codecov upload: it needs a `CODECOV_TOKEN` repository secret that does not exist yet, so CI publishes the summary and an artifact instead. Adding the upload is a two-line change once the token is configured.
 2. ~~**Reporting**: JUnit XML from all tiers + `dorny/test-reporter` checks; source-map registration if sourcemaps are available.~~ — **done**, see above; source mapping via Node's built-in `--enable-source-maps` rather than the `source-map-support` dependency the doc originally proposed.
-3. **Coverage gate** set from phase 1's actual baseline, patch target above project target.
+3. ~~**Coverage gate** set from phase 1's actual baseline, patch target above project target.~~ — **done** for the project-level floor (see above). The *patch* target is not done and cannot be with `c8` alone: diff coverage needs Codecov, which needs the `CODECOV_TOKEN` secret.
 4. **Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.
 5. **Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.

@@ -70,6 +70,18 @@ jobs:
             echo 'The extension-host suite tier is measured separately by `npm run test:vscode-host:coverage`.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Enforce coverage thresholds
+        # Thresholds live in .c8rc.json (statements/branches/functions/lines) but are inert
+        # there: `check-coverage` is deliberately NOT set in the config, so only a command that
+        # passes --check-coverage enforces them. That keeps the summary step above (and a local
+        # `npm run test:coverage`) purely informational, and confines failure to this step.
+        #
+        # They are set just below the measured baseline so the gate ratchets rather than blocks
+        # — see docs/roadmap/test-coverage-and-reporting.md for the numbers and how to raise
+        # them. Note this reads the coverage data the test step already wrote; it does not
+        # re-run the tests.
+        run: ./node_modules/.bin/c8 report --check-coverage --reporter=text-summary
+
       - name: Upload coverage report and test results
         if: always()
         uses: actions/upload-artifact@v4

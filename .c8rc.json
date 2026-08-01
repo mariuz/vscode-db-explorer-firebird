@@ -10,5 +10,10 @@
   ],
   "reporter": ["text-summary", "lcov", "cobertura"],
   "reports-dir": "coverage/unit",
-  "temp-directory": "coverage/.tmp-unit"
+  "temp-directory": "coverage/.tmp-unit",
+
+  "statements": 70,
+  "branches": 90,
+  "functions": 62,
+  "lines": 70
 }

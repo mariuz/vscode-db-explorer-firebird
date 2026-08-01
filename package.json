@@ -45,6 +45,7 @@
     "tsc-watch": "node node_modules/typescript7/bin/tsc -watch -p ./",
     "test": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
     "test:coverage": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; c8 mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**'",
+    "test:coverage:check": "npm run test:coverage && c8 report --check-coverage --reporter=text-summary",
     "test:e2e": "node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000 --exit",
     "test:vscode-host": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test",
     "test:vscode-host:coverage": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test --coverage"
