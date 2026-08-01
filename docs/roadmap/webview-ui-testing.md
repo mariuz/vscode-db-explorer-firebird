@@ -83,9 +83,23 @@ Every one of these produced a silent or misleading failure, and each is now a co
 
 `firebird.database.setPassword` takes a `NodeDatabase` argument, so it is **not invocable from the Command Palette** — the only way to give a workspace connection (`.vscode/firebird.json`, which by design cannot carry a password) its password is the tree's context menu. The spec works around this by using the wizard's paste-a-connection-string path instead. A palette-invocable variant that falls back to the existing `connection-picker.ts` would be a small usability improvement in its own right, and would make workspace connections testable directly. Not done here — it is a product change, not a testing one.
 
+## Phase 3 — Schema Designer and plan view (attempted, not done)
+
+**Not delivered.** Specs for both were written and neither could be made to pass, so neither was kept — a spec that does not pass is worse than no spec, and one that passes for the wrong reason is worse still. What was kept is the harness work that came out of the attempt: `addConnection()`, `runQueryInEditor()` and `expectWebviewText()` are now shared helpers in the fixture, and `results-grid.spec.ts` uses them.
+
+`expectWebviewText()` is worth keeping regardless of phase 3. Asserting straight through the two-deep `frameLocator` chain while a webview is still being created reports `element(s) not found` and never recovers, even with a 60-second timeout — the chain resolves against a frame tree that is still changing underneath it. Waiting for the outer `iframe.webview` *element* to be attached first makes the lookup deterministic.
+
+Three concrete leads for whoever picks this up, all established by failing rather than by guessing:
+
+1. **When the results webview opens is not obvious, and a spec cannot assume it.** A DDL-only run reports through a notification (`Info: Create executed successfully.`) and opens no webview at all. A mixed `RECREATE TABLE …; SELECT …;` batch opened a grid containing *both* statements in a one-off debug run, but the same batch inside a spec never produced one within 60 s. Pin down the actual rule in `runSqlBatch()`/`displayBatch()` before writing a spec that waits on it — this may be a product question (should a mixed batch show its SELECT results?) rather than a test one.
+2. **The Schema Designer can only be opened from the tree.** `firebird.schemaVisualizer.open` is contributed as a `view/item/context` menu on `viewItem == database` and takes a `NodeDatabase`, so the palette cannot invoke it. Right-clicking a `.monaco-list-row` matched by name produced VS Code's generic "Copy Text" menu instead of the tree's, so the row targeting needs to be worked out properly: expand the host node first, then identify the database row within `.sidebar` specifically.
+3. **"Show Graphical Query Plan" did not render within 60 s** with a `SELECT` in the active editor and an active connection. Whether it needs a selection, a saved (non-dirty) file, or something else is unknown — that is the first thing to check.
+
+The value here is still real: the Schema Designer's `render()`/`measureAll()` are precisely what `src/test/webview-harness.ts` names as out of its scope, so they remain the least-tested code in the repository.
+
 ## Suggested phases
 
 1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
 2. ~~**Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.~~ — **done**, see above.
-3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG — the two places the stub DOM explicitly cannot reach.
+3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG — the two places the stub DOM explicitly cannot reach. **Attempted and not achieved** — see the phase 3 section above for the three specific blockers found.
 4. **Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.

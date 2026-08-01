@@ -14,7 +14,7 @@
  */
 
 import { _electron, type ElectronApplication, type Page } from "@playwright/test";
-import { test as base } from "@playwright/test";
+import { test as base, expect as expectFromBase } from "@playwright/test";
 import { downloadAndUnzipVSCode } from "@vscode/test-electron";
 import * as fs from "fs";
 import * as os from "os";
@@ -141,6 +141,74 @@ export async function runCommand(page: Page, command: string): Promise<void> {
   // highlighted for the previous keystroke.
   await page.locator(".quick-input-list .monaco-list-row").first().waitFor({ timeout: 30_000 });
   await page.keyboard.press("Enter");
+}
+
+/**
+ * Adds a saved connection and makes it active, via the wizard's paste-a-connection-string path:
+ * one palette command and one input box, after which `saveNewConnection()` has stored the
+ * password in SecretStorage and set the connection active.
+ *
+ * This is the only route a spec can take. A workspace `.vscode/firebird.json` connection cannot
+ * carry a password by design, and the only way to give one to it is the tree's context menu —
+ * `firebird.database.setPassword` takes a NodeDatabase argument and is not reachable from the
+ * palette.
+ */
+export async function addConnection(page: Page): Promise<void> {
+  const host = process.env.FIREBIRD_HOST ?? "localhost";
+  const port = process.env.FIREBIRD_PORT ?? "3050";
+  const database = process.env.FIREBIRD_DATABASE;
+  const user = process.env.FIREBIRD_USER ?? "SYSDBA";
+  const password = process.env.FIREBIRD_PASSWORD ?? "masterkey";
+  // Only when asked for, matching the e2e tier's FIREBIRD_WIRE_CRYPT convention — a stock
+  // Firebird 4+ install defaults to WireCrypt=Enabled.
+  const wireCrypt = process.env.FIREBIRD_WIRE_CRYPT ? `?wireCrypt=${process.env.FIREBIRD_WIRE_CRYPT}` : "";
+
+  await runCommand(page, "Firebird: Add New Connection");
+
+  // Wait for the wizard's *own* prompt, not merely for a visible input: the Command Palette and
+  // the wizard share this selector, so filling as soon as an input exists can type into the
+  // palette that is still closing.
+  await page
+    .locator(".quick-input-widget", { hasText: "Paste a Firebird connection string" })
+    .waitFor({ state: "visible", timeout: 30_000 });
+  await page
+    .locator(".quick-input-widget .input")
+    .fill(`firebird://${user}:${password}@${host}:${port}/${database}${wireCrypt}`);
+  await page.keyboard.press("Enter");
+
+  // The status bar stops saying "No active database" once the connection is saved and activated —
+  // a deterministic signal that the wizard got all the way through, rather than a sleep.
+  await expectFromBase(page.locator(".statusbar-item", { hasText: "FIREBIRD:" }).first()).not.toContainText(
+    "No active database",
+    { timeout: 60_000 }
+  );
+}
+
+/** Runs the SQL currently in the active editor and waits for the results webview to appear. */
+export async function runQueryInEditor(page: Page): Promise<void> {
+  // `runQuery` reads `window.activeTextEditor`, which is undefined unless the editor is the
+  // focused part — the palette and the wizard both leave focus elsewhere.
+  await page.locator(".monaco-editor").first().click();
+  await runCommand(page, "Firebird: Run Firebird Query");
+}
+
+/** VS Code nests webview content two iframes deep: the workbench's frame, then the extension's. */
+export function webviewFrame(page: Page) {
+  return page.frameLocator("iframe.webview").frameLocator("#active-frame");
+}
+
+/**
+ * Asserts a webview has rendered the given text.
+ *
+ * The explicit wait for the outer iframe *element* first is load-bearing: asserting straight
+ * through the two-deep frameLocator chain while the webview is still being created reports
+ * "element(s) not found" and never recovers, even with a generous timeout — the chain resolves
+ * against a frame tree that is still changing underneath it. Waiting for the container element to
+ * be attached first makes the frame lookup deterministic.
+ */
+export async function expectWebviewText(page: Page, text: string, timeout = 60_000): Promise<void> {
+  await page.locator("iframe.webview").first().waitFor({ state: "attached", timeout });
+  await expectFromBase(webviewFrame(page).locator("body")).toContainText(text, { timeout });
 }
 
 export const test = base.extend<{ vscode: LaunchedVSCode }>({
