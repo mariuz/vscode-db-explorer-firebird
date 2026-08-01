@@ -144,6 +144,19 @@ function primaryKeyColumns(columns: SchemaColumn[]): SchemaColumn[] {
   return columns.filter(c => c.isPrimaryKey);
 }
 
+/**
+ * The name a table is published under.
+ *
+ * The graph's `name` is schema-qualified on Firebird 6 (`PUBLIC.ORDERS`) because it doubles as the
+ * table's identity for DDL, where relying on the search path is a bug. That is the wrong thing to
+ * put in a route or a schema component: on a single-schema database every path would gain a
+ * redundant `public.` segment. `displayName` drops exactly that prefix and keeps a qualification
+ * that actually disambiguates, so `SALES.ORDERS` stays distinct from `ORDERS`.
+ */
+function publishedName(table: SchemaTable): string {
+  return table.displayName ?? table.name;
+}
+
 /** e.g. "orders/{id}" or "order_items/{order_id}/{line_no}" for a composite key. */
 function itemPathSuffix(columns: SchemaColumn[]): string {
   return primaryKeyColumns(columns).map(c => `{${c.name}}`).join("/");
@@ -151,11 +164,12 @@ function itemPathSuffix(columns: SchemaColumn[]): string {
 
 /** access "read-only" omits POST/PUT/DELETE — only the GET (list, and get-by-PK if there is one) operations are generated. */
 function buildTablePaths(table: SchemaTable, columns: SchemaColumn[], access: TableAccessLevel = "full"): Record<string, any> {
-  const schemaRef = { $ref: `#/components/schemas/${table.name}` };
-  const listPath = `/${table.name.toLowerCase()}`;
+  const name = publishedName(table);
+  const schemaRef = { $ref: `#/components/schemas/${name}` };
+  const listPath = `/${name.toLowerCase()}`;
   const listOperations: Record<string, any> = {
     get: {
-      summary: `List ${table.name}`,
+      summary: `List ${name}`,
       responses: {
         "200": { description: "OK", content: { "application/json": { schema: { type: "array", items: schemaRef } } } },
       },
@@ -163,7 +177,7 @@ function buildTablePaths(table: SchemaTable, columns: SchemaColumn[], access: Ta
   };
   if (access === "full") {
     listOperations.post = {
-      summary: `Create a ${table.name} row`,
+      summary: `Create a ${name} row`,
       requestBody: { required: true, content: { "application/json": { schema: schemaRef } } },
       responses: {
         "201": { description: "Created", content: { "application/json": { schema: schemaRef } } },
@@ -181,7 +195,7 @@ function buildTablePaths(table: SchemaTable, columns: SchemaColumn[], access: Ta
     const itemOperations: Record<string, any> = {
       parameters: pkColumns.map(col => ({ name: col.name, in: "path", required: true, schema: jsonSchemaForColumn(col) })),
       get: {
-        summary: `Get one ${table.name} row by primary key`,
+        summary: `Get one ${name} row by primary key`,
         responses: {
           "200": { description: "OK", content: { "application/json": { schema: schemaRef } } },
           "404": { description: "Not found" },
@@ -190,12 +204,12 @@ function buildTablePaths(table: SchemaTable, columns: SchemaColumn[], access: Ta
     };
     if (access === "full") {
       itemOperations.put = {
-        summary: `Update a ${table.name} row`,
+        summary: `Update a ${name} row`,
         requestBody: { required: true, content: { "application/json": { schema: schemaRef } } },
         responses: { "200": { description: "OK", content: { "application/json": { schema: schemaRef } } }, "404": { description: "Not found" } },
       };
       itemOperations.delete = {
-        summary: `Delete a ${table.name} row`,
+        summary: `Delete a ${name} row`,
         responses: { "204": { description: "Deleted" }, "404": { description: "Not found" } },
       };
     }
@@ -223,7 +237,7 @@ export function buildOpenApiSpec(graph: SchemaGraph, options: OpenApiSpecOptions
     if (columns.length === 0) {
       return; // every column filtered out — nothing meaningful to generate for this table
     }
-    schemas[table.name] = buildTableSchema(columns);
+    schemas[publishedName(table)] = buildTableSchema(columns);
     Object.assign(paths, buildTablePaths(table, columns, effectiveAccess(table, spec)));
   });
 

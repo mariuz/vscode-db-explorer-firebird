@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { ConnectionOptions } from "../interfaces";
 import { Driver } from "../shared/driver";
 import { getSchemaColumnsQuery, getForeignKeysQuery } from "../shared/queries";
+import { getEngineMajorVersion } from "../shared/engine-version";
+import { supportsSchemas } from "../shared/schema-support";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, SchemaGraph } from "../schema-designer/schema-graph";
 import { buildOpenApiSpec, TableAccess, TableAccessLevel } from "./openapi-spec";
 import { extractJson } from "../copilot/json-extraction";
@@ -97,7 +99,17 @@ export async function runDataApiSpecGeneratorWithCopilot(connectionOptions: Conn
 
 /** Shared by both generators: fetches the schema over one connection and reports any error itself, so callers only need to check for undefined. */
 async function fetchSchemaGraph(connectionOptions: ConnectionOptions): Promise<SchemaGraph | undefined> {
-  const sql = `${getSchemaColumnsQuery()}\n${getForeignKeysQuery()}`;
+  // Firebird 6 keeps every object in a schema. Without asking for it, same-named tables from
+  // different schemas merge into one graph entry — and this generator would then publish REST
+  // endpoints for a table that does not exist. Gated on the server version: RDB$SCHEMA_NAME is a
+  // hard SQL error before Firebird 6.
+  const withSchemas = supportsSchemas(
+    await getEngineMajorVersion(connectionOptions.id, async probe => {
+      const [row] = await Driver.runBatch(probe, connectionOptions);
+      return (row?.rows ?? []) as any[];
+    })
+  );
+  const sql = `${getSchemaColumnsQuery(withSchemas)}\n${getForeignKeysQuery(withSchemas)}`;
 
   let results;
   try {

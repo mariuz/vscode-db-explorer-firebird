@@ -166,9 +166,22 @@ DDL identities : PUBLIC.CAP_DEMO, SALES.CUST, PUBLIC.CUST, SALES.ORDERS, PUBLIC.
 
 `name` stays the qualified identity — it keys positions, relationship endpoints and focus matching, and it is what generated DDL uses, where deferring to the search path is the whole bug. `displayName` is what the box shows, and is only set when it would actually differ, so every existing consumer that reads `name` is untouched and a pre-6 database produces neither field. The webview's `tableTitle()` is the one place that chooses, used for both the header text and the width measurement so the box is sized to what it displays.
 
+### Phase 1i — the Data API Builder (done)
+
+The generator now reads a schema-aware graph, and the live before/after is the clearest illustration of what merging costs downstream:
+
+```
+old behaviour : /orders, /orders/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}
+schema-aware  : /sales.orders, /sales.orders/{ID}, /orders, /orders/{ID}
+```
+
+`SALES.ORDERS` and `PUBLIC.ORDERS` merged into one table carrying eight duplicated `ID` primary-key columns, and the by-primary-key route is built from them — so the spec published a path repeating the same parameter eight times, for a table that does not exist.
+
+Naming uses the split from phase 1h: routes and schema components take `displayName`, so a single-schema database keeps `/orders` rather than gaining a redundant `/public.orders`, while `SALES.ORDERS` stays distinguishable as `/sales.orders`. One `publishedName()` accessor covers every place a table's name reaches the generated document.
+
 ### What is still missing, precisely
 - **No Schemas level in the tree**, which is the rest of phase 1.
-- **Data API Builder and Database Projects still build schema-blind graphs** — see phase 1f for why that was left as a deliberate choice rather than swept along.
+- **Database Projects still builds a schema-blind graph.** Its file layout is per object, so qualified names change file names, and the design doc's own preference is per-schema folders — that deserves its own decision rather than a flag flip.
 - **The Schema Designer shows `PUBLIC.` prefixes** on a single-schema Firebird 6 database; see phase 1g. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 

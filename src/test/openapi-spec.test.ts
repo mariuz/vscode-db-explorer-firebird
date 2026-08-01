@@ -184,3 +184,40 @@ suite('openapi-spec – buildOpenApiSpec() with tableAccess', function () {
     assert.deepStrictEqual(spec.components.schemas, {});
   });
 });
+
+suite('buildOpenApiSpec() — Firebird 6 schema names', function () {
+  const table = (name: string, displayName?: string) => ({
+    name,
+    ...(displayName ? { displayName } : {}),
+    columns: [{ name: 'ID', type: 'INTEGER', length: 4, notNull: true, isPrimaryKey: true }],
+  });
+
+  test('publishes the display name, so a default-schema table keeps a clean route', function () {
+    // The graph's `name` is qualified because it doubles as the table's DDL identity; putting that
+    // in a URL would give every path on a single-schema database a redundant `public.` segment.
+    const spec: any = buildOpenApiSpec({ tables: [table('PUBLIC.ORDERS', 'ORDERS')], relationships: [] } as any, {});
+    assert.ok(spec.paths['/orders'], Object.keys(spec.paths).join(', '));
+    assert.ok(spec.components.schemas['ORDERS']);
+  });
+
+  test('keeps a qualification that actually disambiguates', function () {
+    const spec: any = buildOpenApiSpec({ tables: [table('SALES.ORDERS')], relationships: [] } as any, {});
+    assert.ok(spec.paths['/sales.orders'], Object.keys(spec.paths).join(', '));
+  });
+
+  test('two same-named tables from different schemas get distinct routes', function () {
+    // Verified live: before the graph carried schemas these merged into one table with eight
+    // duplicate primary-key columns, generating `/orders/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}/{ID}`.
+    const spec: any = buildOpenApiSpec({
+      tables: [table('PUBLIC.ORDERS', 'ORDERS'), table('SALES.ORDERS')], relationships: [],
+    } as any, {});
+    assert.ok(spec.paths['/orders']);
+    assert.ok(spec.paths['/sales.orders']);
+    assert.ok(spec.paths['/orders/{ID}'], Object.keys(spec.paths).join(', '));
+  });
+
+  test('a pre-Firebird-6 graph is unaffected', function () {
+    const spec: any = buildOpenApiSpec({ tables: [table('ORDERS')], relationships: [] } as any, {});
+    assert.ok(spec.paths['/orders']);
+  });
+});
