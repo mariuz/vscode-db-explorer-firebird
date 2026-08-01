@@ -125,6 +125,17 @@ export class NodeDatabase implements FirebirdTree {
     return rows.filter(row => matchesObjectFilter(nameOf(row), filter));
   }
 
+  /**
+   * Whether this connection's server understands SQL schemas, i.e. Firebird 6+. Cached per
+   * connection by `getEngineMajorVersion()`, so the extra round trip happens once rather than on
+   * every expand.
+   */
+  private async schemasSupported(connection: any, resolved: ConnectionOptions): Promise<boolean> {
+    return supportsSchemas(
+      await getEngineMajorVersion(resolved, sql => Driver.client.queryPromise<any>(connection, sql))
+    );
+  }
+
   private async getTableChildren(): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
@@ -132,10 +143,7 @@ export class NodeDatabase implements FirebirdTree {
     // Firebird 6 put every object in a schema. Asking a pre-6 server for RDB$SCHEMA_NAME is a hard
     // SQL error, not a degradation, so the column is only requested once the server has said it is
     // new enough — and a version probe that fails reports 0, i.e. legacy behaviour.
-    const engineMajorVersion = await getEngineMajorVersion(resolved, sql =>
-      Driver.client.queryPromise<any>(connection, sql)
-    );
-    const withSchemas = supportsSchemas(engineMajorVersion);
+    const withSchemas = await this.schemasSupported(connection, resolved);
 
     const tablesQry = getTablesQuery(getOptions().maxTablesCount, withSchemas);
     const tables = await Driver.client.queryPromise<any>(connection, tablesQry);
@@ -147,9 +155,7 @@ export class NodeDatabase implements FirebirdTree {
   private async getViewChildren(): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
-    const withSchemas = supportsSchemas(
-      await getEngineMajorVersion(resolved, sql => Driver.client.queryPromise<any>(connection, sql))
-    );
+    const withSchemas = await this.schemasSupported(connection, resolved);
     const views = await Driver.client.queryPromise<any>(connection, getViewsQuery(withSchemas));
     return this.filterRows(views, "views", v => v.VIEW_NAME).map<NodeView>(
       view => new NodeView(this.dbDetails, view.VIEW_NAME, withSchemas ? view.SCHEMA_NAME : undefined)
@@ -157,26 +163,34 @@ export class NodeDatabase implements FirebirdTree {
   }
 
   private async getProcedureChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const procs = await Driver.client.queryPromise<any>(connection, getStoredProceduresQuery());
-    return this.filterRows(procs, "procedures", p => p.PROCEDURE_NAME).map<NodeProcedure>(proc => new NodeProcedure(this.dbDetails, proc.PROCEDURE_NAME));
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = await this.schemasSupported(connection, resolved);
+    const procs = await Driver.client.queryPromise<any>(connection, getStoredProceduresQuery(withSchemas));
+    return this.filterRows(procs, "procedures", p => p.PROCEDURE_NAME).map<NodeProcedure>(proc => new NodeProcedure(this.dbDetails, proc.PROCEDURE_NAME, withSchemas ? proc.SCHEMA_NAME : undefined));
   }
 
   private async getTriggerChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const triggers = await Driver.client.queryPromise<any>(connection, getTriggersQuery());
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = await this.schemasSupported(connection, resolved);
+    const triggers = await Driver.client.queryPromise<any>(connection, getTriggersQuery(withSchemas));
     return this.filterRows(triggers, "triggers", t => t.TRIGGER_NAME).map<NodeTrigger>(trigger => new NodeTrigger(trigger, this.dbDetails));
   }
 
   private async getGeneratorChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const generators = await Driver.client.queryPromise<any>(connection, getGeneratorsQuery());
-    return this.filterRows(generators, "generators", g => g.GENERATOR_NAME).map<NodeGenerator>(gen => new NodeGenerator(gen.GENERATOR_NAME, this.dbDetails));
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = await this.schemasSupported(connection, resolved);
+    const generators = await Driver.client.queryPromise<any>(connection, getGeneratorsQuery(withSchemas));
+    return this.filterRows(generators, "generators", g => g.GENERATOR_NAME).map<NodeGenerator>(gen => new NodeGenerator(gen.GENERATOR_NAME, this.dbDetails, withSchemas ? gen.SCHEMA_NAME : undefined));
   }
 
   private async getDomainChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const domains = await Driver.client.queryPromise<any>(connection, getDomainsQuery());
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = await this.schemasSupported(connection, resolved);
+    const domains = await Driver.client.queryPromise<any>(connection, getDomainsQuery(withSchemas));
     return this.filterRows(domains, "domains", d => d.DOMAIN_NAME).map<NodeDomain>(domain => new NodeDomain(domain, this.dbDetails));
   }
 
@@ -187,8 +201,10 @@ export class NodeDatabase implements FirebirdTree {
   }
 
   private async getExceptionChildren(): Promise<FirebirdTree[]> {
-    const connection = await Driver.client.createConnection(await this.resolvedDetails());
-    const exceptions = await Driver.client.queryPromise<any>(connection, getExceptionsQuery());
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    const withSchemas = await this.schemasSupported(connection, resolved);
+    const exceptions = await Driver.client.queryPromise<any>(connection, getExceptionsQuery(withSchemas));
     return this.filterRows(exceptions, "exceptions", e => e.EXCEPTION_NAME).map<NodeException>(exception => new NodeException(exception, this.dbDetails));
   }
 

@@ -2,6 +2,7 @@ import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, Uri} fro
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {procedureParametersQuery, getProcedureBodyQuery, dropProcedureQuery, createProcedureScaffold, getObjectPrivilegesQuery} from "../shared/queries";
+import {schemaDisplayName, schemaQualifiedName} from "../shared/schema-support";
 import {Global} from "../shared/global";
 import {Driver} from "../shared/driver";
 import {NodeInfo} from "./node-info";
@@ -10,7 +11,17 @@ import {withTruncationWarning} from "../shared/utils";
 import {buildProcedureCreateDDL, buildProcedureParameterHeader, ProcedureParameter} from "../database-projects/project-model";
 
 export class NodeProcedure implements FirebirdTree {
-  constructor(private readonly dbDetails: ConnectionOptions, private readonly procedureName: string) {}
+  /** @param schema Firebird 6+ only — see NodeTable. */
+  constructor(
+    private readonly dbDetails: ConnectionOptions,
+    private readonly procedureName: string,
+    private readonly schema?: string
+  ) {}
+
+  /** The name to put in SQL: qualified whenever a schema is known. */
+  public getProcedureName(): string {
+    return schemaQualifiedName(this.schema, this.procedureName);
+  }
 
   public getDragIdentifier(): string {
     return this.procedureName.trim();
@@ -18,7 +29,7 @@ export class NodeProcedure implements FirebirdTree {
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: this.procedureName.trim(),
+      label: schemaDisplayName(this.schema, this.procedureName),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "procedure",
       tooltip: `[PROCEDURE] ${this.procedureName.trim()}`,
@@ -30,7 +41,7 @@ export class NodeProcedure implements FirebirdTree {
   }
 
   public async getChildren(): Promise<FirebirdTree[]> {
-    const qry = procedureParametersQuery(this.procedureName.trim());
+    const qry = procedureParametersQuery(this.procedureName.trim(), this.schema);
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
       const params = await Driver.client.queryPromise<any[]>(connection, qry);
@@ -48,7 +59,7 @@ export class NodeProcedure implements FirebirdTree {
 
   /** Fetches this procedure's parameters via the given (already-open) connection, in ProcedureParameter shape. */
   private async fetchParameters(connection: any): Promise<ProcedureParameter[]> {
-    const paramRows = await Driver.client.queryPromise<any>(connection, procedureParametersQuery(this.procedureName.trim()));
+    const paramRows = await Driver.client.queryPromise<any>(connection, procedureParametersQuery(this.procedureName.trim(), this.schema));
     return paramRows.map((r: any) => ({
       name: r.PARAM_NAME.trim(),
       direction: r.PARAM_TYPE === 1 ? "out" : "in",
@@ -64,7 +75,7 @@ export class NodeProcedure implements FirebirdTree {
     logger.info("Edit Procedure: open source for editing");
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
-      const rows = await Driver.client.queryPromise<any>(connection, getProcedureBodyQuery(this.procedureName.trim()));
+      const rows = await Driver.client.queryPromise<any>(connection, getProcedureBodyQuery(this.procedureName.trim(), this.schema));
       const source = rows[0]?.PROCEDURE_SOURCE ?? "";
       const parameters = await this.fetchParameters(connection);
       // RDB$PROCEDURE_SOURCE never includes the "AS" keyword (unlike RDB$TRIGGER_SOURCE), confirmed
@@ -86,7 +97,7 @@ export class NodeProcedure implements FirebirdTree {
 
   public async dropProcedure() {
     logger.info("Drop Procedure");
-    Driver.runQuery(dropProcedureQuery(this.procedureName.trim()), this.dbDetails)
+    Driver.runQuery(dropProcedureQuery(this.getProcedureName()), this.dbDetails)
       .then(results => {
         logger.info(results[0].message);
         logger.showInfo(results[0].message);
@@ -102,7 +113,7 @@ export class NodeProcedure implements FirebirdTree {
   public async scriptAsCreate(): Promise<void> {
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
-      const rows = await Driver.client.queryPromise<any>(connection, getProcedureBodyQuery(this.procedureName.trim()));
+      const rows = await Driver.client.queryPromise<any>(connection, getProcedureBodyQuery(this.procedureName.trim(), this.schema));
       const source = rows[0]?.PROCEDURE_SOURCE ?? "";
       const parameters = await this.fetchParameters(connection);
       await Driver.createSQLTextDocument(buildProcedureCreateDDL({ name: this.procedureName.trim(), source, parameters }));
@@ -114,7 +125,7 @@ export class NodeProcedure implements FirebirdTree {
 
   /** Generic "Script as Drop". */
   public async scriptAsDrop(): Promise<void> {
-    await Driver.createSQLTextDocument(dropProcedureQuery(this.procedureName.trim()));
+    await Driver.createSQLTextDocument(dropProcedureQuery(this.getProcedureName()));
   }
 
   /** Shows this procedure's grants (RDB$USER_PRIVILEGES) in the results grid. */

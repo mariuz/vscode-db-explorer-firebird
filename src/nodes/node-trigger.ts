@@ -1,4 +1,5 @@
 import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, Uri} from "vscode";
+import {schemaDisplayName} from "../shared/schema-support";
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {getTriggerBodyQuery, dropTriggerQuery, createTriggerScaffold} from "../shared/queries";
@@ -11,7 +12,8 @@ export class NodeTrigger implements FirebirdTree {
   constructor(private readonly trigger: any, private readonly dbDetails?: ConnectionOptions) {}
 
   public getTreeItem(context: ExtensionContext): TreeItem {
-    const name = this.trigger.TRIGGER_NAME ? this.trigger.TRIGGER_NAME.trim() : "";
+    // Qualified only when the object sits outside the default schema — see schemaDisplayName().
+    const name = schemaDisplayName(this.trigger.SCHEMA_NAME, this.trigger.TRIGGER_NAME ?? "");
     const tableName = this.trigger.TABLE_NAME ? this.trigger.TABLE_NAME.trim() : "";
     const inactive = this.trigger.INACTIVE === 1;
     const typeDesc = describeTriggerType(this.trigger.TRIGGER_TYPE);

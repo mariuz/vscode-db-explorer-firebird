@@ -1,4 +1,5 @@
 import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, Uri} from "vscode";
+import {schemaDisplayName} from "../shared/schema-support";
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {dropDomainQuery, createDomainScaffold, alterDomainScaffold} from "../shared/queries";
@@ -14,7 +15,8 @@ export class NodeDomain implements FirebirdTree {
   }
 
   public getTreeItem(context: ExtensionContext): TreeItem {
-    const name = this.domain.DOMAIN_NAME ? this.domain.DOMAIN_NAME.trim() : "";
+    // Qualified only when the object sits outside the default schema — see schemaDisplayName().
+    const name = schemaDisplayName(this.domain.SCHEMA_NAME, this.domain.DOMAIN_NAME ?? "");
     const type = this.domain.DOMAIN_TYPE ? this.domain.DOMAIN_TYPE.trim() : "UNKNOWN";
     const length = this.domain.FIELD_LENGTH || 0;
     const notNull = this.domain.NOT_NULL ? "NOT NULL" : "NULL";

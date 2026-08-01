@@ -89,9 +89,30 @@ Views were worse than tables: the merged lookup returned a **duplicated** `ID`. 
 
 **`assertValidIdentifier()` had to learn about two-part names**, and this is the part to be careful with. It is the injection guard for every statement the row-edit builders generate, and its regex rejected the dot — so qualifying a table name would have made row editing fail with `Invalid table name: "SALES.ORDERS"` on exactly the tables this feature exists to address. It now splits on the *first* dot and requires **both** halves to match the same strict rule, so `A.B.C`, `.ORDERS`, `SALES.`, `SALES.ORDERS'` and `ORDERS; DROP TABLE T` are all still rejected — six new tests cover precisely those. The mirrored regex in `extension.ts` deliberately stays single-part: it validates names the user is *creating* (a new index, a new column), where a dot is a mistake rather than a qualification, and its comment now says so instead of claiming the two match.
 
-### What is still missing, precisely
+### Phase 1d — the remaining object categories (done)
 
-- **Procedures, triggers, generators, domains, roles and exceptions still list unqualified**, so the same collision remains visible for them.
+Procedures, triggers, generators, domains and exceptions now list schema-aware, completing the read path for every category that *has* a schema. Verified live:
+
+```
+procedures  : TOTALS | SALES.TOTALS
+generators  : SALES.SEQ1
+domains     : SALES.POSAMT
+exceptions  : SALES.BOOM
+```
+
+Procedures got the full treatment (listing, parameters, body) because they have the same two failure modes tables and views did — verified live, a `TOTALS` procedure in two schemas returned **both** procedures' parameters as if one procedure had them all:
+
+```
+params for (old behaviour) -> N, M
+params for SALES           -> N
+params for PUBLIC          -> M
+```
+
+**Roles deliberately need no change.** `RDB$ROLES` is the one system table in this set *without* an `RDB$SCHEMA_NAME` column — checked directly against the live server rather than assumed — because roles are database-wide rather than schema-scoped. Leaving that category alone is correct, not an omission.
+
+Two implementation notes. `NodeTrigger`, `NodeDomain` and `NodeException` receive the whole metadata row rather than a name, so the extra column reaches them without any constructor change — only their label had to learn `schemaDisplayName()`. And the five-times-repeated version probe is now one `schemasSupported()` helper on `NodeDatabase`, so every category asks the same way and the cached lookup happens in one place.
+
+### What is still missing, precisely
 - **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 

@@ -2,12 +2,23 @@ import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, window, 
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {dropGeneratorQuery, setGeneratorValueQuery, createGeneratorQuery} from "../shared/queries";
+import {schemaDisplayName, schemaQualifiedName} from "../shared/schema-support";
 import {Driver} from "../shared/driver";
 import {logger} from "../logger/logger";
 import {buildGeneratorCreateDDL} from "../database-projects/project-model";
 
 export class NodeGenerator implements FirebirdTree {
-  constructor(private readonly generatorName: string, private readonly dbDetails?: ConnectionOptions) {}
+  /** @param schema Firebird 6+ only — see NodeTable. */
+  constructor(
+    private readonly generatorName: string,
+    private readonly dbDetails?: ConnectionOptions,
+    private readonly schema?: string
+  ) {}
+
+  /** The name to put in SQL: qualified whenever a schema is known. */
+  public getGeneratorName(): string {
+    return schemaQualifiedName(this.schema, this.generatorName);
+  }
 
   public getDragIdentifier(): string {
     return this.generatorName.trim();
@@ -15,7 +26,7 @@ export class NodeGenerator implements FirebirdTree {
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: this.generatorName.trim(),
+      label: schemaDisplayName(this.schema, this.generatorName),
       collapsibleState: TreeItemCollapsibleState.None,
       contextValue: "generator",
       tooltip: `[GENERATOR] ${this.generatorName.trim()}`,

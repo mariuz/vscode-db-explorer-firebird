@@ -1,4 +1,5 @@
 import {ExtensionContext, TreeItem, TreeItemCollapsibleState, commands, Uri} from "vscode";
+import {schemaDisplayName} from "../shared/schema-support";
 import {join} from "path";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {dropExceptionQuery} from "../shared/queries";
@@ -13,12 +14,17 @@ export class NodeException implements FirebirdTree {
     return this.exception.EXCEPTION_NAME ? String(this.exception.EXCEPTION_NAME).trim() : "";
   }
 
+  /** Display name: qualified only when the exception sits outside the default schema. */
+  private getDisplayName(): string {
+    return schemaDisplayName(this.exception.SCHEMA_NAME, this.getExceptionName());
+  }
+
   private getMessage(): string {
     return this.exception.MESSAGE ? String(this.exception.MESSAGE).trim() : "";
   }
 
   public getTreeItem(context: ExtensionContext): TreeItem {
-    const name = this.getExceptionName();
+    const name = this.getDisplayName();
     const message = this.getMessage();
     return {
       label: name,

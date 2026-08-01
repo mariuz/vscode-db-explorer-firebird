@@ -27,7 +27,13 @@ import {
   getTablesQuery,
   selectAllRecordsQuery,
   getViewsQuery,
-  viewColumnsQuery} from '../shared/queries';
+  viewColumnsQuery,
+  getStoredProceduresQuery,
+  getTriggersQuery,
+  getGeneratorsQuery,
+  getDomainsQuery,
+  getExceptionsQuery,
+  procedureParametersQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -587,5 +593,35 @@ suite('view queries — Firebird 6 schema awareness', function () {
     // you edit — whichever came first.
     assert.ok(getViewDefinitionQuery('ACTIVE', 'SALES').includes("RDB$SCHEMA_NAME = 'SALES'"));
     assert.ok(!getViewDefinitionQuery('ACTIVE').includes('RDB$SCHEMA_NAME'));
+  });
+});
+
+suite('remaining object categories — Firebird 6 schema awareness', function () {
+  const listings: [string, (withSchemas?: boolean) => string][] = [
+    ['procedures', getStoredProceduresQuery],
+    ['triggers', getTriggersQuery],
+    ['generators', getGeneratorsQuery],
+    ['domains', getDomainsQuery],
+    ['exceptions', getExceptionsQuery],
+  ];
+
+  for (const [label, build] of listings) {
+    test(`${label}: unchanged without schemas, schema-carrying with them`, function () {
+      assert.ok(!build().includes('RDB$SCHEMA_NAME'), `${label} must not reference the column on a pre-6 server`);
+      assert.strictEqual(build(), build(false));
+      assert.ok(build(true).includes('RDB$SCHEMA_NAME'), `${label} should select the schema on Firebird 6`);
+    });
+  }
+
+  test('procedureParametersQuery() scopes to a schema', function () {
+    // Verified live: without this, TOTALS existing in two schemas returned both procedures'
+    // parameters (N, M) as if one procedure had both.
+    assert.ok(procedureParametersQuery('TOTALS', 'SALES').includes("pp.RDB$SCHEMA_NAME = 'SALES'"));
+    assert.ok(!procedureParametersQuery('TOTALS').includes('RDB$SCHEMA_NAME'));
+  });
+
+  test('getProcedureBodyQuery() scopes to a schema, since its caller reads row 0', function () {
+    assert.ok(getProcedureBodyQuery('TOTALS', 'SALES').includes("RDB$SCHEMA_NAME = 'SALES'"));
+    assert.ok(!getProcedureBodyQuery('TOTALS').includes('RDB$SCHEMA_NAME'));
   });
 });

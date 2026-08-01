@@ -226,14 +226,22 @@ export function viewColumnsQuery(viewName: string, schema?: string): string {
    ORDER BY r.RDB$FIELD_POSITION;`;
 }
 
-export function getStoredProceduresQuery(): string {
+/** `withSchemas` is Firebird 6+ only — see `getTablesQuery()`. */
+export function getStoredProceduresQuery(withSchemas = false): string {
+  if (withSchemas) {
+    return `SELECT TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME, TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME
+            FROM RDB$PROCEDURES
+           WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
+        ORDER BY 1, 2;`;
+  }
   return `SELECT TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME
             FROM RDB$PROCEDURES
            WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
         ORDER BY 1;`;
 }
 
-export function procedureParametersQuery(procedureName: string): string {
+export function procedureParametersQuery(procedureName: string, schema?: string): string {
+  const paramSchemaPredicate = schema?.trim() ? `\n             AND pp.RDB$SCHEMA_NAME = '${schema.trim()}'` : "";
   return `SELECT TRIM(pp.RDB$PARAMETER_NAME) AS PARAM_NAME,
                  pp.RDB$PARAMETER_TYPE AS PARAM_TYPE,
                  CASE f.RDB$FIELD_TYPE
@@ -259,12 +267,15 @@ export function procedureParametersQuery(procedureName: string): string {
                  f.RDB$FIELD_SCALE AS FIELD_SCALE
             FROM RDB$PROCEDURE_PARAMETERS pp
        LEFT JOIN RDB$FIELDS f ON pp.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
-           WHERE pp.RDB$PROCEDURE_NAME = '${procedureName}'
+           WHERE pp.RDB$PROCEDURE_NAME = '${procedureName}'${paramSchemaPredicate}
         ORDER BY pp.RDB$PARAMETER_TYPE, pp.RDB$PARAMETER_NUMBER;`;
 }
 
-export function getTriggersQuery(): string {
-  return `SELECT TRIM(RDB$TRIGGER_NAME) AS TRIGGER_NAME,
+/** `withSchemas` is Firebird 6+ only. Trigger nodes receive the whole row, so the extra column
+ * reaches the node without any signature change. */
+export function getTriggersQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$TRIGGER_NAME) AS TRIGGER_NAME,
                  TRIM(RDB$RELATION_NAME) AS TABLE_NAME,
                  RDB$TRIGGER_TYPE AS TRIGGER_TYPE,
                  RDB$TRIGGER_INACTIVE AS INACTIVE
@@ -273,8 +284,10 @@ export function getTriggersQuery(): string {
         ORDER BY 1;`;
 }
 
-export function getGeneratorsQuery(): string {
-  return `SELECT TRIM(RDB$GENERATOR_NAME) AS GENERATOR_NAME
+/** `withSchemas` is Firebird 6+ only. */
+export function getGeneratorsQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME, " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$GENERATOR_NAME) AS GENERATOR_NAME
             FROM RDB$GENERATORS
            WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
         ORDER BY 1;`;
@@ -289,8 +302,10 @@ export function getGeneratorsQuery(): string {
  * schema-graph.ts's normalizeDefault() already does for table columns; CHECK_SOURCE already
  * includes its own "CHECK (...)" wrapper and can be appended to CREATE/ALTER DOMAIN as-is.
  */
-export function getDomainsQuery(): string {
-  return `SELECT TRIM(RDB$FIELD_NAME) AS DOMAIN_NAME,
+/** `withSchemas` is Firebird 6+ only. Domain nodes receive the whole row. */
+export function getDomainsQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$FIELD_NAME) AS DOMAIN_NAME,
                  CASE RDB$FIELD_TYPE
                    WHEN 261 THEN 'BLOB'
                    WHEN 14  THEN 'CHAR'
@@ -329,8 +344,10 @@ export function getRolesQuery(): string {
         ORDER BY 1;`;
 }
 
-export function getExceptionsQuery(): string {
-  return `SELECT TRIM(RDB$EXCEPTION_NAME) AS EXCEPTION_NAME,
+/** `withSchemas` is Firebird 6+ only. Exception nodes receive the whole row. */
+export function getExceptionsQuery(withSchemas = false): string {
+  const schemaColumn = withSchemas ? "TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,\n                 " : "";
+  return `SELECT ${schemaColumn}TRIM(RDB$EXCEPTION_NAME) AS EXCEPTION_NAME,
                  RDB$MESSAGE AS MESSAGE
             FROM RDB$EXCEPTIONS
            WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)
@@ -439,11 +456,14 @@ export function getSystemTablesQuery(): string {
  */
 export const MAX_SOURCE_CAST_LENGTH = 8191;
 
-export function getProcedureBodyQuery(procedureName: string): string {
+export function getProcedureBodyQuery(procedureName: string, schema?: string): string {
+  // As with views: the caller reads row 0, so without this two same-named procedures would mean
+  // editing whichever one the server returned first.
+  const schemaPredicate = schema?.trim() ? `\n             AND RDB$SCHEMA_NAME = '${schema.trim()}'` : "";
   return `SELECT TRIM(RDB$PROCEDURE_NAME) AS PROCEDURE_NAME,
                  CAST(RDB$PROCEDURE_SOURCE AS VARCHAR(${MAX_SOURCE_CAST_LENGTH}) CHARACTER SET UTF8) AS PROCEDURE_SOURCE
             FROM RDB$PROCEDURES
-           WHERE TRIM(RDB$PROCEDURE_NAME) = '${procedureName}';`;
+           WHERE TRIM(RDB$PROCEDURE_NAME) = '${procedureName}'${schemaPredicate};`;
 }
 
 export function getTriggerBodyQuery(triggerName: string): string {
