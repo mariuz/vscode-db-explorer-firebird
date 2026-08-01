@@ -28,5 +28,7 @@ CONTRIBUTING.md
 !node_modules/node-addon-api
 !node_modules/bindings
 !node_modules/file-uri-to-path
-
 node_modules/node-firebird-native-api/build
+playwright.config.ts
+test-results
+playwright-report

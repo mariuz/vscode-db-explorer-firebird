@@ -59,9 +59,33 @@ On failure the scratch directory is deliberately left on disk — the unpacked e
 
 The extension's own `out/**/*.js.map` sourcemaps are packaged (11.37 MB of the 3.55 MB compressed total). That is pre-existing and arguably deliberate — they make user-reported stack traces readable — so this phase did not change it, but it is the obvious lever if package size ever becomes a concern.
 
+## Phase 2 — the Playwright harness, and the first rendered webview (done)
+
+**A webview in this extension has now been proven to render.** `results-grid.spec.ts` adds a connection through the wizard, runs `SELECT 8675309 AS ANSWER FROM RDB$DATABASE` against a real Firebird server, and asserts that the value appears inside the results webview's document. That is the assertion the stub-DOM tests structurally cannot make.
+
+`npm run test:playwright`. Five specs, ~40 s: four workbench-level ones that need no database, and the results-grid one that does.
+
+- **The harness** is `src/test/playwright/vscode-fixture.ts` — `_electron.launch()` against the VS Code binary `@vscode/test-electron` already caches for the other tiers (no browser download, no second copy of VS Code). It creates a throwaway workspace, user-data and extensions directory per run, and screenshots the workbench on failure.
+- **Webview traversal**: VS Code nests webview content two iframes deep — the outer `iframe.webview` belongs to the workbench, the inner `#active-frame` is the extension's own document, so `page.frameLocator("iframe.webview").frameLocator("#active-frame")` is the way in.
+- **Where it runs**: inside the existing `vscode-host.yml` job, gated to `schedule`/`workflow_dispatch`. That reuses the Firebird server and VS Code download that job already provisions instead of duplicating ~60 lines of setup, while keeping this tier off the merge path. `CODE_VERSION` is pinned to `stable` even on the nightly — the Insiders run in the same job is about API breakage, and pointing DOM selectors at Insiders too would mostly produce noise from workbench markup churn.
+
+### Five things that had to be discovered by failing
+
+Every one of these produced a silent or misleading failure, and each is now a comment at the point it bites:
+
+1. **`--password-store=basic` is mandatory.** Without it SecretStorage tries to reach a system keyring no headless container has, and every `secrets.store()` rejects. The symptom is brutal: `saveNewConnection`'s failure is awaited inside a `.catch(logger.error)`, so the connection wizard just... ends. No connection, no toast, no error on screen. Nothing in the UI says anything went wrong.
+2. **The Command Palette filters once and never re-filters.** Opening it before the extension host has registered the commands leaves a "No matching commands" row that never updates, and `waitFor` happily accepts that row as "a row appeared". The fixture now opens a `.sql` file at launch to force `onLanguage:sql` activation before any spec runs.
+3. **The activation signal is not where you would guess.** The Activity Bar icon and palette entries are rendered from the manifest alone, whether or not a line of extension code has run. The status bar item is real proof — but it is created in `Global.initStatusBarItems()`, which is called from the *tree provider's* `getHostNodes()`, so it only exists once the view has been opened. Waiting for it without opening the view hangs forever.
+4. **The palette and the wizard share `.quick-input-widget .input`.** Filling as soon as an input is visible can type into the palette that is still closing. Wait for the wizard's own prompt text, not for an input.
+5. **A database file the server cannot read fails as a *query* error, not a connection error.** A scratch database created with local `isql` is owned by the developer; the server runs as `firebird` and gets `Permission denied` on open — while the connection itself appears to succeed and the status bar happily shows the database name. Create scratch databases *through* the server (`CREATE DATABASE 'localhost/3050:/path'`), which is what `vscode-host.yml` already does.
+
+### A finding worth acting on separately
+
+`firebird.database.setPassword` takes a `NodeDatabase` argument, so it is **not invocable from the Command Palette** — the only way to give a workspace connection (`.vscode/firebird.json`, which by design cannot carry a password) its password is the tree's context menu. The spec works around this by using the wizard's paste-a-connection-string path instead. A palette-invocable variant that falls back to the existing `connection-picker.ts` would be a small usability improvement in its own right, and would make workspace connections testable directly. Not done here — it is a product change, not a testing one.
+
 ## Suggested phases
 
 1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
-2. **Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.
+2. ~~**Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.~~ — **done**, see above.
 3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG — the two places the stub DOM explicitly cannot reach.
 4. **Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.

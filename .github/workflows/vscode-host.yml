@@ -158,6 +158,22 @@ jobs:
           reporter: jest-junit
           fail-on-error: false
 
+      - name: Run webview UI tests (Playwright)
+        # Nightly and manual runs only. This tier launches a real VS Code window per test and
+        # drives its DOM, so it is both slow and inherently more fragile than anything else here —
+        # docs/roadmap/webview-ui-testing.md explains why that keeps it out of the merge path. It
+        # runs in *this* job rather than its own workflow purely to reuse the Firebird server and
+        # VS Code download already set up above, instead of duplicating ~60 lines of provisioning.
+        #
+        # CODE_VERSION is pinned to stable even on the nightly: the Insiders run above exists to
+        # catch API breakage, and pointing DOM selectors at Insiders as well would mostly produce
+        # noise from workbench markup churn.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: xvfb-run -a npx playwright test
+        env:
+          DISPLAY: ":99.0"
+          CODE_VERSION: stable
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -165,3 +181,14 @@ jobs:
           name: vscode-host-test-results
           path: test-reports
           retention-days: 14
+
+      - name: Upload Playwright artifacts
+        # Screenshots, videos and traces for a failed UI test — the only way to see what a
+        # headless workbench actually looked like when a locator timed out.
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results
+          retention-days: 14
+          if-no-files-found: ignore

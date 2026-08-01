@@ -56,7 +56,8 @@
     "package": "vsce package --no-dependencies",
     "test:vsix": "node scripts/smoke-test-vsix.mjs",
     "test:vscode-host": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test",
-    "test:vscode-host:coverage": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test --coverage"
+    "test:vscode-host:coverage": "npm run compile && node node_modules/typescript7/bin/tsc -p tsconfig.suite.json --noEmitOnError false && vscode-test --coverage",
+    "test:playwright": "playwright test"
   },
   "contributes": {
     "notebooks": [
@@ -1836,6 +1837,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "^14.11.2",
     "@types/ssh2": "^1.15.5",

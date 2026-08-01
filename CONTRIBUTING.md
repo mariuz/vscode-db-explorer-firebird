@@ -199,7 +199,10 @@ npm run test              # unit tests — plain Mocha, mocked `vscode`, no VS C
 npm run test:e2e          # against a real Firebird server (configured via FIREBIRD_* env vars)
 npm run test:vscode-host  # inside a real Extension Development Host
 npm run test:vsix         # packages a .vsix, installs it, and smoke-tests the installed copy
+npm run test:playwright   # drives a real VS Code window and its webviews (Playwright)
 ```
+
+`npm run test:playwright` is the only tier that renders anything: it launches a real VS Code, and its results-grid spec needs a reachable Firebird server (`FIREBIRD_*`, same variables as the other database-backed tiers) — without one, that spec skips and the workbench specs still run. It runs nightly in CI, not on pull requests. Note for local runs: create any scratch database *through* the server (`CREATE DATABASE 'localhost/3050:/path/x.fdb'`), not with a local `isql`, or the server will not have permission to open the file.
 
 `npm run test:vsix` is the only tier that exercises the **packaged** extension — the other three run from source, so none of them can see a `.vscodeignore` mistake or a bundle that never got built. It needs no Firebird server. If it fails it leaves its scratch directory on disk; the unpacked extension folder in there shows exactly what was packaged.
 
