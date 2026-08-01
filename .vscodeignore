@@ -10,6 +10,11 @@ tsconfig.e2e.json
 .vscode-test.mjs
 images
 out/test
+coverage
+test-reports
+.c8rc.json
+mocha-reporters.json
+*.vsix
 .claude
 .github
 .devcontainer

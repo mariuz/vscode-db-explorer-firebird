@@ -1,0 +1,55 @@
+name: VSIX Smoke Test
+
+# Packages the extension and runs it as an *installed* .vsix, which no other tier does — the
+# unit tier imports modules directly and the extension-host suite loads the repository folder
+# via --extensionDevelopmentPath, so both are blind to packaging mistakes. This job exists
+# because building it immediately found one: `coverage/` and `test-reports/` were being shipped
+# inside the package. See docs/roadmap/webview-ui-testing.md.
+#
+# Unlike the extension-host suite, this needs no Firebird server: it asks whether the packaged
+# extension installs, activates and registers its commands, not whether it can query anything.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  vsix-smoke:
+    name: Packaged VSIX Smoke Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Package extension
+        # Also the packaging check in its own right: vsce validates the manifest and fails on a
+        # missing README, bad publisher, or unresolvable icon before any test runs.
+        run: npm run package -- --out firebird-studio.vsix
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: firebird-studio.vsix
+          retention-days: 14
+
+      - name: Smoke-test the packaged extension
+        # xvfb: VS Code is launched for real, so it needs a display even headless.
+        # VSIX_PATH reuses the package built above rather than building a second one.
+        run: xvfb-run -a node scripts/smoke-test-vsix.mjs
+        env:
+          VSIX_PATH: firebird-studio.vsix
+          DISPLAY: ":99.0"

@@ -33,9 +33,35 @@
 - **Native VS Code dialogs are unreachable** (mssql's documented limitation above). Several flows here end in `showSaveDialog()` — results export, notebook export, backup/restore paths — so those specs must stop at the dialog boundary, and the doc should say so rather than leaving a half-covered flow looking covered.
 - **This tier is slow and duplicative if overbuilt.** The pure-function coverage that already exists is fast and precise; Playwright should cover *rendering and wiring*, not re-assert logic already unit-tested. Keeping that split explicit is what stops this from becoming a second, slower copy of the existing suite.
 
+## Phase 1 — VSIX packaging and install smoke test (done)
+
+`npm run test:vsix` packages the extension, installs the `.vsix` into a throwaway VS Code, and runs ten assertions against the **installed** copy. New CI workflow `vsix-smoke.yml` does the same on every push and pull request, and uploads the `.vsix` as an artifact. It needs no Firebird server — the question is whether the packaged extension installs, activates and registers its commands, not whether it can query anything.
+
+**It found a real defect on its first run, which is the entire argument for the tier.** The package contained `coverage/` (116 files, 7.86 MB) and `test-reports/` — the coverage and JUnit tooling added in [test-coverage-and-reporting.md](test-coverage-and-reporting.md) phases 1–2 wrote into directories that `.gitignore` knew about but `.vscodeignore` did not. **230 files / 4.8 MB → 111 files / 3.55 MB** once fixed. Nothing else in the repository could have caught it: `.vscodeignore` affects only packaging, and until now nothing packaged.
+
+### What it asserts
+
+Beyond "it activates", the checks are **data-driven from the manifest**, so they keep working as the manifest grows: every path `package.json` names must exist inside the installed extension — `main`, each `notebookRenderer` entrypoint, every walkthrough step's markdown, every `snippets`/`grammars` path. Plus the two esbuild outputs that *no* manifest path references (`out/mcp-server/server.js`, `out/sql-notebook/renderer.js`) and which therefore nothing else would notice the absence of until a user reached that feature; the webview `htmlContent` assets, which live under `src/` and are copied rather than bundled, making them the prime casualty of any broad `src/**` ignore rule; and a negative assertion that `coverage`, `test-reports`, and `out/test` are *not* present, so the defect above cannot silently return.
+
+One assertion guards the harness itself: `extensionPath` must not be the repository root. Without it, a regression in the runner that quietly loaded the source folder would leave every other assertion passing while testing nothing about packaging.
+
+**The failure mode was verified, not assumed**: adding `out/mcp-server` to `.vscodeignore` and re-running produced exactly one failure — `an esbuild output is missing from the packaged extension: out/mcp-server/server.js` — and exit code 1.
+
+### Three things worth knowing before touching the harness
+
+- **`vsce package` deletes the compiled tests.** It triggers `vscode:prepublish` → `npm run compile` → `esbuild-base`, which begins with `rimraf out`. Compiling the smoke-test tier *before* packaging therefore produces a baffling `Cannot find module out/test/vsix/index.js` from inside the extension host. `scripts/smoke-test-vsix.mjs` owns the ordering — package first, compile second — which is why `npm run test:vsix` is just the script and not a chain of `&&`.
+- **`runTests()` always passes `--extensionDevelopmentPath`** (appended unconditionally in `@vscode/test-electron`'s `out/runTest.js`), so it cannot be omitted to test a purely installed extension. It is pointed at the directory the CLI unpacked the `.vsix` into, so the files under test are the packaged ones even though VS Code loads them in development mode. `runTests()` also always passes `--disable-workspace-trust`, which this extension now *needs* in order to activate at all — `capabilities.untrustedWorkspaces` is `supported: false` as of phase 5 of the coverage doc.
+- **Two local-environment traps**: `resolveCliArgsFromVSCodeExecutablePath()` injects its own `--extensions-dir`/`--user-data-dir` pointing at the shared `.vscode-test` cache unless called with `{ reuseMachineInstall: true }`, which otherwise duplicates those flags and installs the extension somewhere other than where the test looks; and under WSL the CLI stops to ask "Do you want to continue anyway? [y/N]" and aborts on empty stdin, so the harness sets `DONT_PROMPT_WSL_INSTALL=1`. Neither affects a CI runner; both stop a developer from running this locally.
+
+On failure the scratch directory is deliberately left on disk — the unpacked extension directory is the evidence for what was and was not packaged.
+
+### Not covered
+
+The extension's own `out/**/*.js.map` sourcemaps are packaged (11.37 MB of the 3.55 MB compressed total). That is pre-existing and arguably deliberate — they make user-reported stack traces readable — so this phase did not change it, but it is the obvious lever if package size ever becomes a concern.
+
 ## Suggested phases
 
-1. **VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.
+1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
 2. **Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.
 3. **Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG — the two places the stub DOM explicitly cannot reach.
 4. **Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.

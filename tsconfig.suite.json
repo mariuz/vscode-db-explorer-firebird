@@ -18,7 +18,8 @@
     "strict": true
   },
   "include": [
-    "src/test/suite/**/*.ts"
+    "src/test/suite/**/*.ts",
+    "src/test/vsix/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -198,7 +198,10 @@ There are three independent test tiers (see `CLAUDE.md` for how they differ):
 npm run test              # unit tests — plain Mocha, mocked `vscode`, no VS Code needed
 npm run test:e2e          # against a real Firebird server (configured via FIREBIRD_* env vars)
 npm run test:vscode-host  # inside a real Extension Development Host
+npm run test:vsix         # packages a .vsix, installs it, and smoke-tests the installed copy
 ```
+
+`npm run test:vsix` is the only tier that exercises the **packaged** extension — the other three run from source, so none of them can see a `.vscodeignore` mistake or a bundle that never got built. It needs no Firebird server. If it fails it leaves its scratch directory on disk; the unpacked extension folder in there shows exactly what was packaged.
 
 When adding new features, check whether existing tests cover the affected code paths and add tests if they don't. A new file under test must also be added to `tsconfig.test.json`'s `include` list, or the unit tier will not compile it.
 
