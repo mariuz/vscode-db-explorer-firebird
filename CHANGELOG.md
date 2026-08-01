@@ -6,6 +6,8 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ### Fixed
 
+- **Running a query showed an empty results grid.** Since 0.2.0, the grid for **Run Firebird Query** built itself before it was attached to the page, so it silently rendered no rows at all — the row count, the toolbar and the tabs all appeared as normal above an empty table. Results now render again.
+- **Select All Records trimmed large tables without saying so.** The row limit (`firebird.maxResultRows`, 10 000 by default) applied correctly, but a table with more rows than that looked exactly like a table with precisely that many — there was no note. It now says the result is partial.
 - **Show Object Privileges listed two tables' grants at once on Firebird 6.** With an `ORDERS` table in both `PUBLIC` and `SALES`, asking either one for its privileges listed all of both tables' grants merged together, so one table appeared to hold contradictory permissions. It now shows only the grants on the table you clicked. Firebird 5 and earlier are unaffected — they have no schemas for two tables to share a name across.
 - **Four kinds of grant were shown as a single letter.** `USAGE` on a generator, exception or schema appeared as `G`, and the `CREATE`/`ALTER`/`DROP` privileges as `C`, `L` and `O`. All four are spelled out now.
 
@@ -17,6 +19,8 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 - **Firebird Studio's editor tabs now have their own icons.** Query results, the Schema Designer, the query plan, the profiler and mock data all opened with the generic editor icon, so having several of them open at once left a tab strip you had to read word by word. Each now shows a distinct icon that follows your colour theme.
 
 ### Added
+
+- **Page through a large result instead of stopping at the limit.** When a query returns more rows than the limit shows, the grid now offers **‹ Previous** / **Next ›**. Each page is fetched from the server as its own query rather than held in memory, so walking through a large table costs no more than one page at a time. It appears for a plain `SELECT` (including `WITH …` and `UNION`) on Firebird 3 and later; anything else keeps the previous behaviour. The grid says which rows you are looking at — *Rows 1–10000 of more* — and names a total only once it reaches the end, because finding the real total would mean counting the whole table on every page. If the query has no `ORDER BY`, it warns that pages can overlap or skip rows, since Firebird may order them differently each time. With unsaved row edits pending, changing page is refused rather than throwing them away.
 
 - **Press F12 on a table name to see how it is defined.** Firebird keeps no source for a table, so Firebird Studio scripts one: its `CREATE TABLE`, generated from the connected database and opened read-only. Pressing F12 on the same table again reuses that document rather than opening another copy. It resolves table names — the same ones autocomplete offers.
 - **A `.sql` file now has an outline.** The Outline view and the breadcrumb list the file's statements — `CREATE TABLE CUSTOMERS`, `INSERT INTO ORDERS`, `COMMIT` — so a long migration script can be navigated by clicking rather than scrolling. It works in any SQL file, with or without a database connection.

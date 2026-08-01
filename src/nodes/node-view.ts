@@ -60,9 +60,17 @@ export class NodeView implements FirebirdTree {
     }
   }
 
+  /** Unlimited form of this view's SELECT, for the grid's pager — see NodeTable.getSelectAllSql(). */
+  public getSelectAllSql(): string {
+    return selectAllRecordsQuery(this.getViewName());
+  }
+
   public async selectAllRecords() {
     logger.info("Custom Query: Select All View Records");
-    const qry = selectAllRecordsQuery(this.getViewName(), getOptions().maxResultRows);
+    // One row more than is displayed, so a full page can be told from a full table -- see
+    // NodeTable.selectAllRecords().
+    const maxRows = getOptions().maxResultRows;
+    const qry = selectAllRecordsQuery(this.getViewName(), maxRows > 0 ? maxRows + 1 : 0);
     Global.activeConnection = this.dbDetails;
     return Driver.runQuery(qry, this.dbDetails)
       .then(result => result)

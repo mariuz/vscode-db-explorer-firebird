@@ -336,5 +336,54 @@ suite('result-view app.js – pure helpers (via __test__ hook)', function () {
       // and claiming otherwise would be worse than staying quiet.
       assert.strictEqual(hooks.truncationNote(10, 10), '');
     });
+
+    test('reports "there are more" without inventing a total when the total is unknown', function () {
+      // Select All Records asks for one row more than it displays: getting it proves there are
+      // more rows without saying how many. Before this, that path showed no note at all -- exactly
+      // a capful of rows looks identical to a table holding exactly that many.
+      const note = hooks.truncationNote(undefined, 10000, true);
+      assert.ok(note.includes('10000'), note);
+      assert.ok(/there are more/i.test(note), note);
+      assert.ok(note.includes('firebird.maxResultRows'), note);
+      assert.ok(!/10001/.test(note), `the probe row must not leak into the note as a total: ${note}`);
+    });
+
+    test('an exact total wins over the "there are more" form', function () {
+      const note = hooks.truncationNote(50000, 10000, true);
+      assert.ok(note.includes('50000'), note);
+    });
+  });
+
+  suite('pageRangeLabel() — server-side paging (docs/roadmap/large-result-sets.md, phase 2)', function () {
+    test('numbers rows from 1, because people read it', function () {
+      assert.ok(hooks.pageRangeLabel(0, 100, false).includes('Rows 1–100'));
+      assert.ok(hooks.pageRangeLabel(100, 100, false).includes('Rows 101–200'));
+    });
+
+    test('says "of more" rather than a total, since no COUNT(*) is issued', function () {
+      const label = hooks.pageRangeLabel(0, 10000, true);
+      assert.ok(/of more$/.test(label), label);
+    });
+
+    test('the last page states the total it now knows', function () {
+      // Reaching a short page is exactly the point at which the total becomes known for free.
+      assert.strictEqual(hooks.pageRangeLabel(10000, 42, false), 'Rows 10001–10042 of 10042');
+    });
+
+    test('an empty page says so rather than showing an empty range', function () {
+      assert.strictEqual(hooks.pageRangeLabel(10000, 0, false), 'No rows at this offset');
+    });
+  });
+
+  suite('pagingOrderWarning()', function () {
+    test('warns when the statement has no ORDER BY', function () {
+      const warning = hooks.pagingOrderWarning(false);
+      assert.ok(/ORDER BY/.test(warning), warning);
+      assert.ok(/overlap|skip/i.test(warning), warning);
+    });
+
+    test('says nothing when the statement is ordered', function () {
+      assert.strictEqual(hooks.pagingOrderWarning(true), '');
+    });
   });
 });

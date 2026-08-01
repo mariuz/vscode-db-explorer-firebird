@@ -13,7 +13,7 @@
  * so any Firebird database will do — no seeded schema needed.
  */
 
-import { test, expect, makeWorkspace, launchVSCode, addConnection, runQueryInEditor, runCommand, expectWebviewText, type LaunchedVSCode } from "./vscode-fixture";
+import { test, expect, makeWorkspace, launchVSCode, addConnection, runQueryInEditor, runCommand, expectWebviewText, webviewFrame, type LaunchedVSCode } from "./vscode-fixture";
 
 /** Unlikely to appear anywhere in the workbench chrome, so finding it proves the grid rendered it. */
 const SENTINEL = "8675309";
@@ -51,6 +51,14 @@ test.describe("Query results grid", () => {
     await runQueryInEditor(page);
 
     await expectWebviewText(page, SENTINEL);
+
+    // Assert on a *grid cell*, not just on the webview's text. The sentinel is also in the SQL,
+    // which the batch tab label shows verbatim — so the assertion above passes even when the grid
+    // renders nothing at all, and it did: from 015d75e until this was added, the batch view built
+    // its DataTable against a detached panel and every Run Query produced an empty grid.
+    await page.locator("iframe.webview").first().waitFor({ state: "attached", timeout: 60_000 });
+    await expect(webviewFrame(page).locator("table.dataTable tbody td", { hasText: SENTINEL }).first())
+      .toBeVisible({ timeout: 60_000 });
   });
 
   test("the results tab carries its themed icon", async () => {

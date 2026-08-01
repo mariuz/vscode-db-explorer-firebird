@@ -93,11 +93,24 @@ export class NodeTable implements FirebirdTree {
       });
   }
 
+  /**
+   * The unlimited form of this table's SELECT, for the results grid's pager to re-issue as a
+   * window. Deliberately without the FIRST clause selectAllRecords() uses: Firebird refuses
+   * "FIRST/SKIP … with OFFSET/FETCH", and a statement that already limits itself cannot be paged.
+   */
+  public getSelectAllSql(): string {
+    return selectAllRecordsQuery(this.getTableName());
+  }
+
   //  run predefined sql query
   public async selectAllRecords() {
     logger.info("Custom Query: Select All Records");
 
-    const qry = selectAllRecordsQuery(this.getTableName(), getOptions().maxResultRows);
+    // One row more than will be displayed: FIRST n returns exactly n on a larger table, which is
+    // indistinguishable from a table that happens to hold exactly n rows -- so without the extra
+    // row the grid would trim silently, which is the one thing the row cap must never do.
+    const maxRows = getOptions().maxResultRows;
+    const qry = selectAllRecordsQuery(this.getTableName(), maxRows > 0 ? maxRows + 1 : 0);
     Global.activeConnection = this.dbDetails;
 
     return Driver.runQuery(qry, this.dbDetails)

@@ -83,10 +83,15 @@ export class NodeField implements FirebirdTree {
   }
 
   //  run predefined sql query
+  /** The statement selectAllSingleFieldRecords() runs, for the grid's pager to re-issue as a window. */
+  public getSelectAllSql(): string {
+    return selectAllFieldRecordsQuery(this.field.FIELD_NAME, this.table.trim());
+  }
+
   public async selectAllSingleFieldRecords() {
     logger.info("Custom Query: Select All Single Field Records");
 
-    const qry = selectAllFieldRecordsQuery(this.field.FIELD_NAME, this.table.trim());
+    const qry = this.getSelectAllSql();
     Global.activeConnection = this.dbDetails;
 
     return Driver.runQuery(qry, this.dbDetails)

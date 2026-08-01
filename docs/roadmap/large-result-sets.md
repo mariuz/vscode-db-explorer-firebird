@@ -40,8 +40,44 @@ A new `firebird.maxResultRows` setting (integer, default **10 000**, `0` for no 
 
 **This changes a default**, as the doc's own Risks section anticipated: a result over 10 000 rows is now trimmed where it previously was not. That is a user-visible behaviour change and has a CHANGELOG entry saying so.
 
+## Phase 2 — server-side paging (done)
+
+A capped result now carries a pager. **Next** is a fresh query with an `OFFSET … ROWS FETCH NEXT … ROWS ONLY` window rather than a slice of rows already in the webview, so the extension never has to hold a large table in memory to let you walk through it.
+
+Every claim about what Firebird accepts was checked against a live 6.0.0 server before being encoded, because the whole feature rests on which statements can safely have a window appended:
+
+```
+SELECT ID FROM BIGT OFFSET 10000 ROWS FETCH NEXT 5 ROWS ONLY   -> ids 10001..10005
+WITH C AS (SELECT ID FROM BIGT) SELECT ID FROM C ORDER BY ID
+  OFFSET 100 ROWS FETCH NEXT 5 ROWS ONLY                       -> ids 101..105
+… UNION ALL … OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY             -> applies to the whole union
+SELECT FIRST 10 ID FROM BIGT OFFSET 5 ROWS FETCH NEXT 5 …      -> -104 "FIRST/SKIP cannot be
+                                                                  used with OFFSET/FETCH or ROWS"
+SELECT ID FROM BIGT ROWS 1 TO 3 OFFSET 5 ROWS …                -> -104 token unknown: OFFSET
+```
+
+`analyzePaging()` lives in `sql-analysis.ts` beside the existing statement classification, as this doc proposed. It refuses anything but a single top-level `SELECT`/`WITH`, refuses a statement that already limits itself, and gates on Firebird 3 — a failed version probe counts as "cannot", because guessing wrong costs a SQL error in the user's face while guessing conservatively only costs the feature. Keyword scanning masks string literals and comments first and only matches at paren depth zero, so a subquery's own `FIRST`, a window function's `ROWS BETWEEN` frame, and `SELECT 'ORDER BY'` are all left alone. The window is appended **on its own line**, because a statement ending in a `--` comment would otherwise swallow it and quietly return everything.
+
+**The row-count question this doc demanded an explicit answer to: no `COUNT(*)`, ever.** Each page asks for one row more than it shows; whether that row arrives is what "there are more" means. So the grid says *Rows 1–10000 of more*, and only names a total on the last page, where it becomes known for free. A blind count alongside every page fetch would double the cost of paging a large table for information nobody asked for.
+
+**Row order is disclosed, not assumed.** A statement with no top-level `ORDER BY` gets a warning that pages may overlap or skip rows, since Firebird is free to return them in a different order each time. Paging is not *refused* without one, as the Risks section suggested: row editing targets rows by their values rather than by position, so an unstable order cannot edit the wrong row — it can only show a confusing window, which saying so addresses.
+
+Changing page discards nothing silently either: with edits queued, the pager refuses to move and says why. That is checked at click time rather than by disabling the buttons, because `pending` is mutated from eight places and a disabled state that forgets to refresh is worse than none.
+
+### The silent truncation phase 1 left behind
+
+`selectAllRecordsQuery()` emitted `SELECT FIRST 10000 *`, which returns exactly 10 000 rows on a larger table — indistinguishable from a table holding exactly 10 000. `capRows()` saw nothing to trim, so **Select All Records showed no disclosure at all**, which is precisely what phase 1 says must never happen. Those paths now ask for one row more than they display, and the extra row (never shown) is what proves there are more. The note has a second form for it — *"Showing the first 10000 rows — there are more"* — because reporting the probe's count as a total would be a lie.
+
+### A three-week-old regression this uncovered
+
+Building the Playwright spec produced a screenshot showing the pager, the truncation note and the toolbar all rendering correctly above **an entirely empty grid** — no rows, no search box, no export buttons.
+
+The batch view built its DataTable against a panel that was not yet in the document: `buildEditableTable()` initialises via `$("#id")`, an id lookup searches the *document*, and DataTables no-ops on an empty set rather than failing. So since `015d75e` (2026-07-11), **every Run Query rendered an empty grid** — the extension's single most-used feature. The original batch code had the ordering right and said why, in a comment reading "Initialise DataTable after appending to DOM"; extracting the shared helper moved the `append` after the call and dropped the comment with it.
+
+It survived three weeks of test runs because the one spec that could have caught it asserted `expectWebviewText(page, "8675309")` — and the sentinel is in the query text, which the batch tab label shows verbatim. The assertion passed on a grid containing nothing. It now asserts on a grid *cell*, and the init runs against the element rather than an id lookup, so neither half of the mistake can recur quietly.
+
 ## Suggested phases
 
 1. ~~**`firebird.maxResultRows` cap + truncation disclosure in the grid.** Smallest change that removes the unbounded case; no protocol or paging work.~~ — **done**, see above.
-2. **Server-side paging** for wrappable single-`SELECT` statements, including the deterministic-order requirement and the row-count decision.
+2. ~~**Server-side paging** for wrappable single-`SELECT` statements, including the deterministic-order requirement and the row-count decision.~~ — **done**, see above.
 3. **Query-level filter/sort push-down** for the single-table (row-editing) case, reusing `parameterized-query.ts` for values.

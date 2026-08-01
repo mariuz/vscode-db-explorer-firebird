@@ -94,7 +94,7 @@ $(() => {
       return;
     }
 
-    if (msg.command === "primaryKey" || msg.command === "applyResult" || msg.command === "queryPlanResult" || msg.command === "actualPlanResult") {
+    if (msg.command === "primaryKey" || msg.command === "applyResult" || msg.command === "queryPlanResult" || msg.command === "actualPlanResult" || msg.command === "pageResult") {
       resolveRequest(msg.data.requestId, msg.data);
       return;
     }
@@ -133,7 +133,7 @@ $(() => {
       const meta = `${r.durationMs} ms` + (r.rowCount ? ` · ${r.rowCount} row(s)` : "");
       $panel.append($("<div>").addClass("result-meta").text(meta));
 
-      const note = truncationNote(r.truncatedFrom, r.rowCount);
+      const note = truncationNote(r.truncatedFrom, r.rowCount, r.moreRows);
       if (note) { $panel.append($("<div>").addClass("result-message").text(note)); }
 
       if (r.error) {
@@ -142,8 +142,12 @@ $(() => {
         $panel.append($("<div>").addClass("result-message").text(r.message));
       } else if (r.tableBody && r.tableBody.length) {
         const tableId = `batch-table-${i}`;
-        buildEditableTable($panel, tableId, r.tableHeader, r.tableBody, recordsPerPage, r.editableTable, r.fullSql);
+        // The panel must be in the document *before* the grid is built: DataTables measures the
+        // table to lay out its scroll container, and a detached one initialises to nothing. The
+        // original batch code said so in a comment ("Initialise DataTable after appending to DOM");
+        // extracting buildEditableTable() lost the ordering, and with it every batch row.
         $batchDiv.append($panel);
+        buildEditableTable($panel, tableId, r.tableHeader, r.tableBody, recordsPerPage, r.editableTable, r.fullSql, r.paging);
         return; // don't fall through to append again
       } else {
         $panel.append($("<div>").addClass("result-message").text("0 rows returned."));
@@ -172,15 +176,15 @@ $(() => {
     $("#single-result").show();
     const $target = $("#single-result-table").empty();
     // Same disclosure as the batch view: a trimmed result must say so rather than look complete.
-    const note = truncationNote(data.truncatedFrom, (data.tableBody || []).length);
+    const note = truncationNote(data.truncatedFrom, (data.tableBody || []).length, data.moreRows);
     if (note) { $target.append($("<div>").addClass("result-message").text(note)); }
-    buildEditableTable($target, "query-results", data.tableHeader, data.tableBody, data.recordsPerPage, data.editableTable);
+    buildEditableTable($target, "query-results", data.tableHeader, data.tableBody, data.recordsPerPage, data.editableTable, undefined, data.paging);
     $("body").addClass("loaded");
   }
 
   // ── Editable result table (shared by both single and batch views) ────────
 
-  function buildEditableTable($container, tableId, headers, tableBody, recordsPerPage, editableTable, sql) {
+  function buildEditableTable($container, tableId, headers, tableBody, recordsPerPage, editableTable, sql, paging) {
     const $wrapper = $("<div>").addClass("container batch-table-wrapper");
 
     const $editToolbar = $("<div>").addClass("edit-toolbar");
@@ -283,8 +287,12 @@ $(() => {
       $textViewPre
     ).hide();
 
+    // Server-side pager (docs/roadmap/large-result-sets.md, phase 2). Created empty here so it sits
+    // above the grid, and populated below once the DataTable it drives exists.
+    const $pager = $("<div>").addClass("fb-pager").hide();
+
     // $planPanel is null when sql is unknown (see above) -- jQuery's append() no-ops on a null arg.
-    $wrapper.append($editToolbar, $table, $chartPanel, $textViewPanel, $planPanel);
+    $wrapper.append($editToolbar, $pager, $table, $chartPanel, $textViewPanel, $planPanel);
     $container.append($wrapper);
 
     // A leading "actions" column (row-delete toggle) is always present but
@@ -299,7 +307,10 @@ $(() => {
     }].concat(headers);
     const data = tableBody.map(row => [""].concat(row));
 
-    const dt = $(`#${tableId}`).DataTable({
+    // On $table itself rather than $(`#${tableId}`): an id lookup searches the *document*, so it
+    // silently returns nothing if the container has not been attached yet, and DataTables then
+    // no-ops on an empty set instead of failing. Belt and braces with the append ordering above.
+    const dt = $table.DataTable({
       scrollX: true,
       iDisplayLength: recordsPerPage === "All records" ? -1 : parseInt(recordsPerPage, 10),
       columns,
@@ -314,6 +325,71 @@ $(() => {
     const pending = [];
     let editing = false;
     let pkColumns = [];
+
+    // ── Server-side pager ────────────────────────────────────────────────────
+    //
+    // Each page is a fresh query with an OFFSET/FETCH window rather than a slice of rows already
+    // in memory, so a large table never has to be held here in full. Only the grid's data is
+    // swapped -- the columns cannot change between pages of the same statement, so the DataTable,
+    // its export buttons, the chart panel and the plan tab all survive a page change untouched.
+    if (paging && paging.sql) {
+      let offset = paging.offset || 0;
+      let hasMore = !!paging.hasMore;
+      let shown = tableBody.length;
+      let loading = false;
+
+      const $prev = $("<button>").addClass("btn-grid-action btn-page-prev").text("‹ Previous");
+      const $next = $("<button>").addClass("btn-grid-action btn-page-next").text("Next ›");
+      const $label = $("<span>").addClass("fb-page-label");
+      const $pageStatus = $("<span>").addClass("fb-page-status");
+      $pager.append($prev, $next, $label, $pageStatus).show();
+
+      const warning = pagingOrderWarning(paging.ordered);
+      if (warning) {
+        $pager.append($("<div>").addClass("fb-page-warning").text(warning));
+      }
+
+      function refreshPager() {
+        $label.text(pageRangeLabel(offset, shown, hasMore));
+        $prev.prop("disabled", loading || offset <= 0);
+        $next.prop("disabled", loading || !hasMore);
+      }
+
+      function goTo(nextOffset) {
+        if (loading || nextOffset < 0) { return; }
+        // A page change replaces every row in the grid, which would silently discard edits queued
+        // against rows that are about to disappear. Refusing the move -- and saying why -- is the
+        // honest option. Checked here rather than by disabling the buttons because `pending` is
+        // mutated from eight places, and a disabled state that forgets to refresh is worse than
+        // none at all.
+        if (pending.length > 0) {
+          $pageStatus.text("Apply or discard your changes before changing page.");
+          return;
+        }
+        loading = true;
+        refreshPager();
+        $pageStatus.text("Fetching…");
+        requestFromExtension("fetchPage", { sql: paging.sql, offset: nextOffset }).then(result => {
+          loading = false;
+          if (result.error) {
+            $pageStatus.text(result.error);
+            refreshPager();
+            return;
+          }
+          offset = result.offset;
+          hasMore = !!result.hasMore;
+          shown = (result.tableBody || []).length;
+          dt.clear();
+          dt.rows.add((result.tableBody || []).map(row => [""].concat(row)));
+          dt.draw();
+          refreshPager();
+        });
+      }
+
+      $prev.on("click", () => goTo(offset - paging.pageSize));
+      $next.on("click", () => goTo(offset + paging.pageSize));
+      refreshPager();
+    }
 
     function findPending(tr) {
       return pending.find(p => p.tr === tr);
@@ -1011,9 +1087,35 @@ $(() => {
    * that a partial result is *stated* rather than silently displayed, which is exactly the
    * behaviour worth pinning down with a test.
    */
-  function truncationNote(truncatedFrom, shown) {
-    if (!truncatedFrom || truncatedFrom <= shown) { return ""; }
-    return `Showing the first ${shown} of ${truncatedFrom} rows — raise or disable the limit with the "firebird.maxResultRows" setting.`;
+  function truncationNote(truncatedFrom, shown, moreRows) {
+    if (truncatedFrom && truncatedFrom > shown) {
+      return `Showing the first ${shown} of ${truncatedFrom} rows — raise or disable the limit with the "firebird.maxResultRows" setting.`;
+    }
+    // The total is unknown here: the statement asked the server for one row more than it shows and
+    // got it, which proves there are more without saying how many. Claiming a total would be a lie,
+    // and saying nothing would let a trimmed result look complete.
+    if (moreRows) {
+      return `Showing the first ${shown} rows — there are more. Raise or disable the limit with the "firebird.maxResultRows" setting.`;
+    }
+    return "";
+  }
+
+  /**
+   * Label for the server-side pager: which rows of the whole result are on screen.
+   *
+   * Says "of more" rather than a total because no COUNT(*) is issued -- see the extension side's
+   * handleFetchPage(). Ranges are 1-based because they are read by people, not by code.
+   */
+  function pageRangeLabel(offset, shown, hasMore) {
+    if (!shown) { return "No rows at this offset"; }
+    const range = `Rows ${offset + 1}–${offset + shown}`;
+    return hasMore ? `${range} of more` : `${range} of ${offset + shown}`;
+  }
+
+  /** Warning shown alongside the pager when the statement has no ORDER BY. */
+  function pagingOrderWarning(ordered) {
+    if (ordered) { return ""; }
+    return "This query has no ORDER BY, so Firebird may return its rows in a different order each time — pages can overlap or skip rows. Add an ORDER BY for a stable window.";
   }
 
   // Test-only hook: no-op in a real webview (there is no `module` global there).
@@ -1022,7 +1124,7 @@ $(() => {
       sqlLiteral, buildInsertStatement, buildInClause, selectionRange,
       parseShortcut, matchesShortcut,
       detectNumericColumns, buildBarChartSvg, buildLineChartSvg, buildPieChartSvg, buildScatterChartSvg,
-      buildTextView, truncationNote,
+      buildTextView, truncationNote, pageRangeLabel, pagingOrderWarning,
       computeSelectionStats, formatSelectionStats,
       resultsFontProperties,
     };

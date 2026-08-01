@@ -4,6 +4,9 @@ import { join } from "path";
 
 import { QueryResultsView, Message } from "./queryResultsView";
 import { BatchResult, Driver, extractTableNames } from "../shared/driver";
+import { analyzePaging, buildPagedQuery } from "../shared/sql-analysis";
+import { getEngineMajorVersion } from "../shared/engine-version";
+import { Global } from "../shared/global";
 import { getPrimaryKeyColumnsQuery } from "../shared/queries";
 import { RowChange, buildStatementForChange } from "../shared/row-edit";
 import { interpretPlanText, PlanInterpretation } from "../shared/plan-parser";
@@ -35,6 +38,32 @@ export interface PreparedResultSet {
    * much is missing rather than just that something is.
    */
   truncatedFrom?: number;
+  /**
+   * Set when rows were dropped but the total is *not* known — the statement asked the server for
+   * one row more than it displays, so all that can be said is that there are more. Distinct from
+   * `truncatedFrom` on purpose: reporting the probe's count as a total would be a lie.
+   */
+  moreRows?: boolean;
+  /** Present when this result can be re-issued as a window of itself (docs/roadmap/large-result-sets.md, phase 2). */
+  paging?: PagingInfo;
+}
+
+/** What the grid needs to offer a server-side pager. */
+export interface PagingInfo {
+  /** The statement to re-issue, without any window clause of its own. */
+  sql: string;
+  /** Rows per page — `firebird.maxResultRows`, the same number that bounded the first page. */
+  pageSize: number;
+  /** Row offset of the page currently displayed. */
+  offset: number;
+  /** Whether a further page exists. Known without a COUNT(*) — see {@link ResultView.handleFetchPage}. */
+  hasMore: boolean;
+  /**
+   * Whether the statement has a top-level ORDER BY. Without one, Firebird is free to return rows
+   * in any order, so two pages of the same query may overlap or skip rows — the grid says so
+   * rather than presenting the pages as a window onto a stable set.
+   */
+  ordered: boolean;
 }
 
 /** Payload for the "applyChanges" message sent from the webview's edit toolbar. */
@@ -71,6 +100,9 @@ export interface ViewTableDiagramRequest {
 export default class ResultView extends QueryResultsView implements Disposable {
   private resultSet?: ResultSet;
   private resultTableName?: string;
+  /** The statement behind `resultSet`, when the caller knows it — see {@link display}. */
+  private resultSql?: string;
+  private probedForMore = false;
   private batchResults?: PreparedResultSet[];
   private recordsPerPage!: string;
   /** Keyed by statement SQL text, so switching back to an already-viewed "Query Plan" tab (or
@@ -85,10 +117,24 @@ export default class ResultView extends QueryResultsView implements Disposable {
     super("resultview", "Firebird Query Results", "table");
   }
 
-  /** Display a single (legacy) result set. `tableName`, when known, pre-fills row editing. */
-  display(resultSet: any, recordsPerPage: string, tableName?: string) {
+  /**
+   * Display a single (legacy) result set. `tableName`, when known, pre-fills row editing.
+   *
+   * `source` describes where the rows came from, for callers that build their own statement:
+   * `sql` is that statement *without* any row limit, so the pager can re-issue it as a window, and
+   * `probedForMore` says the caller asked for one row more than the cap allows — which is the only
+   * way this path can tell "exactly a capful of rows" from "a capful, and there are more".
+   */
+  display(
+    resultSet: any,
+    recordsPerPage: string,
+    tableName?: string,
+    source?: { sql?: string; probedForMore?: boolean }
+  ) {
     this.resultSet = resultSet;
     this.resultTableName = tableName;
+    this.resultSql = source?.sql;
+    this.probedForMore = source?.probedForMore === true;
     this.batchResults = undefined;
     this.recordsPerPage = recordsPerPage;
     this.planCache.clear();
@@ -108,18 +154,12 @@ export default class ResultView extends QueryResultsView implements Disposable {
 
   handleMessage(message: Message): void {
     if (message.command === "getData") {
-      const { shortcuts, resultsFontSize, resultsFontFamily } = getOptions();
-      if (this.batchResults) {
-        this.send({
-          command: "batchData",
-          data: { results: this.batchResults, recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily },
-        });
-      } else {
-        const data = this.resultSet
-          ? { ...this.getPreparedResults(), editableTable: this.resultTableName, shortcuts, resultsFontSize, resultsFontFamily }
-          : { tableHeader: [], tableBody: [], recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily };
-        this.send({ command: "message", data });
-      }
+      void this.sendData();
+      return;
+    }
+
+    if (message.command === "fetchPage") {
+      void this.handleFetchPage(message.data as { requestId: string; sql: string; offset: number });
       return;
     }
 
@@ -167,6 +207,100 @@ export default class ResultView extends QueryResultsView implements Disposable {
       // its connection from).
       this.emit("viewTableDiagram", message.data as ViewTableDiagramRequest);
       return;
+    }
+  }
+
+  /**
+   * Builds the webview's initial payload, including whether each result can be paged.
+   *
+   * Async only because of the engine-version probe — OFFSET/FETCH is Firebird 3+, and asking is
+   * cheaper and more honest than assuming. The probe is cached per connection, so this costs a
+   * round trip once.
+   */
+  private async sendData(): Promise<void> {
+    const { shortcuts, resultsFontSize, resultsFontFamily, maxResultRows } = getOptions();
+    const engineMajor = await this.engineMajorVersion();
+
+    if (this.batchResults) {
+      const results = this.batchResults.map(r => ({
+        ...r,
+        paging: buildPagingInfo(r.fullSql, engineMajor, maxResultRows, r.truncatedFrom != null || r.moreRows === true),
+      }));
+      this.send({
+        command: "batchData",
+        data: { results, recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily },
+      });
+      return;
+    }
+
+    if (!this.resultSet) {
+      this.send({
+        command: "message",
+        data: { tableHeader: [], tableBody: [], recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily },
+      });
+      return;
+    }
+
+    const prepared = this.getPreparedResults();
+    this.send({
+      command: "message",
+      data: {
+        ...prepared,
+        editableTable: this.resultTableName,
+        shortcuts,
+        resultsFontSize,
+        resultsFontFamily,
+        paging: buildPagingInfo(
+          this.resultSql,
+          engineMajor,
+          maxResultRows,
+          prepared.truncatedFrom != null || prepared.moreRows === true
+        ),
+      },
+    });
+  }
+
+  private async engineMajorVersion(): Promise<number> {
+    try {
+      return await getEngineMajorVersion(Global.activeConnection?.id, sql => Driver.runQuery(sql));
+    } catch {
+      return 0; // no paging rather than a failed page fetch in the user's face
+    }
+  }
+
+  /**
+   * Fetches one page of a pageable statement by re-issuing it with an OFFSET/FETCH window.
+   *
+   * Asks the server for one row more than the page holds, and reports `hasMore` from whether that
+   * extra row arrived. This is the answer to the design doc's "accurate row count" question: no
+   * blind `COUNT(*)` is issued alongside every page — on a large table that costs as much as the
+   * page itself — so the grid can say which rows it is showing and whether more exist, but not how
+   * many there are in total.
+   */
+  private async handleFetchPage(data: { requestId: string; sql: string; offset: number }): Promise<void> {
+    const { requestId, sql, offset } = data;
+    const pageSize = getOptions().maxResultRows;
+    try {
+      if (!Number.isInteger(pageSize) || pageSize <= 0) {
+        throw new Error("Paging needs a positive firebird.maxResultRows.");
+      }
+      const rows: any[] = (await Driver.runQuery(buildPagedQuery(sql, offset, pageSize + 1))) ?? [];
+      const hasMore = rows.length > pageSize;
+      const page = hasMore ? rows.slice(0, pageSize) : rows;
+      const decoder = new TextDecoder();
+      this.send({
+        command: "pageResult",
+        data: {
+          requestId,
+          offset,
+          hasMore,
+          rowCount: page.length,
+          tableBody: page.map(row => encodeRow(row, decoder)),
+        },
+      });
+    } catch (err: any) {
+      logger.error(err);
+      this.send({ command: "pageResult", data: { requestId, offset, error: err?.message ?? String(err) } });
     }
   }
 
@@ -299,7 +433,13 @@ export default class ResultView extends QueryResultsView implements Disposable {
   }
 
   /* prepare results before displaying */
-  private getPreparedResults(): object {
+  private getPreparedResults(): {
+    tableHeader: object[];
+    tableBody: string[][];
+    recordsPerPage: string;
+    truncatedFrom?: number;
+    moreRows?: boolean;
+  } {
     const decoder = new TextDecoder();
     const tableHeader: object[] = [];
     const tableBody: string[][] = [];
@@ -316,6 +456,17 @@ export default class ResultView extends QueryResultsView implements Disposable {
     capped.rows.forEach((row: any) => {
       tableBody.push(encodeRow(row, decoder));
     });
+    // When the caller asked for one row more than it displays, the extra row proves there are more
+    // but says nothing about how many — so `truncatedFrom`, which the grid renders as a total, must
+    // not carry it. See PreparedResultSet.moreRows.
+    if (this.probedForMore) {
+      return {
+        tableHeader,
+        tableBody,
+        recordsPerPage: this.recordsPerPage,
+        moreRows: capped.truncatedFrom != null || undefined,
+      };
+    }
     return { tableHeader, tableBody, recordsPerPage: this.recordsPerPage, truncatedFrom: capped.truncatedFrom };
   }
 
@@ -339,6 +490,30 @@ export default class ResultView extends QueryResultsView implements Disposable {
     // with what is in it; `truncatedFrom` is what tells the user rows were dropped.
     return { sql, fullSql, tableHeader, tableBody, rowCount: capped.rows.length, durationMs: r.durationMs, editableTable, truncatedFrom: capped.truncatedFrom };
   }
+}
+
+/**
+ * Decides whether a result gets a pager, and with what.
+ *
+ * `hasMore` is the gate rather than pageability alone: a result that fits inside the cap is
+ * complete, and offering to fetch a next page that is known to be empty is noise. `offset: 0`
+ * because the rows on screen are always the first page — every path that opens this view fetches
+ * from the start.
+ */
+export function buildPagingInfo(
+  sql: string | undefined,
+  engineMajorVersion: number,
+  pageSize: number,
+  hasMore: boolean
+): PagingInfo | undefined {
+  if (!sql || !hasMore || !Number.isInteger(pageSize) || pageSize <= 0) {
+    return undefined;
+  }
+  const analysis = analyzePaging(sql, engineMajorVersion);
+  if (!analysis.pageable) {
+    return undefined;
+  }
+  return { sql, pageSize, offset: 0, hasMore: true, ordered: analysis.ordered };
 }
 
 /**
