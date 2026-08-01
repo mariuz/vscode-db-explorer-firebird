@@ -11,6 +11,7 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ### Added
 
+- **A `.sql` file now has an outline.** The Outline view and the breadcrumb list the file's statements — `CREATE TABLE CUSTOMERS`, `INSERT INTO ORDERS`, `COMMIT` — so a long migration script can be navigated by clicking rather than scrolling. It works in any SQL file, with or without a database connection.
 - **Hover a table or column name in a `.sql` file to see what it is.** A table shows its columns and their types; a column shows its type and which table it belongs to — and every table, when more than one has a column by that name. Nothing appears for keywords, aliases or anything else the connected database does not recognise. It reuses the schema information autocomplete has already loaded, so it costs no extra queries.
 
 - **Copilot now knows Firebird's dialect everywhere, not just in `@firebird` chat.** Agent mode, inline chat and any other model could previously write `LIMIT 10`, `AUTO_INCREMENT` or `information_schema` against a Firebird database — all of which it rejects — because the dialect rules only ever reached the model through this extension's own chat participant. A dialect guide now ships with the extension and applies to any chat while you have a `.sql` or `.fbnb` file open: row limiting with `FIRST`/`SKIP`, `RDB$DATABASE` as the dummy table, identity columns and sequences, `EXECUTE BLOCK` and `SET TERM`, the `RDB$`/`MON$` catalogue, and qualifying names on Firebird 6 schemas.

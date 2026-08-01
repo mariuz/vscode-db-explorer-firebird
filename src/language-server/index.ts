@@ -1,6 +1,7 @@
 import { Disposable, languages, TextDocument } from "vscode";
 import { CompletionProvider } from "./completionProvider";
 import { HoverProvider } from "./hoverProvider";
+import { SqlDocumentSymbolProvider } from "./documentSymbolProvider";
 import { FirebirdSchema, Schema } from "../interfaces";
 
 export default class LanguageServer implements Disposable {
@@ -32,6 +33,8 @@ export default class LanguageServer implements Disposable {
     const documentSelector = [{ scheme: "file", language: "sql" }, { scheme: "untitled", language: "sql" }];
     this.subscriptions.push(languages.registerCompletionItemProvider(documentSelector, this.completionProvider, "*", "."));
     this.subscriptions.push(languages.registerHoverProvider(documentSelector, this.hoverProvider));
+    // Needs no schema and no connection — pure text analysis over the statement splitter.
+    this.subscriptions.push(languages.registerDocumentSymbolProvider(documentSelector, new SqlDocumentSymbolProvider()));
   }
 
   setSchemaHandler(schemaHandler: (doc: TextDocument) => Thenable<FirebirdSchema>) {

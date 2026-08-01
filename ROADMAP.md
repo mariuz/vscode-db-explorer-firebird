@@ -138,7 +138,7 @@ Firebird 6.0 is the first Firebird release with SQL schemas, which changes the o
 
 ## Editor language features
 
-- [ ] **Hover, Go to Definition, and Document Symbols for `.sql` files** — until now `registerCompletionItemProvider` was the *only* language provider in the codebase. **Hover is done**: hovering a table shows its columns and types, a column shows its type and every table holding it, and anything unrecognised shows nothing rather than an invented popup — reusing the completion provider's schema cache, so no new queries. Go to Definition and Document Symbols remain ([design doc](docs/roadmap/sql-language-features.md))
+- [ ] **Hover, Go to Definition, and Document Symbols for `.sql` files** — until now `registerCompletionItemProvider` was the *only* language provider in the codebase. **Hover and Document Symbols are done**: hovering a table shows its columns and types, a column shows its type and every table holding it, and anything unrecognised shows nothing rather than an invented popup — reusing the completion provider's schema cache, so no new queries. The Outline view and breadcrumb now list a `.sql` file's statements, which needs no connection at all since it is pure text analysis over the existing statement splitter. Go to Definition remains ([design doc](docs/roadmap/sql-language-features.md))
 
 ## VS Code platform API adoption
 

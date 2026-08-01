@@ -46,8 +46,24 @@ Split so the logic is testable: `hover-model.ts` holds `identifierAt()` and `bui
 
 **Not verified end to end.** Two attempts at a Playwright spec failed — a DOM-level mouse hover cannot reliably target an identifier because Monaco splits a line into syntax-coloured spans, and driving the editor's own `Show or Focus Hover` command did not produce a `.monaco-hover` element within the timeout either. Both attempts also destabilised the tab-icon spec sharing that VS Code instance, so neither was kept. What is covered is the markdown and the identifier extraction; what is not is that the provider is registered correctly and that VS Code renders its output.
 
+## Phase 2 — document symbols (done)
+
+`languages.registerDocumentSymbolProvider` fills the Outline view and the editor breadcrumb with one entry per statement — `CREATE TABLE CUSTOMERS`, `INSERT INTO ORDERS`, `COMMIT` — which makes a long migration script navigable instead of a wall of text.
+
+**It needs no connection.** Unlike hover and completion this is pure text analysis, so it works in any `.sql` file, including one that was never connected to anything. `splitStatementsWithOffsets()` already does the hard part (string literals, comments, `SET TERM`, PSQL `BEGIN`/`END` nesting) and returns ranges, so `symbol-model.ts` is only the mapping from statement text to a label and a `SymbolKind`.
+
+Details that needed deciding:
+
+- **Longer verbs are matched first.** A prefix table is only correct if `CREATE OR ALTER` is tried before `CREATE` and `ALTER TABLE` before `ALTER`; otherwise `CREATE OR ALTER PROCEDURE TOTALS` outlines as `CREATE OR`.
+- **Leading comments are skipped.** The splitter deliberately includes a preceding comment in a statement's range, so that "run the statement under the cursor" works when the cursor is on the comment. Without looking past it, every documented statement would be labelled `-- …`.
+- **Unrecognised statements still get an entry**, truncated to 60 characters. An outline that silently omits statements is worse than one with a generic row, because the gap is invisible — the file simply looks shorter than it is.
+- **Schema-qualified names survive**, so `CREATE TABLE SALES.ORDERS` outlines whole rather than stopping at the dot.
+- `INSERT INTO` rather than `INSERT`: the verb phrase is captured, so the label reads the way the statement does. The first version dropped `INTO`/`FROM` and read `INSERT ORDERS`, which a test caught.
+
+12 tests on the model. The provider itself is a nine-line adapter that maps offsets to `Range`s.
+
 ## Suggested phases
 
 1. ~~**Hover** — the cheapest and most-used of the three, and it validates the "identifier under the cursor" resolution logic that the other two depend on.~~ — **done**, see above. `identifierAt()` is now available for phases 2 and 3 to reuse.
-2. **Document Symbols** — pure text analysis over `sql-splitter.ts`, no connection required, so it works in a file with no active connection.
+2. ~~**Document Symbols** — pure text analysis over `sql-splitter.ts`, no connection required.~~ — **done**, see above.
 3. **Go to Definition** — reuses phase 1's identifier resolution plus `ddl-builders.ts`, and needs the generated-document lifecycle question answered first.
