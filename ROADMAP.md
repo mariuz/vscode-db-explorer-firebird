@@ -138,7 +138,7 @@ Firebird 6.0 is the first Firebird release with SQL schemas, which changes the o
 
 ## Editor language features
 
-- [ ] **Hover, Go to Definition, and Document Symbols for `.sql` files** — `languages.registerCompletionItemProvider` is currently the *only* language provider registered in the entire codebase; there is no hover, no `F12`, and no Outline/breadcrumb for a SQL script. All three reuse machinery that already exists (`SchemaProvider`'s metadata cache, `sql-splitter.ts`'s statement boundaries, `script-as/ddl-builders.ts`'s DDL generation) ([design doc](docs/roadmap/sql-language-features.md))
+- [ ] **Hover, Go to Definition, and Document Symbols for `.sql` files** — until now `registerCompletionItemProvider` was the *only* language provider in the codebase. **Hover is done**: hovering a table shows its columns and types, a column shows its type and every table holding it, and anything unrecognised shows nothing rather than an invented popup — reusing the completion provider's schema cache, so no new queries. Go to Definition and Document Symbols remain ([design doc](docs/roadmap/sql-language-features.md))
 
 ## VS Code platform API adoption
 

@@ -30,8 +30,24 @@ Three providers, in increasing order of cost, all guarded on there being an acti
 
 **Deliberately not proposed**: a real LSP server process. VS Code 1.125 shipped `vscode-languageclient`/`vscode-languageserver` 10.0.0 with LSP 3.18, but a separate process buys nothing here — the providers need `Driver`/`Global.activeConnection`, which live in the extension host, and every provider above is a metadata lookup rather than a parse-heavy analysis. Rename/find-all-references are also out of scope: renaming a Firebird object is a DDL operation with dependency implications, not a text edit, and pretending otherwise in an editor gesture would be actively dangerous.
 
+## Phase 1 — hover (done)
+
+`languages.registerHoverProvider` is now the *second* language provider in this extension. Hovering an identifier in a `.sql` file shows what the connected database knows about it:
+
+- a **table** — its columns and their types, as a markdown table;
+- a **column** — its type and which table it belongs to, listing *all* of them when several tables share the name, since picking one arbitrarily would be actively misleading;
+- **anything else** — no hover at all. A keyword or an alias must not get an invented "unknown object" popup.
+
+It costs no new queries: the provider shares the completion provider's schema handler, so it reads the same cache. Matching is case-insensitive because unquoted Firebird identifiers fold to upper case, and `$` counts as an identifier character — without that, every `RDB$`/`MON$` system object would fail to resolve.
+
+Split so the logic is testable: `hover-model.ts` holds `identifierAt()` and `buildHoverMarkdown()` (both pure, 12 tests), and `hoverProvider.ts` is the VS Code adapter, which also swallows a schema-lookup failure rather than letting it surface — a hover that throws becomes an error notification on mouse-move, which is worse than no hover.
+
+**A test of mine was wrong, not the code.** `identifierAt` treats a cursor immediately *after* a word as belonging to it — positions sit between characters, which is the same rule VS Code's own `getWordRangeAtPosition()` applies. My first test asserted the opposite for the space after `SELECT`; it was corrected, and the rule now has an explicit test naming the reason.
+
+**Not verified end to end.** Two attempts at a Playwright spec failed — a DOM-level mouse hover cannot reliably target an identifier because Monaco splits a line into syntax-coloured spans, and driving the editor's own `Show or Focus Hover` command did not produce a `.monaco-hover` element within the timeout either. Both attempts also destabilised the tab-icon spec sharing that VS Code instance, so neither was kept. What is covered is the markdown and the identifier extraction; what is not is that the provider is registered correctly and that VS Code renders its output.
+
 ## Suggested phases
 
-1. **Hover** — the cheapest and most-used of the three, and it validates the "identifier under the cursor" resolution logic that the other two depend on.
+1. ~~**Hover** — the cheapest and most-used of the three, and it validates the "identifier under the cursor" resolution logic that the other two depend on.~~ — **done**, see above. `identifierAt()` is now available for phases 2 and 3 to reuse.
 2. **Document Symbols** — pure text analysis over `sql-splitter.ts`, no connection required, so it works in a file with no active connection.
 3. **Go to Definition** — reuses phase 1's identifier resolution plus `ddl-builders.ts`, and needs the generated-document lifecycle question answered first.
