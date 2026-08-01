@@ -96,6 +96,11 @@
     ],
     "commands": [
       {
+        "command": "firebird.database.alterSchema",
+        "title": "Alter Schema...",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.database.newQueryInSchema",
         "title": "New Query in Schema...",
         "category": "Firebird"
@@ -1587,6 +1592,11 @@
           "command": "firebird.database.newQueryInSchema",
           "when": "view == firebird-explorer && viewItem == database",
           "group": "firebird@8"
+        },
+        {
+          "command": "firebird.database.alterSchema",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "firebird@9"
         }
       ]
     },

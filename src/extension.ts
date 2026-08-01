@@ -6,7 +6,7 @@ import {Options, FirebirdTree, ConnectionOptions} from "./interfaces";
 import {connectionPicker, pickConnectionOptions} from "./shared/connection-picker";
 import {getEngineMajorVersion} from "./shared/engine-version";
 import {supportsSchemas} from "./shared/schema-support";
-import {createSchemaQuery, dropSchemaQuery, getSchemasQuery, setSearchPathQuery} from "./shared/queries";
+import {createSchemaQuery, dropSchemaQuery, getSchemasQuery, setSearchPathQuery, alterSchemaQuery} from "./shared/queries";
 import {Driver} from "./shared/driver";
 import * as vscode from 'vscode';
 import {Global} from "./shared/global";
@@ -503,6 +503,66 @@ export function activate(context: ExtensionContext) {
       // does not control. Putting it in the document means what runs is what you can see — and it
       // travels with the file if it is saved or shared.
       await Driver.createSQLTextDocument(`${setSearchPathQuery(picked)}\n\n`);
+    })
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.alterSchema", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      const details = await requireSchemaSupport(node);
+      if (!details) { return; }
+
+      let schemas: string[];
+      try {
+        const rows = await Driver.runQuery(getSchemasQuery(), details);
+        schemas = (rows ?? []).map((r: any) => String(r.SCHEMA_NAME).trim());
+      } catch (err: any) {
+        logger.showError(`Could not list schemas: ${err?.message ?? err}`);
+        return;
+      }
+      if (schemas.length === 0) {
+        logger.showInfo("This database has no user schemas.");
+        return;
+      }
+
+      const schema = await window.showQuickPick(schemas, { placeHolder: "Select a schema to alter" });
+      if (!schema) { return; }
+
+      const property = await window.showQuickPick(
+        [
+          { label: "Default SQL security", detail: "Whether routines in this schema run as their definer or their invoker" },
+          { label: "Default character set", detail: "The character set new columns in this schema default to" },
+        ],
+        { placeHolder: `What should change about ${schema}?` }
+      );
+      if (!property) { return; }
+
+      let statement: string;
+      if (property.label === "Default SQL security") {
+        const picked = await window.showQuickPick(["DEFINER", "INVOKER"], {
+          placeHolder: "SQL SECURITY",
+        });
+        if (!picked) { return; }
+        statement = alterSchemaQuery(schema, { sqlSecurity: picked as "DEFINER" | "INVOKER" });
+      } else {
+        const charset = await window.showInputBox({
+          title: `Default character set for ${schema}`,
+          placeHolder: "e.g. UTF8",
+          validateInput: v => IDENTIFIER_RE.test(v.trim()) ? undefined : "Enter a character set name (e.g. UTF8)",
+        });
+        if (!charset) { return; }
+        statement = alterSchemaQuery(schema, { characterSet: charset.trim().toUpperCase() });
+      }
+
+      try {
+        await Driver.runQuery(statement, details);
+        logger.showInfo(`Schema ${schema} altered.`);
+        firebirdTreeDataProvider.refresh();
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError(`Could not alter the schema: ${err?.message ?? err}`);
+      }
     })
   );
 

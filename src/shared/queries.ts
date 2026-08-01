@@ -191,6 +191,29 @@ export function createSchemaQuery(schemaName: string): string {
 }
 
 /**
+ * `ALTER SCHEMA` (Firebird 6+).
+ *
+ * The syntax is `ALTER SCHEMA <name> SET DEFAULT ...` — **not** the `DEFAULT ...` form that
+ * `CREATE SCHEMA` uses. Established against a live Firebird 6.0.0 server rather than from the
+ * documentation: `ALTER SCHEMA S DEFAULT SQL SECURITY INVOKER` is rejected with
+ * `Token unknown - line 1, column 20 - DEFAULT`, and so is the bare `SQL SECURITY` form.
+ */
+export function alterSchemaQuery(
+  schemaName: string,
+  change: { characterSet: string } | { sqlSecurity: "DEFINER" | "INVOKER" }
+): string {
+  assertValidIdentifier(schemaName, "schema name");
+  if ("characterSet" in change) {
+    assertValidIdentifier(change.characterSet, "character set");
+    return `ALTER SCHEMA ${schemaName} SET DEFAULT CHARACTER SET ${change.characterSet};`;
+  }
+  if (change.sqlSecurity !== "DEFINER" && change.sqlSecurity !== "INVOKER") {
+    throw new Error(`Invalid SQL SECURITY: "${change.sqlSecurity}". Expected DEFINER or INVOKER.`);
+  }
+  return `ALTER SCHEMA ${schemaName} SET DEFAULT SQL SECURITY ${change.sqlSecurity};`;
+}
+
+/**
  * `DROP SCHEMA` (Firebird 6+).
  *
  * Firebird refuses to drop a schema that still contains objects, which is the behaviour worth

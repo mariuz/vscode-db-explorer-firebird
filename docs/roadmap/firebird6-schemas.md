@@ -272,7 +272,18 @@ DROP SCHEMA   : ok      -> ["PUBLIC","SALES"]
 - **Drop does not cascade.** Firebird refuses to drop a schema that still contains objects, which is the behaviour worth keeping, so a mistaken drop cannot take a schema's tables with it. It still gets a modal confirmation, like every other drop here.
 - **On the database node, not a Schemas node**, since there is no Schemas tree level yet — and reachable from the palette through the same `resolveDatabaseNode()` fallback the other tree-node commands now use.
 
-**Not done in this phase**: `ALTER SCHEMA` (its useful form is `DEFAULT CHARACTER SET`/`DEFAULT SQL SECURITY`, which needs its own small wizard) and schema-level grants in the privileges viewer, which reads `RDB$USER_PRIVILEGES` by object name and would need a schema variant.
+**Alter Schema…** followed, covering both properties a schema has: its default SQL security and its default character set. The syntax had to be established against the live server rather than taken from the documentation, and it is **not** what `CREATE SCHEMA` uses:
+
+```
+ALTER SCHEMA SALES DEFAULT SQL SECURITY INVOKER      -> Token unknown - line 1, column 20 - DEFAULT
+ALTER SCHEMA SALES SQL SECURITY INVOKER              -> SQL error code = -104
+ALTER SCHEMA SALES SET DEFAULT SQL SECURITY INVOKER  -> accepted; RDB$SCHEMAS.RDB$SQL_SECURITY becomes <false>
+ALTER SCHEMA SALES SET DEFAULT CHARACTER SET UTF8    -> accepted; RDB$CHARACTER_SET_NAME becomes UTF8
+```
+
+`CREATE SCHEMA` takes `DEFAULT …`; `ALTER SCHEMA` takes `SET DEFAULT …`. Guessing from the create syntax — which is what the design doc's own summary would have led to — produces a statement the server rejects.
+
+**Not done**: schema-level grants in the privileges viewer. `RDB$USER_PRIVILEGES` has no rows naming a schema on a database where one was created and dropped, so which object-type code records them (if any) needs catalogue research rather than a guess.
 
 ## Phase 3 — New Query in Schema (done); per-connection default schema (not done)
 

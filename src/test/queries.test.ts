@@ -38,7 +38,8 @@ import {
   getSchemasQuery,
   createSchemaQuery,
   dropSchemaQuery,
-  setSearchPathQuery} from '../shared/queries';
+  setSearchPathQuery,
+  alterSchemaQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -732,5 +733,30 @@ suite('setSearchPathQuery() (Firebird 6)', function () {
     for (const bad of ['SALES, PUBLIC', 'SALES; DROP DATABASE', "SALES'", '']) {
       assert.throws(() => setSearchPathQuery(bad), `accepted ${JSON.stringify(bad)}`);
     }
+  });
+});
+
+suite('alterSchemaQuery() (Firebird 6)', function () {
+  test('uses SET DEFAULT, which is what the server actually accepts', function () {
+    // Established live, not from documentation: `ALTER SCHEMA S DEFAULT SQL SECURITY INVOKER` —
+    // the form CREATE SCHEMA uses — is rejected with "Token unknown ... DEFAULT", and so is the
+    // bare `SQL SECURITY` form.
+    assert.strictEqual(
+      alterSchemaQuery('SALES', { sqlSecurity: 'INVOKER' }),
+      'ALTER SCHEMA SALES SET DEFAULT SQL SECURITY INVOKER;'
+    );
+    assert.strictEqual(
+      alterSchemaQuery('SALES', { characterSet: 'UTF8' }),
+      'ALTER SCHEMA SALES SET DEFAULT CHARACTER SET UTF8;'
+    );
+  });
+
+  test('rejects an SQL security value that is neither DEFINER nor INVOKER', function () {
+    assert.throws(() => alterSchemaQuery('SALES', { sqlSecurity: 'ANYONE' as any }));
+  });
+
+  test('guards both identifiers, since each is interpolated into DDL', function () {
+    assert.throws(() => alterSchemaQuery('SALES; DROP DATABASE', { characterSet: 'UTF8' }));
+    assert.throws(() => alterSchemaQuery('SALES', { characterSet: 'UTF8; DROP DATABASE' }));
   });
 });
