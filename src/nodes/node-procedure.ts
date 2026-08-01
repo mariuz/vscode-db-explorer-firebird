@@ -15,7 +15,8 @@ export class NodeProcedure implements FirebirdTree {
   constructor(
     private readonly dbDetails: ConnectionOptions,
     private readonly procedureName: string,
-    private readonly schema?: string
+    private readonly schema?: string,
+    private readonly labelSchema?: string
   ) {}
 
   /** The name to put in SQL: qualified whenever a schema is known. */
@@ -29,7 +30,7 @@ export class NodeProcedure implements FirebirdTree {
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: schemaDisplayName(this.schema, this.procedureName),
+      label: schemaDisplayName(this.schema, this.procedureName, this.labelSchema),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "procedure",
       tooltip: `[PROCEDURE] ${this.procedureName.trim()}`,

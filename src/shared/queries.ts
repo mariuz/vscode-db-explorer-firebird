@@ -164,7 +164,15 @@ export function fieldsQuery(tables: string[], withSchemas = false): string {
  * it is hidden unless the caller explicitly wants it — matching `firebird.showSystemObjects`.
  */
 export function getSchemasQuery(includeSystem = false): string {
-  const filter = includeSystem ? "" : "\n           WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)";
+  // Plugin-owned schemas are excluded even though Firebird does not flag them as system.
+  // RDB$PROFILER creates PLG$PROFILER the first time the Live Profiler is used, so without this a
+  // perfectly ordinary single-schema database grows a second "user" schema full of plugin
+  // internals the moment someone profiles a query — which would add a schema level to the tree,
+  // and offer PLG$PROFILER as something to drop. Found by the extension-host suite, where the
+  // profiler tests had created it. PLG$ is Firebird's own prefix for plugin-owned objects.
+  const filter = includeSystem
+    ? ""
+    : "\n           WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)\n             AND RDB$SCHEMA_NAME NOT STARTING WITH 'PLG$'";
   return `SELECT TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,
                  RDB$SYSTEM_FLAG AS SYSTEM_FLAG,
                  TRIM(RDB$OWNER_NAME) AS OWNER_NAME

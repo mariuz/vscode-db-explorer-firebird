@@ -1,13 +1,13 @@
 import {ExtensionContext, TreeItem, TreeItemCollapsibleState, window, Uri, ThemeIcon, ThemeColor, env, QuickPickItem, ProgressLocation} from "vscode";
 import {join} from "path";
-import {NodeTable, NodeCategoryFolder, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeSystemTable, NodeUser} from "./";
+import {NodeTable, NodeCategoryFolder, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeSystemTable, NodeUser, NodeSchema} from "./";
 import {ConnectionOptions, FirebirdTree} from "../interfaces";
 import {getOptions, Constants} from "../config";
 import {Driver} from "../shared/driver";
 import {Global} from "../shared/global";
 import {CredentialStore} from "../shared/credential-store";
 import {FirebirdTreeDataProvider} from "../firebirdTreeDataProvider";
-import {getMaxParallelWorkersQuery, databaseInfoQry, getTablesQuery, getViewsQuery, getStoredProceduresQuery, getTriggersQuery, getGeneratorsQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getSystemTablesQuery, getUsersQuery} from "../shared/queries";
+import {getMaxParallelWorkersQuery, databaseInfoQry, getTablesQuery, getViewsQuery, getStoredProceduresQuery, getTriggersQuery, getGeneratorsQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getSystemTablesQuery, getUsersQuery, getSchemasQuery} from "../shared/queries";
 import {getEngineMajorVersion} from "../shared/engine-version";
 import {supportsSchemas} from "../shared/schema-support";
 import {logger} from "../logger/logger";
@@ -99,23 +99,79 @@ export class NodeDatabase implements FirebirdTree {
     return Driver.resolvePassword(this.dbDetails);
   }
 
-  // list database object categories
+  /**
+   * Object categories, or — on a Firebird 6 database with more than one user schema — a level of
+   * schemas with those categories beneath each.
+   *
+   * The extra level appears only when it distinguishes something. Every Firebird 6 database has
+   * `PUBLIC`, so showing it unconditionally would add a click for every database that has exactly
+   * one schema and always will.
+   */
   public async getChildren(): Promise<FirebirdTree[]> {
+    const schemas = await this.userSchemas();
+    if (schemas.length > 1) {
+      return schemas.map(schema => new NodeSchema(schema, (s: string) => this.categoryFolders(s)));
+    }
+    return this.categoryFolders();
+  }
+
+  /**
+   * The category folders, optionally scoped to one schema.
+   *
+   * Roles and Users are deliberately absent from a schema's folders: both are database-wide
+   * (`RDB$ROLES` has no `RDB$SCHEMA_NAME` column — checked against a live server), so listing them
+   * under each schema would repeat the same rows and imply an ownership that does not exist.
+   */
+  private categoryFolders(schema?: string): FirebirdTree[] {
     const children: FirebirdTree[] = [
-      new NodeCategoryFolder("Tables", "tables", this.dbDetails, this.getTableChildren.bind(this)),
-      new NodeCategoryFolder("Views", "views", this.dbDetails, this.getViewChildren.bind(this)),
-      new NodeCategoryFolder("Stored Procedures", "procedures", this.dbDetails, this.getProcedureChildren.bind(this)),
-      new NodeCategoryFolder("Triggers", "triggers", this.dbDetails, this.getTriggerChildren.bind(this)),
-      new NodeCategoryFolder("Generators", "generators", this.dbDetails, this.getGeneratorChildren.bind(this)),
-      new NodeCategoryFolder("Domains", "domains", this.dbDetails, this.getDomainChildren.bind(this)),
-      new NodeCategoryFolder("Roles", "roles", this.dbDetails, this.getRoleChildren.bind(this)),
-      new NodeCategoryFolder("Exceptions", "exceptions", this.dbDetails, this.getExceptionChildren.bind(this)),
-      new NodeCategoryFolder("Users", "users", this.dbDetails, this.getUserChildren.bind(this)),
+      new NodeCategoryFolder("Tables", "tables", this.dbDetails, () => this.getTableChildren(schema)),
+      new NodeCategoryFolder("Views", "views", this.dbDetails, () => this.getViewChildren(schema)),
+      new NodeCategoryFolder("Stored Procedures", "procedures", this.dbDetails, () => this.getProcedureChildren(schema)),
+      new NodeCategoryFolder("Triggers", "triggers", this.dbDetails, () => this.getTriggerChildren(schema)),
+      new NodeCategoryFolder("Generators", "generators", this.dbDetails, () => this.getGeneratorChildren(schema)),
+      new NodeCategoryFolder("Domains", "domains", this.dbDetails, () => this.getDomainChildren(schema)),
     ];
-    if (getOptions().showSystemObjects) {
+    // Roles between Domains and Exceptions, Users last: the flat layout's folder order is
+    // unchanged from before schemas existed, which a suite-tier test asserts exactly.
+    if (!schema) {
+      children.push(new NodeCategoryFolder("Roles", "roles", this.dbDetails, this.getRoleChildren.bind(this)));
+    }
+    children.push(new NodeCategoryFolder("Exceptions", "exceptions", this.dbDetails, () => this.getExceptionChildren(schema)));
+    if (!schema) {
+      children.push(new NodeCategoryFolder("Users", "users", this.dbDetails, this.getUserChildren.bind(this)));
+    }
+    if (getOptions().showSystemObjects && !schema) {
       children.push(new NodeCategoryFolder("System Tables", "systemTables", this.dbDetails, this.getSystemTableChildren.bind(this)));
     }
     return children;
+  }
+
+  /** User schemas on this connection, or [] on a server without them. Empty means "no schema level". */
+  private async userSchemas(): Promise<string[]> {
+    const resolved = await this.resolvedDetails();
+    const connection = await Driver.client.createConnection(resolved);
+    if (!(await this.schemasSupported(connection, resolved))) {
+      return [];
+    }
+    try {
+      const rows = await Driver.client.queryPromise<any>(connection, getSchemasQuery());
+      return (rows ?? []).map((r: any) => String(r.SCHEMA_NAME).trim());
+    } catch {
+      // A failed lookup must not cost the user their tree — fall back to the flat layout.
+      return [];
+    }
+  }
+
+  /**
+   * Narrows rows to one schema, when the tree is showing a schema level.
+   *
+   * Filtered here rather than in SQL: the listing queries already return `SCHEMA_NAME` for every
+   * row, so scoping client-side needs no second query shape and keeps one statement per category
+   * regardless of how the tree is arranged.
+   */
+  private inSchema<T extends { SCHEMA_NAME?: unknown }>(rows: T[], schema?: string): T[] {
+    if (!schema) { return rows; }
+    return rows.filter(r => String(r.SCHEMA_NAME ?? "").trim() === schema);
   }
 
   /** Narrows rows to those matching this category's active object filter (if any), set via NodeCategoryFolder#setFilter(). */
@@ -136,7 +192,7 @@ export class NodeDatabase implements FirebirdTree {
     );
   }
 
-  private async getTableChildren(): Promise<FirebirdTree[]> {
+  private async getTableChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
 
@@ -147,51 +203,51 @@ export class NodeDatabase implements FirebirdTree {
 
     const tablesQry = getTablesQuery(getOptions().maxTablesCount, withSchemas);
     const tables = await Driver.client.queryPromise<any>(connection, tablesQry);
-    return this.filterRows(tables, "tables", t => t.TABLE_NAME).map<NodeTable>(
-      table => new NodeTable(this.dbDetails, table.TABLE_NAME, withSchemas ? table.SCHEMA_NAME : undefined)
+    return this.filterRows(this.inSchema(tables, schema), "tables", t => t.TABLE_NAME).map<NodeTable>(
+      table => new NodeTable(this.dbDetails, table.TABLE_NAME, withSchemas ? table.SCHEMA_NAME : undefined, schema)
     );
   }
 
-  private async getViewChildren(): Promise<FirebirdTree[]> {
+  private async getViewChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const views = await Driver.client.queryPromise<any>(connection, getViewsQuery(withSchemas));
-    return this.filterRows(views, "views", v => v.VIEW_NAME).map<NodeView>(
-      view => new NodeView(this.dbDetails, view.VIEW_NAME, withSchemas ? view.SCHEMA_NAME : undefined)
+    return this.filterRows(this.inSchema(views, schema), "views", v => v.VIEW_NAME).map<NodeView>(
+      view => new NodeView(this.dbDetails, view.VIEW_NAME, withSchemas ? view.SCHEMA_NAME : undefined, schema)
     );
   }
 
-  private async getProcedureChildren(): Promise<FirebirdTree[]> {
+  private async getProcedureChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const procs = await Driver.client.queryPromise<any>(connection, getStoredProceduresQuery(withSchemas));
-    return this.filterRows(procs, "procedures", p => p.PROCEDURE_NAME).map<NodeProcedure>(proc => new NodeProcedure(this.dbDetails, proc.PROCEDURE_NAME, withSchemas ? proc.SCHEMA_NAME : undefined));
+    return this.filterRows(this.inSchema(procs, schema), "procedures", p => p.PROCEDURE_NAME).map<NodeProcedure>(proc => new NodeProcedure(this.dbDetails, proc.PROCEDURE_NAME, withSchemas ? proc.SCHEMA_NAME : undefined, schema));
   }
 
-  private async getTriggerChildren(): Promise<FirebirdTree[]> {
+  private async getTriggerChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const triggers = await Driver.client.queryPromise<any>(connection, getTriggersQuery(withSchemas));
-    return this.filterRows(triggers, "triggers", t => t.TRIGGER_NAME).map<NodeTrigger>(trigger => new NodeTrigger(trigger, this.dbDetails));
+    return this.filterRows(this.inSchema(triggers, schema), "triggers", t => t.TRIGGER_NAME).map<NodeTrigger>(trigger => new NodeTrigger(trigger, this.dbDetails, schema));
   }
 
-  private async getGeneratorChildren(): Promise<FirebirdTree[]> {
+  private async getGeneratorChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const generators = await Driver.client.queryPromise<any>(connection, getGeneratorsQuery(withSchemas));
-    return this.filterRows(generators, "generators", g => g.GENERATOR_NAME).map<NodeGenerator>(gen => new NodeGenerator(gen.GENERATOR_NAME, this.dbDetails, withSchemas ? gen.SCHEMA_NAME : undefined));
+    return this.filterRows(this.inSchema(generators, schema), "generators", g => g.GENERATOR_NAME).map<NodeGenerator>(gen => new NodeGenerator(gen.GENERATOR_NAME, this.dbDetails, withSchemas ? gen.SCHEMA_NAME : undefined, schema));
   }
 
-  private async getDomainChildren(): Promise<FirebirdTree[]> {
+  private async getDomainChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const domains = await Driver.client.queryPromise<any>(connection, getDomainsQuery(withSchemas));
-    return this.filterRows(domains, "domains", d => d.DOMAIN_NAME).map<NodeDomain>(domain => new NodeDomain(domain, this.dbDetails));
+    return this.filterRows(this.inSchema(domains, schema), "domains", d => d.DOMAIN_NAME).map<NodeDomain>(domain => new NodeDomain(domain, this.dbDetails, schema));
   }
 
   private async getRoleChildren(): Promise<FirebirdTree[]> {
@@ -200,12 +256,12 @@ export class NodeDatabase implements FirebirdTree {
     return this.filterRows(roles, "roles", r => r.ROLE_NAME).map<NodeRole>(role => new NodeRole(role.ROLE_NAME, this.dbDetails));
   }
 
-  private async getExceptionChildren(): Promise<FirebirdTree[]> {
+  private async getExceptionChildren(schema?: string): Promise<FirebirdTree[]> {
     const resolved = await this.resolvedDetails();
     const connection = await Driver.client.createConnection(resolved);
     const withSchemas = await this.schemasSupported(connection, resolved);
     const exceptions = await Driver.client.queryPromise<any>(connection, getExceptionsQuery(withSchemas));
-    return this.filterRows(exceptions, "exceptions", e => e.EXCEPTION_NAME).map<NodeException>(exception => new NodeException(exception, this.dbDetails));
+    return this.filterRows(this.inSchema(exceptions, schema), "exceptions", e => e.EXCEPTION_NAME).map<NodeException>(exception => new NodeException(exception, this.dbDetails, schema));
   }
 
   private async getSystemTableChildren(): Promise<FirebirdTree[]> {

@@ -12,7 +12,8 @@ export class NodeGenerator implements FirebirdTree {
   constructor(
     private readonly generatorName: string,
     private readonly dbDetails?: ConnectionOptions,
-    private readonly schema?: string
+    private readonly schema?: string,
+    private readonly labelSchema?: string
   ) {}
 
   /** The name to put in SQL: qualified whenever a schema is known. */
@@ -26,7 +27,7 @@ export class NodeGenerator implements FirebirdTree {
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
-      label: schemaDisplayName(this.schema, this.generatorName),
+      label: schemaDisplayName(this.schema, this.generatorName, this.labelSchema),
       collapsibleState: TreeItemCollapsibleState.None,
       contextValue: "generator",
       tooltip: `[GENERATOR] ${this.generatorName.trim()}`,

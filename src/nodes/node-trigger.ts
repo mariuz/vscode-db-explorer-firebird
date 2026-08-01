@@ -9,11 +9,11 @@ import {withTruncationWarning} from "../shared/utils";
 import {buildTriggerCreateDDL, describeTriggerType} from "../database-projects/project-model";
 
 export class NodeTrigger implements FirebirdTree {
-  constructor(private readonly trigger: any, private readonly dbDetails?: ConnectionOptions) {}
+  constructor(private readonly trigger: any, private readonly dbDetails?: ConnectionOptions, private readonly labelSchema?: string) {}
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     // Qualified only when the object sits outside the default schema — see schemaDisplayName().
-    const name = schemaDisplayName(this.trigger.SCHEMA_NAME, this.trigger.TRIGGER_NAME ?? "");
+    const name = schemaDisplayName(this.trigger.SCHEMA_NAME, this.trigger.TRIGGER_NAME ?? "", this.labelSchema);
     const tableName = this.trigger.TABLE_NAME ? this.trigger.TABLE_NAME.trim() : "";
     const inactive = this.trigger.INACTIVE === 1;
     const typeDesc = describeTriggerType(this.trigger.TRIGGER_TYPE);

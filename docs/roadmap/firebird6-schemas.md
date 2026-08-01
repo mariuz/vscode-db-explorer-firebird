@@ -180,7 +180,7 @@ schema-aware  : /sales.orders, /sales.orders/{ID}, /orders, /orders/{ID}
 Naming uses the split from phase 1h: routes and schema components take `displayName`, so a single-schema database keeps `/orders` rather than gaining a redundant `/public.orders`, while `SALES.ORDERS` stays distinguishable as `/sales.orders`. One `publishedName()` accessor covers every place a table's name reaches the generated document.
 
 ### What is still missing, precisely
-- **No Schemas level in the tree**, which is the rest of phase 1.
+
 - **Database Projects still builds a schema-blind graph.** Its file layout is per object, so qualified names change file names, and the design doc's own preference is per-schema folders — that deserves its own decision rather than a flag flip.
 - **The Schema Designer shows `PUBLIC.` prefixes** on a single-schema Firebird 6 database; see phase 1g. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
@@ -308,6 +308,22 @@ Under the default path that same unqualified statement returns `{ID: 1, NOTE: "p
 It is a separate exported function precisely because driving the whole provider needs a faithful `TextDocument` — an attempt to test through `provideCompletionItems()` failed on the mock rather than on the logic, so the decision was extracted to where it can be tested directly.
 
 **Still not done — the per-connection default schema.** Storing a schema on the saved connection and applying it when the session opens needs a hook in connection creation that survives pooling; `isc_dpb_search_path` (the DPB item meant for exactly this) is not exposed by the pure-JS driver. That is a driver-level change, not a UI one, and is the remaining piece of this phase along with search-path-aware completion ranking.
+
+## Phase 1j — the Schemas tree level (done)
+
+The Object Explorer nests *database → schema → categories* when a database has **more than one user schema**, and keeps the flat layout otherwise. Every Firebird 6 database has `PUBLIC`, so showing the level unconditionally would add a click for the overwhelming majority of databases, which have exactly one schema and always will.
+
+`NodeSchema` owns no fetching: it hands each category the same child factory `NodeDatabase` would have used, pre-bound to its schema, so there is one implementation of "list the tables" rather than a schema-scoped copy of each. Scoping is a client-side filter on `SCHEMA_NAME`, which every listing query already returns — no second query shape. Objects inside a schema node lose their prefix (`ORDERS`, not `SALES.ORDERS` under a `SALES` node) via a `labelSchema` passed to each node type.
+
+**Roles and Users stay database-wide** and appear only in the flat layout: `RDB$ROLES` has no schema column, so repeating them under every schema would imply an ownership that does not exist.
+
+### Two problems only the extension-host suite could find
+
+**`PLG$PROFILER` is a user schema as far as Firebird is concerned.** Firebird's own profiler creates it the first time the Live Profiler runs — a feature this extension offers — so an ordinary single-schema database would silently grow a schema level containing plugin internals, and offer `PLG$PROFILER` as something to drop. `getSchemasQuery()` now excludes `PLG$`-prefixed schemas, Firebird's own convention for plugin-owned objects. There was no way to predict this from reading code; the suite's profiler tests had created the schema, and the tree tests then failed.
+
+**Database Projects and schema-diff had drifted to different naming conventions.** Publish emitted `CREATE OR ALTER PROCEDURE PUBLIC.PUB_PROC` while comparing against a snapshot that said `PUB_PROC`, so on a single-schema Firebird 6 database *every object looked rewritten*. The two suite-tier publish tests caught it (`PUB_PARENT should exist in the target snapshot`), and bisecting against `5ffc699` confirmed it arrived with the Database Projects schema work rather than the tree.
+
+The fix is one convention throughout a project: **display-form identity** — bare in the default schema, qualified elsewhere — for file names, for diffing, and in generated DDL. A display name is still qualified for any schema other than the default, so nothing becomes ambiguous, and a single-schema database produces byte-identical output to before schemas existed.
 
 ## Suggested phases
 

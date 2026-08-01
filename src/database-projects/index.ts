@@ -9,7 +9,7 @@ import {
   getAllPrimaryKeyConstraintNamesQuery, getDomainsQuery, getRolesQuery, getExceptionsQuery, getUsersQuery,
 } from "../shared/queries";
 import { getEngineMajorVersion } from "../shared/engine-version";
-import { supportsSchemas, schemaQualifiedName, schemaDisplayName } from "../shared/schema-support";
+import { supportsSchemas, schemaDisplayName, splitQualifiedName } from "../shared/schema-support";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, normalizeDefault } from "../schema-designer/schema-graph";
 import { buildProjectFiles, MANIFEST_FILE_NAME, ProjectInput, ProcedureParameter } from "./project-model";
 import { diffProjects, buildPublishScript } from "./publish-model";
@@ -27,6 +27,12 @@ export const SNAPSHOT_FILE_NAME = "firebird.project-snapshot.json";
  * (diffs it against a saved snapshot, with no need for the SchemaDesigner/tree code paths that
  * also read this data).
  */
+/** `PUBLIC.X` -> `X`; any other schema keeps its prefix. Mirrors schemaDisplayName() for a name that is already qualified. */
+function schemaDisplayNameOf(qualified: string): string {
+  const { schema, name } = splitQualifiedName(qualified);
+  return schemaDisplayName(schema, name);
+}
+
 export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions): Promise<ProjectInput> {
   // Firebird 6 keeps every object in a schema. Without asking for it, same-named tables from
   // different schemas merge into one graph entry with the union of their columns, and Extract
@@ -38,10 +44,17 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
     })
   );
 
-  /** Object identity: qualified where the server has schemas, bare otherwise. */
-  const qualify = (schema: unknown, name: unknown) =>
-    schemaQualifiedName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
-  /** File-facing name: drops a redundant default-schema prefix — see project-model's table files. */
+  /**
+   * A project identifies every object by its *display* name — bare in the default schema,
+   * qualified elsewhere — and uses that one form for file names, for diffing against a target,
+   * and in generated DDL.
+   *
+   * One convention throughout is the point. Mixing them (qualified identity, display file names)
+   * made publish emit `CREATE OR ALTER PROCEDURE PUBLIC.PUB_PROC` while comparing against a
+   * snapshot that said `PUB_PROC`, so a single-schema Firebird 6 database looked entirely
+   * rewritten. A display name is still qualified for any schema other than the default, so
+   * nothing becomes ambiguous.
+   */
   const display = (schema: unknown, name: unknown) =>
     schemaDisplayName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
 
@@ -76,7 +89,7 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
 
   const parametersByProcedure = new Map<string, ProcedureParameter[]>();
   for (const row of (procParamsResult?.rows ?? []) as any[]) {
-    const procName = qualify(row.SCHEMA_NAME, row.PROCEDURE_NAME);
+    const procName = display(row.SCHEMA_NAME, row.PROCEDURE_NAME);
     const list = parametersByProcedure.get(procName) ?? [];
     list.push({
       name: row.PARAM_NAME.trim(),
@@ -90,10 +103,33 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
     parametersByProcedure.set(procName, list);
   }
 
-  const graph = buildSchemaGraph(
+  const rawGraph = buildSchemaGraph(
     (columnsResult?.rows ?? []) as SchemaColumnRow[],
     (fkResult?.rows ?? []) as ForeignKeyRow[]
   );
+
+  /**
+   * A project identifies objects by their *display* name — bare in the default schema, qualified
+   * elsewhere — the same convention its file names and `fetchSchemaSnapshot()` use.
+   *
+   * `buildSchemaGraph()` qualifies unconditionally, because the Schema Designer's DDL must never
+   * depend on the search path. Carrying that into a project instead made every object in a
+   * single-schema Firebird 6 database look renamed to publish, which the suite-tier tests caught
+   * as `PUB_PARENT should exist in the target snapshot` — publish compared `PUBLIC.PUB_PARENT`
+   * against a snapshot saying `PUB_PARENT` and concluded nothing matched.
+   *
+   * Generated DDL stays unambiguous where it matters: a display name is still qualified for any
+   * schema other than the default.
+   */
+  const graph = {
+    ...rawGraph,
+    tables: rawGraph.tables.map(t => ({ ...t, name: t.displayName ?? t.name })),
+    relationships: rawGraph.relationships.map(r => ({
+      ...r,
+      table: schemaDisplayNameOf(r.table),
+      refTable: schemaDisplayNameOf(r.refTable),
+    })),
+  };
 
   const pkConstraintNames: Record<string, string> = {};
   for (const row of (pkNamesResult?.rows ?? []) as any[]) {
@@ -114,23 +150,20 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
       check: (r.CHECK_SOURCE ?? "").trim() || undefined,
     })),
     views: ((viewsResult?.rows ?? []) as any[]).map(r => ({
-      name: qualify(r.SCHEMA_NAME, r.VIEW_NAME),
-      displayName: display(r.SCHEMA_NAME, r.VIEW_NAME),
+      name: display(r.SCHEMA_NAME, r.VIEW_NAME),
       source: r.VIEW_SOURCE ?? "",
     })),
     procedures: ((proceduresResult?.rows ?? []) as any[]).map(r => {
-      const name = qualify(r.SCHEMA_NAME, r.PROCEDURE_NAME);
+      const name = display(r.SCHEMA_NAME, r.PROCEDURE_NAME);
       return {
         name,
-        displayName: display(r.SCHEMA_NAME, r.PROCEDURE_NAME),
         source: r.PROCEDURE_SOURCE ?? "",
         parameters: parametersByProcedure.get(name) ?? [],
       };
     }),
     triggers: ((triggersResult?.rows ?? []) as any[]).map(r => ({
-      name: qualify(r.SCHEMA_NAME, r.TRIGGER_NAME),
-      displayName: display(r.SCHEMA_NAME, r.TRIGGER_NAME),
-      table: r.TABLE_NAME ? qualify(r.SCHEMA_NAME, r.TABLE_NAME) : "",
+      name: display(r.SCHEMA_NAME, r.TRIGGER_NAME),
+      table: r.TABLE_NAME ? display(r.SCHEMA_NAME, r.TABLE_NAME) : "",
       inactive: !!r.INACTIVE,
       type: r.TRIGGER_TYPE ?? 0,
       source: r.TRIGGER_SOURCE ?? "",

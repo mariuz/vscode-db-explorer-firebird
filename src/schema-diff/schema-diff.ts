@@ -8,7 +8,7 @@ import {
   getTriggersQuery,
 } from '../shared/queries';
 import { getEngineMajorVersion } from "../shared/engine-version";
-import { supportsSchemas, schemaQualifiedName } from "../shared/schema-support";
+import { supportsSchemas, schemaDisplayName } from "../shared/schema-support";
 
 export interface SchemaSnapshot {
   tables: TableSnapshot[];
@@ -66,9 +66,19 @@ export async function fetchSchemaSnapshot(conn: ConnectionOptions, maxTables: nu
     const withSchemas = supportsSchemas(
       await getEngineMajorVersion(conn.id, (sql: string) => Driver.client.queryPromise<any>(connection, sql))
     );
-    /** Snapshot key and display name: qualified when the server has schemas, bare otherwise. */
+    /**
+     * Snapshot key and display name.
+     *
+     * Uses the *display* form — bare in the default schema, qualified elsewhere — rather than
+     * always qualifying. Two reasons. A single-schema Firebird 6 database then produces exactly
+     * the snapshot it produced before schemas existed, so a comparison against a Firebird 5
+     * database (or a project extracted from one) still lines up. And Database Projects names its
+     * files the same way, so publish compares like with like; qualifying unconditionally made
+     * every object in a single-schema database look renamed, which the suite-tier publish tests
+     * caught as `PUB_PARENT should exist in the target snapshot`.
+     */
     const qualify = (schema: unknown, name: unknown) =>
-      schemaQualifiedName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
+      schemaDisplayName(withSchemas ? String(schema ?? "") : undefined, String(name ?? ""));
 
     // Tables
     const tableRows: any[] = await Driver.client.queryPromise(connection, getTablesQuery(maxTables, withSchemas));

@@ -22,7 +22,8 @@ export class NodeTable implements FirebirdTree {
   constructor(
     private readonly dbDetails: ConnectionOptions,
     private readonly table: string,
-    private readonly schema?: string
+    private readonly schema?: string,
+    private readonly labelSchema?: string
   ) {}
 
   /**
@@ -47,7 +48,7 @@ export class NodeTable implements FirebirdTree {
     return {
       // Objects in the default schema keep their bare name so a single-schema database (which is
       // every Firebird 6 database until someone runs CREATE SCHEMA) looks exactly as before.
-      label: schemaDisplayName(this.schema, this.table),
+      label: schemaDisplayName(this.schema, this.table, this.labelSchema),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "table",
       tooltip: `[TABLE] ${this.table}`,

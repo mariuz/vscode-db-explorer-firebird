@@ -8,7 +8,7 @@ import {logger} from "../logger/logger";
 import {buildExceptionCreateDDL} from "../script-as/ddl-builders";
 
 export class NodeException implements FirebirdTree {
-  constructor(private readonly exception: any, private readonly dbDetails?: ConnectionOptions) {}
+  constructor(private readonly exception: any, private readonly dbDetails?: ConnectionOptions, private readonly labelSchema?: string) {}
 
   public getExceptionName(): string {
     return this.exception.EXCEPTION_NAME ? String(this.exception.EXCEPTION_NAME).trim() : "";
@@ -16,7 +16,7 @@ export class NodeException implements FirebirdTree {
 
   /** Display name: qualified only when the exception sits outside the default schema. */
   private getDisplayName(): string {
-    return schemaDisplayName(this.exception.SCHEMA_NAME, this.getExceptionName());
+    return schemaDisplayName(this.exception.SCHEMA_NAME, this.getExceptionName(), this.labelSchema);
   }
 
   private getMessage(): string {

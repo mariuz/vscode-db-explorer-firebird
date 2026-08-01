@@ -8,7 +8,7 @@ import {logger} from "../logger/logger";
 import {buildDomainCreateDDL} from "../script-as/ddl-builders";
 
 export class NodeDomain implements FirebirdTree {
-  constructor(private readonly domain: any, private readonly dbDetails?: ConnectionOptions) {}
+  constructor(private readonly domain: any, private readonly dbDetails?: ConnectionOptions, private readonly labelSchema?: string) {}
 
   public getDragIdentifier(): string {
     return this.domain.DOMAIN_NAME ? this.domain.DOMAIN_NAME.trim() : "";
@@ -16,7 +16,7 @@ export class NodeDomain implements FirebirdTree {
 
   public getTreeItem(context: ExtensionContext): TreeItem {
     // Qualified only when the object sits outside the default schema — see schemaDisplayName().
-    const name = schemaDisplayName(this.domain.SCHEMA_NAME, this.domain.DOMAIN_NAME ?? "");
+    const name = schemaDisplayName(this.domain.SCHEMA_NAME, this.domain.DOMAIN_NAME ?? "", this.labelSchema);
     const type = this.domain.DOMAIN_TYPE ? this.domain.DOMAIN_TYPE.trim() : "UNKNOWN";
     const length = this.domain.FIELD_LENGTH || 0;
     const notNull = this.domain.NOT_NULL ? "NOT NULL" : "NULL";

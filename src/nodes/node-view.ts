@@ -16,7 +16,8 @@ export class NodeView implements FirebirdTree {
   constructor(
     private readonly dbDetails: ConnectionOptions,
     private readonly viewName: string,
-    private readonly schema?: string
+    private readonly schema?: string,
+    private readonly labelSchema?: string
   ) {}
 
   /** The name to put in SQL: qualified whenever a schema is known, never left to the search path. */
@@ -36,7 +37,7 @@ export class NodeView implements FirebirdTree {
   public getTreeItem(context: ExtensionContext): TreeItem {
     return {
       // Bare name in the default schema, qualified elsewhere — see schemaDisplayName().
-      label: schemaDisplayName(this.schema, this.viewName),
+      label: schemaDisplayName(this.schema, this.viewName, this.labelSchema),
       collapsibleState: TreeItemCollapsibleState.Collapsed,
       contextValue: "view",
       tooltip: `[VIEW] ${this.viewName.trim()}`,
