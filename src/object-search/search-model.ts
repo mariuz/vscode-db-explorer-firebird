@@ -48,3 +48,21 @@ export function buildSearchIndex(input: ObjectSearchInput): SearchResult[] {
   ];
   return results.sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/**
+ * Merges the system-table results into the main index, sorted as one list.
+ *
+ * Pure, and separated from the picker for exactly that reason: the picker is driven by a command
+ * that takes a tree node, so it cannot be reached from the Command Palette and therefore not by
+ * the Playwright tier either. This is the part worth pinning down — that system entries are
+ * distinguishable, and that the merged list stays in one alphabetical order rather than appending
+ * a second sorted block at the end.
+ */
+export function mergeSystemResults(base: SearchResult[], system: SearchResult[]): SearchResult[] {
+  return [...base, ...system].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The description shown beside a result: its kind, marked when the object is a system one. */
+export function describeResult(result: SearchResult, isSystem = false): string {
+  return isSystem ? `${kindLabel(result.kind)} (system)` : kindLabel(result.kind);
+}

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildSearchIndex, kindLabel, ObjectSearchInput } from '../object-search/search-model';
+import { buildSearchIndex, kindLabel, ObjectSearchInput, mergeSystemResults, describeResult} from '../object-search/search-model';
 
 function emptyInput(overrides: Partial<ObjectSearchInput> = {}): ObjectSearchInput {
   return { tables: [], views: [], procedures: [], triggers: [], generators: [], domains: [], ...overrides };
@@ -57,5 +57,25 @@ suite('object-search-model – buildSearchIndex()', function () {
       domains: [],
     });
     assert.deepStrictEqual(index.map(r => r.name), ['APPLE', 'MANGO', 'ZEBRA']);
+  });
+});
+
+suite('mergeSystemResults() / describeResult() — the system-tables toggle', function () {
+  const r = (name: string) => ({ name, kind: 'TABLE' as const, row: {} });
+
+  test('merges into one alphabetical list, not two sorted blocks', function () {
+    // The toggle adds system tables to a list the user is already reading; appending a second
+    // sorted block would make the whole thing look unsorted.
+    const merged = mergeSystemResults([r('CUSTOMERS'), r('ORDERS')], [r('RDB$RELATIONS'), r('MON$ATTACHMENTS')]);
+    assert.deepStrictEqual(merged.map(x => x.name), ['CUSTOMERS', 'MON$ATTACHMENTS', 'ORDERS', 'RDB$RELATIONS']);
+  });
+
+  test('keeps every entry — nothing is deduplicated away', function () {
+    assert.strictEqual(mergeSystemResults([r('A'), r('B')], [r('C')]).length, 3);
+  });
+
+  test('marks system entries so they are distinguishable in the list', function () {
+    assert.strictEqual(describeResult(r('X'), true), 'Table (system)');
+    assert.strictEqual(describeResult(r('X')), 'Table');
   });
 });

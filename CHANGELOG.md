@@ -6,6 +6,7 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ### Changed
 
+- **Object Search can now include system tables, without leaving the search.** Searching only ever covered your own objects, and system tables were reachable only by turning on a setting and browsing the tree. The search box gains a toggle that pulls them in — `RDB$RELATIONS`, `MON$ATTACHMENTS` and the rest — merged into the same alphabetical list and marked as system. It also now says what pressing Enter will do, which differs by object type.
 - **Firebird Studio's editor tabs now have their own icons.** Query results, the Schema Designer, the query plan, the profiler and mock data all opened with the generic editor icon, so having several of them open at once left a tab strip you had to read word by word. Each now shows a distinct icon that follows your colour theme.
 
 ### Added

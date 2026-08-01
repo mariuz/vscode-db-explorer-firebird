@@ -84,10 +84,25 @@ A `ThemeIcon` needs no assets and follows the active theme, unlike the light/dar
 
 **Verified in a real VS Code**, not just type-checked: the Playwright tier now asserts `.tab .codicon-table` is visible after running a query. That is checkable there and essentially nowhere else — the unit tier's `vscode` mock would accept any string as a codicon id, so a typo would pass every other test and simply render nothing.
 
+## Phase 4b — QuickInput refinements (done, one item found already satisfied)
+
+**The Object Explorer filter already had its prompt.** This doc proposed "a persistent `prompt` line explaining the filter syntax" for it — `NodeCategoryFolder.setFilter()` has used `showInputBox` with exactly that prompt since it was written. Nothing to do; recorded so the next reader does not go looking.
+
+**Object search got both.** It used `showQuickPick()`, which cannot express either feature, so it is now built with `createQuickPick()`:
+
+- A **`prompt`** (1.108) under the input: *"Matches on name and type. Enter opens the object's primary action."* — the second half matters, because pressing Enter does not just close the picker, it runs a `SELECT`, opens an ALTER scaffold or peeks a generator value depending on what is selected.
+- An **inline toggle** (1.109) for system tables. This is not a client-side filter: system objects are excluded in *SQL*, by an `RDB$SYSTEM_FLAG` predicate in every listing query, so turning it on runs one extra query and merges the results. Fetched once and remembered, so toggling repeatedly does not re-query.
+
+**Scope worth stating plainly**: the toggle adds system *tables* — the only system category with an existing query. System triggers, procedures and domains are not included, so it is narrower than the "include system objects" the doc originally imagined.
+
+**Not covered by an automated test**, and this is now the third feature in that position: `firebird.database.searchObjects` takes a `NodeDatabase`, so it cannot be invoked from the Command Palette and the Playwright tier cannot reach it either (the same limitation already recorded for `setPassword` and `schemaVisualizer.open`). What *is* testable was extracted into `search-model.ts` — `mergeSystemResults()` and `describeResult()`, with three tests covering the two things worth pinning down: that the merged list is one alphabetical sequence rather than two sorted blocks appended, and that system entries stay distinguishable.
+
+That recurring gap is itself a finding. A palette-invocable variant of these node-argument commands, falling back to the existing `connection-picker.ts`, would make three features testable at once and is worth its own roadmap item.
+
 ## Suggested phases
 
 1. ~~**Raise the floor**: `engines.vscode` and `@types/vscode` to `^1.110.0`.~~ — **done**.
 2. ~~**`secrets.keys()`**: activation-time reconciliation plus a "Clear All Saved Passwords" command.~~ — **done**, see above.
 3. ~~**`chatInstructions`** carrying the dialect rules, so agent mode writes Firebird SQL without going through `@firebird`.~~ — **done**; note the rules had to be written, not moved (see above).
-4. **Presentation**: ~~`ThemeIcon` webview tab icons~~ — **done** (phase 4a), then the QuickInput toggle/prompt refinements in object search and the Object Explorer filter.
+4. ~~**Presentation**: `ThemeIcon` webview tab icons, then the QuickInput toggle/prompt refinements.~~ — **done** (phases 4a and 4b).
 5. **Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.
