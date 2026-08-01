@@ -96,6 +96,16 @@
     ],
     "commands": [
       {
+        "command": "firebird.database.dropSchema",
+        "title": "Drop Schema...",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.database.createSchema",
+        "title": "Create Schema...",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.notebook.new",
         "title": "New Firebird SQL Notebook",
         "category": "Firebird"
@@ -1557,6 +1567,16 @@
           "command": "firebird.folder.clearFilter",
           "when": "view == firebird-explorer && viewItem == folder.systemTables",
           "group": "filter@1"
+        },
+        {
+          "command": "firebird.database.createSchema",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "firebird@9"
+        },
+        {
+          "command": "firebird.database.dropSchema",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "firebird@9"
         }
       ]
     },

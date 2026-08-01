@@ -4,6 +4,9 @@ import {FirebirdTreeDataProvider} from "./firebirdTreeDataProvider";
 import {NodeHost, NodeDatabase, NodeTable, NodeField, NodeView, NodeProcedure, NodeTrigger, NodeGenerator, NodeDomain, NodeRole, NodeException, NodeUser, NodeIndex, NodeIndexFolder, NodeCategoryFolder} from "./nodes";
 import {Options, FirebirdTree, ConnectionOptions} from "./interfaces";
 import {connectionPicker, pickConnectionOptions} from "./shared/connection-picker";
+import {getEngineMajorVersion} from "./shared/engine-version";
+import {supportsSchemas} from "./shared/schema-support";
+import {createSchemaQuery, dropSchemaQuery, getSchemasQuery} from "./shared/queries";
 import {Driver} from "./shared/driver";
 import * as vscode from 'vscode';
 import {Global} from "./shared/global";
@@ -415,6 +418,101 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand("firebird.setActive", (databaseNode: NodeDatabase) => {
       databaseNode.setActive();
+    })
+  );
+
+  /**
+   * Firebird 6 schema lifecycle.
+   *
+   * These live on the database node and the Command Palette rather than on a Schemas tree node,
+   * because there is no Schemas level yet (see docs/roadmap/firebird6-schemas.md). Both check the
+   * server version first: `RDB$SCHEMAS` and `CREATE SCHEMA` do not exist before Firebird 6, and a
+   * raw SQL error would not tell the user why.
+   */
+  const requireSchemaSupport = async (node: NodeDatabase): Promise<ConnectionOptions | undefined> => {
+    const details = await node.getResolvedConnectionDetails();
+    const major = await getEngineMajorVersion(details.id, async (sql: string) => {
+      const [row] = await Driver.runBatch(sql, details);
+      return (row?.rows ?? []) as any[];
+    });
+    if (!supportsSchemas(major)) {
+      logger.showError(
+        `SQL schemas need Firebird 6 or newer; this server reports ${major || "an unknown version"}.`
+      );
+      return undefined;
+    }
+    return details;
+  };
+
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.createSchema", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      const details = await requireSchemaSupport(node);
+      if (!details) { return; }
+
+      const name = await window.showInputBox({
+        title: "Create Schema",
+        prompt: "Name for the new schema",
+        placeHolder: "e.g. SALES",
+        validateInput: v => IDENTIFIER_RE.test(v.trim())
+          ? undefined
+          : "Enter a valid identifier (letters, digits, _, $ — must not start with a digit)",
+      });
+      if (!name) { return; }
+
+      try {
+        await Driver.runQuery(createSchemaQuery(name.trim().toUpperCase()), details);
+        logger.showInfo(`Schema ${name.trim().toUpperCase()} created.`);
+        firebirdTreeDataProvider.refresh();
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError(`Could not create the schema: ${err?.message ?? err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.dropSchema", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      const details = await requireSchemaSupport(node);
+      if (!details) { return; }
+
+      let schemas: string[];
+      try {
+        const rows = await Driver.runQuery(getSchemasQuery(), details);
+        schemas = (rows ?? []).map((r: any) => String(r.SCHEMA_NAME).trim());
+      } catch (err: any) {
+        logger.showError(`Could not list schemas: ${err?.message ?? err}`);
+        return;
+      }
+      if (schemas.length === 0) {
+        logger.showInfo("This database has no user schemas to drop.");
+        return;
+      }
+
+      const picked = await window.showQuickPick(schemas, { placeHolder: "Select a schema to drop" });
+      if (!picked) { return; }
+
+      // Firebird refuses to drop a non-empty schema, so this cannot silently take tables with it —
+      // but it is still a destructive DDL statement, so it gets a modal confirmation like the
+      // other drops in this extension.
+      const confirm = await window.showWarningMessage(
+        `Drop schema ${picked}? Firebird will refuse if it still contains objects.`,
+        { modal: true },
+        "Drop Schema"
+      );
+      if (confirm !== "Drop Schema") { return; }
+
+      try {
+        await Driver.runQuery(dropSchemaQuery(picked), details);
+        logger.showInfo(`Schema ${picked} dropped.`);
+        firebirdTreeDataProvider.refresh();
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError(`Could not drop the schema: ${err?.message ?? err}`);
+      }
     })
   );
 

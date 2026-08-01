@@ -34,7 +34,10 @@ import {
   getDomainsQuery,
   getExceptionsQuery,
   procedureParametersQuery,
-  fieldsQuery} from '../shared/queries';
+  fieldsQuery,
+  getSchemasQuery,
+  createSchemaQuery,
+  dropSchemaQuery} from '../shared/queries';
 
 // ── Source-fetching queries (procedure/trigger/view "edit source") ────────────
 //
@@ -691,5 +694,27 @@ suite('fieldsQuery() — Firebird 6 schema awareness', function () {
     // Callers pass bare relation names and key by schema + name themselves, which is simpler than
     // threading qualified names through an IN list.
     assert.ok(fieldsQuery(['ORDERS'], true).includes("IN ('ORDERS')"));
+  });
+});
+
+suite('schema lifecycle queries (Firebird 6)', function () {
+  test('getSchemasQuery() hides SYSTEM unless asked', function () {
+    // SYSTEM holds all RDB$/MON$ metadata, is appended to every search path implicitly, and only
+    // index operations may be performed on it — listing it by default would invite a drop attempt.
+    assert.ok(getSchemasQuery().includes('RDB$SYSTEM_FLAG'));
+    assert.ok(!getSchemasQuery(true).includes('RDB$SYSTEM_FLAG IS NULL'));
+  });
+
+  test('CREATE and DROP name the schema, nothing more', function () {
+    assert.strictEqual(createSchemaQuery('SALES'), 'CREATE SCHEMA SALES;');
+    assert.strictEqual(dropSchemaQuery('SALES'), 'DROP SCHEMA SALES;');
+  });
+
+  test('both refuse anything that is not a plain identifier', function () {
+    // These interpolate straight into DDL, so the guard matters more here than most places.
+    for (const bad of ['SALES; DROP DATABASE', "SALES'", 'SALES SCHEMA', '']) {
+      assert.throws(() => createSchemaQuery(bad), `create accepted ${JSON.stringify(bad)}`);
+      assert.throws(() => dropSchemaQuery(bad), `drop accepted ${JSON.stringify(bad)}`);
+    }
   });
 });

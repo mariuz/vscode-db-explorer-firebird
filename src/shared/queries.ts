@@ -156,6 +156,40 @@ export function fieldsQuery(tables: string[], withSchemas = false): string {
  * 0 (or anything not a positive integer) means no limit, matching `firebird.maxTablesCount`'s
  * existing convention.
  */
+/**
+ * Every schema in the database (Firebird 6+ only — `RDB$SCHEMAS` does not exist before it).
+ *
+ * `includeSystem` controls whether `SYSTEM` is listed. It holds all `RDB$*`/`MON$*` metadata, is
+ * appended to every search path implicitly, and only index operations may be performed on it, so
+ * it is hidden unless the caller explicitly wants it — matching `firebird.showSystemObjects`.
+ */
+export function getSchemasQuery(includeSystem = false): string {
+  const filter = includeSystem ? "" : "\n           WHERE (RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0)";
+  return `SELECT TRIM(RDB$SCHEMA_NAME) AS SCHEMA_NAME,
+                 RDB$SYSTEM_FLAG AS SYSTEM_FLAG,
+                 TRIM(RDB$OWNER_NAME) AS OWNER_NAME
+            FROM RDB$SCHEMAS${filter}
+        ORDER BY 1;`;
+}
+
+/** `CREATE SCHEMA` (Firebird 6+). The name is validated by the caller before it reaches here. */
+export function createSchemaQuery(schemaName: string): string {
+  assertValidIdentifier(schemaName, "schema name");
+  return `CREATE SCHEMA ${schemaName};`;
+}
+
+/**
+ * `DROP SCHEMA` (Firebird 6+).
+ *
+ * Firebird refuses to drop a schema that still contains objects, which is the behaviour worth
+ * having — this command does not cascade, so a mistaken drop cannot take a schema's tables with
+ * it. The caller surfaces the server's own error.
+ */
+export function dropSchemaQuery(schemaName: string): string {
+  assertValidIdentifier(schemaName, "schema name");
+  return `DROP SCHEMA ${schemaName};`;
+}
+
 export function selectAllRecordsQuery(tableName: string, maxRows = 0): string {
   const first = Number.isInteger(maxRows) && maxRows > 0 ? `FIRST ${maxRows} ` : "";
   return `SELECT ${first}* FROM ${tableName};`;

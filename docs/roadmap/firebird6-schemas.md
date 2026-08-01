@@ -256,10 +256,28 @@ pgsql's presentation, and the thing that makes a multi-schema ER diagram readabl
 
 The data was already there — `buildSchemaGraph()` has carried `schema` per table since phase 1h — so this is presentation only, with `schemaColor()` and `schemasInDraft()` exported through the webview's existing `__test__` hook and covered by six tests.
 
+## Phase 5 — schema lifecycle (create and drop done)
+
+**Create Schema…** and **Drop Schema…**, on the database node's context menu and the Command Palette. Every statement was exercised against the live Firebird 6.0.0 server end to end — list, create, list again, drop, list again — rather than only unit-tested:
+
+```
+schemas (user): ["PUBLIC","SALES"]
+schemas (all) : ["PUBLIC","SALES","SYSTEM"]
+CREATE SCHEMA : ok      -> ["PUBLIC","SALES","TMP_PHASE5"]
+DROP SCHEMA   : ok      -> ["PUBLIC","SALES"]
+```
+
+- **Version-checked first.** `RDB$SCHEMAS` and `CREATE SCHEMA` do not exist before Firebird 6, so both commands probe the engine version and say *"SQL schemas need Firebird 6 or newer; this server reports 5"* rather than surfacing a raw SQL error.
+- **`SYSTEM` is not offered.** `getSchemasQuery()` hides it by default: it holds all `RDB$*`/`MON$*` metadata, is appended to every search path implicitly, and only index operations are permitted on it — listing it in a drop picker would invite an attempt that can only fail.
+- **Drop does not cascade.** Firebird refuses to drop a schema that still contains objects, which is the behaviour worth keeping, so a mistaken drop cannot take a schema's tables with it. It still gets a modal confirmation, like every other drop here.
+- **On the database node, not a Schemas node**, since there is no Schemas tree level yet — and reachable from the palette through the same `resolveDatabaseNode()` fallback the other tree-node commands now use.
+
+**Not done in this phase**: `ALTER SCHEMA` (its useful form is `DEFAULT CHARACTER SET`/`DEFAULT SQL SECURITY`, which needs its own small wizard) and schema-level grants in the privileges viewer, which reads `RDB$USER_PRIVILEGES` by object name and would need a schema variant.
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
 2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
 3. **Search path**: per-connection default schema, `SET SEARCH_PATH` on session open, "New Query in Schema", and search-path-aware completion ranking/qualification.
 4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
-5. **Lifecycle**: `CREATE`/`ALTER`/`DROP SCHEMA` actions, schema-level grants, per-schema folders in Database Projects, and schema-qualified schema-diff.
+5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5). `ALTER SCHEMA`, schema-level grants and per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).
