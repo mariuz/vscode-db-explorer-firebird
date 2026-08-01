@@ -46,7 +46,21 @@ export function getTablesQuery(maxTableCount: number, withSchemas = false): stri
  * actually uses it for — so the COALESCE fallback to the old RDB$FIELD_LENGTH value for every other
  * type changes nothing for them.
  */
-export function tableInfoQuery(tableName: string): string {
+/**
+ * Column metadata for one table.
+ *
+ * `schema` must only be passed on Firebird 6+ (`supportsSchemas()`), where it becomes a predicate
+ * on `RDB$SCHEMA_NAME`. Without it the query matches on the relation name alone, so on a database
+ * holding both `SALES.ORDERS` and `PUBLIC.ORDERS` it returns the union of *both* tables' columns —
+ * verified live: a bare lookup for `ORDERS` returned `ID, NOTE, TOTAL`, a table that does not
+ * exist. The index/constraint joins are scoped to the same schema for the same reason: `RDB$INDICES`
+ * carries `RDB$SCHEMA_NAME` on Firebird 6 (confirmed against a live server), and joining on the
+ * relation name alone would attach another schema's indexes to these columns.
+ */
+export function tableInfoQuery(tableName: string, schema?: string): string {
+  const schemaName = schema?.trim();
+  const relationSchemaPredicate = schemaName ? `\n        AND r.RDB$SCHEMA_NAME = '${schemaName}'` : "";
+  const indexSchemaJoin = schemaName ? `\n        AND i.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME` : "";
   return `SELECT TRIM(r.RDB$FIELD_NAME) AS FIELD_NAME,
          CASE f.RDB$FIELD_TYPE
            WHEN 261 THEN 'BLOB'
@@ -79,12 +93,12 @@ export function tableInfoQuery(tableName: string): string {
   LEFT JOIN RDB$FIELDS f ON r.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
   LEFT JOIN RDB$INDEX_SEGMENTS s ON s.RDB$FIELD_NAME=r.RDB$FIELD_NAME
   LEFT JOIN RDB$INDICES i ON i.RDB$INDEX_NAME = s.RDB$INDEX_NAME
-        AND i.RDB$RELATION_NAME=r.RDB$RELATION_NAME
+        AND i.RDB$RELATION_NAME=r.RDB$RELATION_NAME${indexSchemaJoin}
   LEFT JOIN RDB$RELATION_CONSTRAINTS rc ON rc.RDB$INDEX_NAME = s.RDB$INDEX_NAME
         AND rc.RDB$INDEX_NAME = i.RDB$INDEX_NAME
         AND rc.RDB$RELATION_NAME = i.RDB$RELATION_NAME
   LEFT JOIN RDB$REF_CONSTRAINTS refc ON rc.RDB$CONSTRAINT_NAME = refc.RDB$CONSTRAINT_NAME
-      WHERE (r.rdb$system_flag is null or r.rdb$system_flag = 0) AND r.RDB$RELATION_NAME ='${tableName}'
+      WHERE (r.rdb$system_flag is null or r.rdb$system_flag = 0) AND r.RDB$RELATION_NAME ='${tableName}'${relationSchemaPredicate}
    GROUP BY FIELD_NAME, FIELD_TYPE, FIELD_LENGTH, FIELD_SUB_TYPE, FIELD_PRECISION, FIELD_SCALE, NOT_NULL, DFLT_VALUE, FIELD_POSITION
    ORDER BY FIELD_POSITION;`;
 }

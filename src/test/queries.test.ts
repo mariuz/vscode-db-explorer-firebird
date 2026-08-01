@@ -537,3 +537,30 @@ suite('getTablesQuery() — Firebird 6 schema awareness', function () {
     assert.ok(!getTablesQuery(0, true).includes('FIRST'));
   });
 });
+
+suite('tableInfoQuery() — Firebird 6 schema filtering', function () {
+  test('without a schema the SQL is unchanged, so a pre-6 server sees no difference', function () {
+    const legacy = tableInfoQuery('ORDERS');
+    assert.ok(!legacy.includes('RDB$SCHEMA_NAME'), 'must not reference a column a pre-6 server does not have');
+    assert.ok(legacy.includes("r.RDB$RELATION_NAME ='ORDERS'"));
+  });
+
+  test('a schema becomes a predicate on the relation, which is what stops the column merge', function () {
+    // Verified live: without this, a lookup for ORDERS against a database holding both
+    // SALES.ORDERS (ID, TOTAL) and PUBLIC.ORDERS (ID, NOTE) returned ID, NOTE, TOTAL — a table
+    // that does not exist. With it, each returns only its own columns.
+    const scoped = tableInfoQuery('ORDERS', 'SALES');
+    assert.ok(scoped.includes("r.RDB$SCHEMA_NAME = 'SALES'"));
+  });
+
+  test('the index join is scoped to the same schema, not just the relation name', function () {
+    // RDB$INDICES carries RDB$SCHEMA_NAME on Firebird 6 (confirmed against a live server), so
+    // joining on the relation name alone would attach another schema's indexes to these columns.
+    assert.ok(tableInfoQuery('ORDERS', 'SALES').includes('i.RDB$SCHEMA_NAME = r.RDB$SCHEMA_NAME'));
+  });
+
+  test('an empty or whitespace schema is treated as absent rather than emitted as a broken predicate', function () {
+    assert.ok(!tableInfoQuery('ORDERS', '').includes('RDB$SCHEMA_NAME'));
+    assert.ok(!tableInfoQuery('ORDERS', '   ').includes('RDB$SCHEMA_NAME'));
+  });
+});

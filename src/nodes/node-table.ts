@@ -59,7 +59,7 @@ export class NodeTable implements FirebirdTree {
   }
 
   public async getChildren(): Promise<any> {
-    const qry = tableInfoQuery(this.table);
+    const qry = tableInfoQuery(this.table, this.schema);
 
     try {
       const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
@@ -79,7 +79,7 @@ export class NodeTable implements FirebirdTree {
   public async showTableInfo() {
     logger.info("Custom Query: Show Table Info");
 
-    const qry = tableInfoQuery(this.table.trim());
+    const qry = tableInfoQuery(this.table.trim(), this.schema);
 
     Global.activeConnection = this.dbDetails;
 
@@ -135,7 +135,7 @@ export class NodeTable implements FirebirdTree {
     const tableName = this.table.trim();
     const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
     try {
-      const columnRows = await Driver.client.queryPromise<any>(connection, tableInfoQuery(tableName));
+      const columnRows = await Driver.client.queryPromise<any>(connection, tableInfoQuery(tableName, this.schema));
       const fkRows = await Driver.client.queryPromise<any>(connection, getForeignKeysQuery());
       const table = tableInfoRowsToTable(tableName, columnRows);
       const ddl = [buildTableCreateDDL(table)];

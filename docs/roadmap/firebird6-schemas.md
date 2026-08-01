@@ -62,10 +62,21 @@ What landed:
 - **`getTablesQuery(maxTableCount, withSchemas)`**: selects `RDB$SCHEMA_NAME` only when asked. The pre-6 form is byte-identical to what it always emitted — asserted by a test, since `RDB$SCHEMA_NAME` on a pre-6 server is a hard SQL error, not a degradation.
 - **`NodeTable`** carries an optional schema: `getTableName()` returns the qualified name (used by Select All Records, Drop Table, and drag-into-editor), `getRelationName()` returns the bare one for metadata lookups that match on `RDB$RELATION_NAME`.
 
+### Phase 1b — schema-filtered column metadata (done)
+
+`tableInfoQuery(tableName, schema?)` now takes an optional schema, and `NodeTable` passes its own at all three call sites (expanding the node, Table Info, and Script as Create). Verified live against the same two-schema database:
+
+```
+(no schema, old behaviour) -> ID, NOTE, TOTAL
+SALES                      -> ID, TOTAL
+PUBLIC                     -> ID, NOTE
+```
+
+The old lookup returned the union of both tables' columns — a table that does not exist — and expanding either `ORDERS` node showed it. The index join is scoped to the same schema for the same reason: `RDB$INDICES` carries `RDB$SCHEMA_NAME` on Firebird 6 (confirmed against a live server), so joining on the relation name alone would attach another schema's indexes to these columns. Without a schema the SQL is unchanged, asserted by a test.
+
 ### What is still missing, precisely
 
 - **Only the Tables category is schema-aware.** Views, procedures, triggers, generators, domains, roles and exceptions still list unqualified, so the same collision remains visible for them.
-- **Column metadata is still schema-blind.** `tableInfoQuery()` filters on `RDB$RELATION_NAME` alone, so expanding either `ORDERS` node lists the columns of *both* — that lookup needs an `RDB$SCHEMA_NAME` predicate on Firebird 6.
 - **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 
