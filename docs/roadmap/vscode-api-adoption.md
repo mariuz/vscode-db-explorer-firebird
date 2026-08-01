@@ -32,7 +32,11 @@ A note on cadence, because it changes how to read version numbers: 1.102 shipped
 ### The rest, briefly
 
 - **QuickInput toggles/`prompt`/`resourceUri`** are a fit for `src/shared/object-explorer-filter.ts` and `src/object-search/` — a persistent `prompt` line explaining the filter syntax, and an inline **toggle** for "include system objects" (today `firebird.showSystemObjects` is a settings-level flag, not something you can flip mid-search).
-- **`secondarySidebar`** would let the Firebird tree sit opposite the editor while results occupy the panel — a layout users currently cannot get, since the container is activity-bar-only.
+- **`secondarySidebar` — declined, and the reasoning is worth keeping.** This doc claimed it "would let the Firebird tree sit opposite the editor while results occupy the panel — a layout users currently cannot get". That premise is false: VS Code's own UX guidelines state that "users can drag an entire View Container from the Activity Bar to the Panel (or vice versa) and can also move individual Views", and that views "can also be dragged to the Secondary Sidebar". The layout is already available to anyone who wants it.
+
+  What the contribution point actually changes is the **default** location. Defaulting a database explorer to the Secondary Side Bar would be worse than the status quo, not better — every comparable extension (including vscode-mssql and vscode-pgsql) puts its connection tree in the Activity Bar, and that is where users look for it.
+
+  There is also a known hazard: declaring a `secondarySidebar` container has been reported to disturb *other* extensions' view positions on VS Code versions that predate it ([qwen-code#2432](https://github.com/QwenLM/qwen-code/issues/2432)), and Secondary Side Bar view contributions have fallen back to the Explorer unexpectedly ([vscode#249910](https://github.com/microsoft/vscode/issues/249910)). This extension's floor is now 1.110 so the first does not apply, but neither is a risk worth taking for a default nobody asked to change.
 - **`onTerminalShellIntegration`** is a refinement, not a fix: `isql-terminal.ts` already handles shell integration being absent (0.1.96/0.1.97), so this only sharpens activation timing.
 - **LSP 3.18 / languageclient 10 is explicitly not applicable** — see [sql-language-features.md](sql-language-features.md) for why a separate language-server process buys this extension nothing.
 - **Not applicable at all**, recorded so the next review does not re-derive it: the Language Model *Chat Provider* API (1.104 — this extension consumes models, it does not provide them), authentication `WWW-Authenticate` challenges and `AuthenticationSession.idToken` (1.104/1.106 — no OAuth provider here; Firebird auth is SRP over the wire protocol), `getRepositoryWorkspace` (1.106, Git), and the TypeScript-extension-authoring-without-a-build-step experiment (1.108 — this repo bundles with esbuild deliberately).
@@ -98,6 +102,24 @@ A `ThemeIcon` needs no assets and follows the active theme, unlike the light/dar
 **Not covered by an automated test**, and this is now the third feature in that position: `firebird.database.searchObjects` takes a `NodeDatabase`, so it cannot be invoked from the Command Palette and the Playwright tier cannot reach it either (the same limitation already recorded for `setPassword` and `schemaVisualizer.open`). What *is* testable was extracted into `search-model.ts` — `mergeSystemResults()` and `describeResult()`, with three tests covering the two things worth pinning down: that the merged list is one alphabetical sequence rather than two sorted blocks appended, and that system entries stay distinguishable.
 
 That recurring gap is itself a finding. A palette-invocable variant of these node-argument commands, falling back to the existing `connection-picker.ts`, would make three features testable at once and is worth its own roadmap item.
+
+## Status
+
+Every **finalized, adoptable** item in this doc is now either done or deliberately declined:
+
+| Item | Outcome |
+| --- | --- |
+| Engine floor `^1.110.0` | done (phase 1) |
+| `context.secrets.keys()` | done (phase 2) — closed a real credential leak |
+| `chatInstructions` | done (phase 3) — the dialect rules had to be written, not moved |
+| `ThemeIcon` webview tab icons | done (phase 4a) — five panels, not six |
+| `QuickPick.prompt` / `QuickInputButton.toggle` | done (phase 4b) — one half already existed |
+| `secondarySidebar` | **declined** — the premise was wrong; users can already drag containers there |
+| `onTerminal` / `onTerminalShellIntegration` | not done — a refinement to activation timing, no user-visible effect |
+| `env.isAppPortable` | not done — no concrete need surfaced in the native-driver path |
+| LSP 3.18 / languageclient 10 | not applicable, per `sql-language-features.md` |
+
+What remains in this doc is the **proposed-API watch list**, which cannot ship to the Marketplace until finalized. `approveCombination` (per-argument tool approval for `run_write_query`) is the one to re-check first.
 
 ## Suggested phases
 
