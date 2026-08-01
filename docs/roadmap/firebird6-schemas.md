@@ -290,6 +290,12 @@ Under the default path that same unqualified statement returns `{ID: 1, NOTE: "p
 
 `SYSTEM` is deliberately not named in the generated statement: Firebird appends it to every search path itself, so listing it would suggest the user controls something they do not.
 
+**Completion is schema-aware now too.** The cache `db-words.provider.ts` builds is what powers completion, hover and Go to Definition, and it was still schema-blind: on a two-schema database it produced two identical `ORDERS` entries — indistinguishable in the list, and pooling each other's columns, since the column rows were keyed by bare name. It now asks for schemas (version-gated), keys columns by schema + name, and carries the schema on each `Schema.Table`.
+
+`tableCompletionParts()` decides how each one is presented: the **label** is what a human reads (bare in the default schema, qualified elsewhere, so the two are distinguishable) while the **inserted text** is qualified whenever a schema is known, so accepting a completion never leaves the resulting SQL depending on the search path. `filterText` keeps the label as the filter, or typing `ord` would stop matching an entry whose insert text is `PUBLIC.ORDERS`.
+
+It is a separate exported function precisely because driving the whole provider needs a faithful `TextDocument` — an attempt to test through `provideCompletionItems()` failed on the mock rather than on the logic, so the decision was extracted to where it can be tested directly.
+
 **Still not done — the per-connection default schema.** Storing a schema on the saved connection and applying it when the session opens needs a hook in connection creation that survives pooling; `isc_dpb_search_path` (the DPB item meant for exactly this) is not exposed by the pure-JS driver. That is a driver-level change, not a UI one, and is the remaining piece of this phase along with search-path-aware completion ranking.
 
 ## Suggested phases

@@ -1,5 +1,6 @@
 import {CompletionItemProvider, TextDocument, CompletionItem, CompletionItemKind, MarkdownString, Position, CompletionContext, Range} from "vscode";
 import {Schema, FirebirdSchema, FirebirdReserved} from "../interfaces";
+import { schemaDisplayName, schemaQualifiedName } from "../shared/schema-support";
 import {firebirdReserved, firebirdPsqlKeywords, firebirdBuiltinFunctions} from "./firebird-reserved";
 
 interface SchemaProvider {
@@ -109,7 +110,8 @@ export class CompletionProvider implements CompletionItemProvider {
         if (sqlContext === SqlContext.FromClause || sqlContext === SqlContext.General) {
           tables.forEach(tbl => {
             const alias = text.match(RegExp(`((from)|(join)) ${tbl.name} (as )?(?!(on)|=|(with)|(using)|(as))(?<alias>\\w+)`, 'i'))?.groups?.alias;
-            tableItems.push(new TableCompletionItem(tbl.name, undefined, tbl.fields));
+            const parts = tableCompletionParts(tbl);
+            tableItems.push(new TableCompletionItem(parts.label, parts.detail, tbl.fields, parts.insertText));
             if (alias) {
               tableItems.push(new TableCompletionItem(alias, tbl.name, tbl.fields));
             }
@@ -176,6 +178,26 @@ class PsqlCompletionItem extends CompletionItem {
   }
 }
 
+/**
+ * How a table is presented in the completion list.
+ *
+ * The label is what a human reads — bare in the default schema, qualified elsewhere, so two
+ * same-named tables are distinguishable instead of appearing as two identical entries. The
+ * *inserted* text is qualified whenever a schema is known, so accepting a completion never leaves
+ * the resulting SQL depending on the session's search path.
+ *
+ * Pure, and exported for that reason: driving the whole provider needs a faithful TextDocument,
+ * while this is the part with a decision in it.
+ */
+export function tableCompletionParts(table: Schema.Table): { label: string; detail?: string; insertText?: string } {
+  const label = schemaDisplayName(table.schema, table.name);
+  if (!table.schema) {
+    return { label };
+  }
+  const qualified = schemaQualifiedName(table.schema, table.name);
+  return { label, detail: qualified, insertText: qualified };
+}
+
 class TableCompletionItem extends CompletionItem {
   /**
    * Creates an instance of TableCompletionItem.
@@ -184,9 +206,15 @@ class TableCompletionItem extends CompletionItem {
    * @param {Schema.Field[]} [fields]
    * @memberof TableCompletionItem
    */
-  constructor(label: string, detail?: string, fields?: Schema.Field[]) {
+  constructor(label: string, detail?: string, fields?: Schema.Field[], insertText?: string) {
     super(label, CompletionItemKind.File);
     this.detail = detail;
+    if (insertText && insertText !== label) {
+      this.insertText = insertText;
+      // Without this VS Code filters on the inserted text, so typing `ord` would not match a
+      // completion labelled ORDERS whose insert text is PUBLIC.ORDERS.
+      this.filterText = label;
+    }
     if (fields) {
       const mkTable = new MarkdownString(`| Field | Type | \n |---|---| `);
       fields.forEach(field => mkTable.appendMarkdown(`\n | ${field.name} | ${field.type} |`));

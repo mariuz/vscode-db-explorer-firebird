@@ -7,7 +7,7 @@
  */
 
 import * as assert from 'assert';
-import { getSqlContext, SqlContext } from '../language-server/completionProvider';
+import { getSqlContext, SqlContext, tableCompletionParts } from '../language-server/completionProvider';
 
 // ── General context ───────────────────────────────────────────────────────────
 
@@ -123,5 +123,28 @@ suite('CompletionProvider – getSqlContext (PsqlBlock)', function () {
   test('detects PSQL context in stored procedure body', function () {
     const procHeader = 'CREATE PROCEDURE MY_PROC AS\nBEGIN\n  ';
     assert.strictEqual(getSqlContext(procHeader), SqlContext.PsqlBlock);
+  });
+});
+
+suite('tableCompletionParts() — Firebird 6 schemas', function () {
+  test('a default-schema table reads bare but inserts qualified', function () {
+    // The label is what you read; the inserted text must not depend on the search path.
+    const parts = tableCompletionParts({ name: 'ORDERS', schema: 'PUBLIC', fields: [] });
+    assert.strictEqual(parts.label, 'ORDERS');
+    assert.strictEqual(parts.insertText, 'PUBLIC.ORDERS');
+  });
+
+  test('a table from another schema is qualified in both, so the two are distinguishable', function () {
+    // Before this, ORDERS in two schemas produced two identical entries.
+    const parts = tableCompletionParts({ name: 'ORDERS', schema: 'SALES', fields: [] });
+    assert.strictEqual(parts.label, 'SALES.ORDERS');
+    assert.strictEqual(parts.insertText, 'SALES.ORDERS');
+  });
+
+  test('a table with no schema — every pre-Firebird-6 database — is untouched', function () {
+    const parts = tableCompletionParts({ name: 'LEGACY', fields: [] });
+    assert.strictEqual(parts.label, 'LEGACY');
+    assert.strictEqual(parts.insertText, undefined);
+    assert.strictEqual(parts.detail, undefined);
   });
 });
