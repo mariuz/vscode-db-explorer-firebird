@@ -135,18 +135,27 @@ export class NodeTable implements FirebirdTree {
     const tableName = this.table.trim();
     const connection = await Driver.client.createConnection(await Driver.resolvePassword(this.dbDetails));
     try {
+      // `this.schema` is only ever set on Firebird 6+, so it doubles as the "this server has
+      // schemas" signal without a second version probe.
+      const withSchemas = Boolean(this.schema);
       const columnRows = await Driver.client.queryPromise<any>(connection, tableInfoQuery(tableName, this.schema));
-      const fkRows = await Driver.client.queryPromise<any>(connection, getForeignKeysQuery());
-      const table = tableInfoRowsToTable(tableName, columnRows);
+      const fkRows = await Driver.client.queryPromise<any>(connection, getForeignKeysQuery(withSchemas));
+      // The generated DDL names the table exactly as it is, schema and all — a script that says
+      // CREATE TABLE ORDERS would recreate it in whichever schema the search path points at.
+      const table = tableInfoRowsToTable(this.getTableName(), columnRows);
       const ddl = [buildTableCreateDDL(table)];
       fkRows
-        .filter((row: any) => row.TABLE_NAME.trim() === tableName)
+        .filter((row: any) =>
+          row.TABLE_NAME.trim() === tableName &&
+          (!withSchemas || row.SCHEMA_NAME?.trim() === this.schema?.trim()))
         .forEach((row: any) => {
           ddl.push(buildForeignKeyDDL({
             constraintName: row.CONSTRAINT_NAME.trim(),
-            table: row.TABLE_NAME.trim(),
+            table: schemaQualifiedName(withSchemas ? row.SCHEMA_NAME : undefined, row.TABLE_NAME),
             column: row.COLUMN_NAME.trim(),
-            refTable: row.REF_TABLE_NAME.trim(),
+            // The referenced table may live in another schema, so it is qualified from the row's
+            // own REF_SCHEMA_NAME rather than assumed to match.
+            refTable: schemaQualifiedName(withSchemas ? row.REF_SCHEMA_NAME : undefined, row.REF_TABLE_NAME),
             refColumn: row.REF_COLUMN_NAME.trim(),
           }));
         });

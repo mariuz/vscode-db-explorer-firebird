@@ -625,3 +625,32 @@ suite('remaining object categories — Firebird 6 schema awareness', function ()
     assert.ok(!getProcedureBodyQuery('TOTALS').includes('RDB$SCHEMA_NAME'));
   });
 });
+
+suite('getForeignKeysQuery() — Firebird 6 schema scoping', function () {
+  test('unchanged without schemas', function () {
+    assert.ok(!getForeignKeysQuery().includes('RDB$SCHEMA_NAME'));
+    assert.strictEqual(getForeignKeysQuery(), getForeignKeysQuery(false));
+  });
+
+  test('scopes every join, not just the first', function () {
+    // Verified live: with the same constraint name AND the same index name present in two
+    // schemas, joining on names alone returned an 8-row cross product for two foreign keys.
+    // Scoping all four joins returns exactly 2.
+    const fb6 = getForeignKeysQuery(true);
+    assert.ok(fb6.includes('rc.RDB$SCHEMA_NAME = refc.RDB$SCHEMA_NAME'), 'constraint join');
+    assert.ok(fb6.includes('seg.RDB$SCHEMA_NAME = rc.RDB$SCHEMA_NAME'), 'index segment join');
+    assert.ok(fb6.includes('seg2.RDB$SCHEMA_NAME = rc2.RDB$SCHEMA_NAME'), 'referenced index segment join');
+  });
+
+  test('joins the referenced side through RDB$CONST_SCHEMA_NAME_UQ', function () {
+    // A foreign key may reference a table in a *different* schema, so the referenced constraint's
+    // schema comes from RDB$REF_CONSTRAINTS rather than being assumed to match the FK's own.
+    assert.ok(getForeignKeysQuery(true).includes('rc2.RDB$SCHEMA_NAME = refc.RDB$CONST_SCHEMA_NAME_UQ'));
+  });
+
+  test('exposes both sides\' schemas so callers can qualify each independently', function () {
+    const fb6 = getForeignKeysQuery(true);
+    assert.ok(fb6.includes('AS SCHEMA_NAME'));
+    assert.ok(fb6.includes('AS REF_SCHEMA_NAME'));
+  });
+});

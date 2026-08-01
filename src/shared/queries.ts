@@ -753,18 +753,45 @@ export function getSchemaColumnsQuery(): string {
  * column(s)), pairing up composite-key columns by their position within the key — used to draw
  * relationship lines in the schema visualizer.
  */
-export function getForeignKeysQuery(): string {
-  return `SELECT TRIM(rc.RDB$RELATION_NAME) AS TABLE_NAME,
+/**
+ * Foreign keys across the database.
+ *
+ * `withSchemas` (Firebird 6+ only) adds the owning schema to each side and scopes the constraint
+ * joins to it. Without that scoping two schemas holding same-named constraints would cross-join,
+ * and a caller filtering by bare table name would attach another schema's foreign keys to its
+ * table — which is exactly what "Script as Create" does with the result.
+ */
+export function getForeignKeysQuery(withSchemas = false): string {
+  const schemaColumns = withSchemas
+    ? `TRIM(rc.RDB$SCHEMA_NAME) AS SCHEMA_NAME,
+                 TRIM(rc2.RDB$SCHEMA_NAME) AS REF_SCHEMA_NAME,
+                 `
+    : "";
+  // Every join needs scoping, not just the first. Verified against a live Firebird 6 server with
+  // the same constraint name (FK_ORDERS_CUST) and the same index name in two schemas: joining on
+  // names alone produced an 8-row cross product for what is really two foreign keys.
+  //
+  // The referenced side joins through RDB$CONST_SCHEMA_NAME_UQ rather than the constraint's own
+  // schema, because a foreign key may legitimately reference a table in a *different* schema.
+  const rcJoin = withSchemas ? `
+                                         AND rc.RDB$SCHEMA_NAME = refc.RDB$SCHEMA_NAME` : "";
+  const segJoin = withSchemas ? `
+                                      AND seg.RDB$SCHEMA_NAME = rc.RDB$SCHEMA_NAME` : "";
+  const rc2Join = withSchemas ? `
+                                          AND rc2.RDB$SCHEMA_NAME = refc.RDB$CONST_SCHEMA_NAME_UQ` : "";
+  const seg2Join = withSchemas ? `
+                                         AND seg2.RDB$SCHEMA_NAME = rc2.RDB$SCHEMA_NAME` : "";
+  return `SELECT ${schemaColumns}TRIM(rc.RDB$RELATION_NAME) AS TABLE_NAME,
                  TRIM(seg.RDB$FIELD_NAME) AS COLUMN_NAME,
                  TRIM(rc.RDB$CONSTRAINT_NAME) AS CONSTRAINT_NAME,
                  TRIM(rc2.RDB$RELATION_NAME) AS REF_TABLE_NAME,
                  TRIM(seg2.RDB$FIELD_NAME) AS REF_COLUMN_NAME
             FROM RDB$REF_CONSTRAINTS refc
-            JOIN RDB$RELATION_CONSTRAINTS rc ON rc.RDB$CONSTRAINT_NAME = refc.RDB$CONSTRAINT_NAME
-            JOIN RDB$INDEX_SEGMENTS seg ON seg.RDB$INDEX_NAME = rc.RDB$INDEX_NAME
-            JOIN RDB$RELATION_CONSTRAINTS rc2 ON rc2.RDB$CONSTRAINT_NAME = refc.RDB$CONST_NAME_UQ
+            JOIN RDB$RELATION_CONSTRAINTS rc ON rc.RDB$CONSTRAINT_NAME = refc.RDB$CONSTRAINT_NAME${rcJoin}
+            JOIN RDB$INDEX_SEGMENTS seg ON seg.RDB$INDEX_NAME = rc.RDB$INDEX_NAME${segJoin}
+            JOIN RDB$RELATION_CONSTRAINTS rc2 ON rc2.RDB$CONSTRAINT_NAME = refc.RDB$CONST_NAME_UQ${rc2Join}
             JOIN RDB$INDEX_SEGMENTS seg2 ON seg2.RDB$INDEX_NAME = rc2.RDB$INDEX_NAME
-                                         AND seg2.RDB$FIELD_POSITION = seg.RDB$FIELD_POSITION
+                                         AND seg2.RDB$FIELD_POSITION = seg.RDB$FIELD_POSITION${seg2Join}
         ORDER BY TABLE_NAME, CONSTRAINT_NAME, seg.RDB$FIELD_POSITION;`;
 }
 

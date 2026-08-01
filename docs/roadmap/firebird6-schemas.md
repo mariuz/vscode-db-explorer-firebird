@@ -112,7 +112,21 @@ params for PUBLIC          -> M
 
 Two implementation notes. `NodeTrigger`, `NodeDomain` and `NodeException` receive the whole metadata row rather than a name, so the extra column reaches them without any constructor change — only their label had to learn `schemaDisplayName()`. And the five-times-repeated version probe is now one `schemasSupported()` helper on `NodeDatabase`, so every category asks the same way and the cached lookup happens in one place.
 
+### Phase 1e — foreign keys and generated DDL (done)
+
+The last correctness gap in the paths already made schema-aware. `getForeignKeysQuery()` joined `RDB$RELATION_CONSTRAINTS` and `RDB$INDEX_SEGMENTS` on names alone, and on Firebird 6 those names repeat per schema. With `FK_ORDERS_CUST` (and an identically-named index) present in both `SALES` and `PUBLIC`, verified live:
+
+```
+old behaviour (8 rows): ORDERS -> CUST | ORDERS -> CUST | ... (x8)
+schema-aware  (2 rows): SALES.ORDERS -> SALES.CUST | PUBLIC.ORDERS -> PUBLIC.CUST
+```
+
+Two foreign keys became an eight-row cross product, with no column in the result to tell the duplicates apart. **All four joins** needed scoping, not just the constraint one. The referenced side joins through **`RDB$REF_CONSTRAINTS.RDB$CONST_SCHEMA_NAME_UQ`** rather than the constraint's own schema, because a foreign key may legitimately reference a table in a different schema — that column exists precisely for this, and was found by inspecting the live catalogue rather than guessed.
+
+**Script as Create** now names the table as it actually is (`CREATE TABLE SALES.ORDERS`, not `CREATE TABLE ORDERS`, which would recreate it wherever the search path points), filters foreign keys by schema as well as name, and qualifies each side of a foreign key independently from the row's own `SCHEMA_NAME`/`REF_SCHEMA_NAME`. It infers schema support from `this.schema` being set, which only happens on Firebird 6+, rather than re-probing the version.
+
 ### What is still missing, precisely
+- **The Schema Designer and Database Projects remain schema-blind.** `schema-graph.ts` calls `getForeignKeysQuery()` without the flag and `getSchemaColumnsQuery()` has no schema column at all, so a multi-schema ER diagram still merges same-named tables into one box. That is phase 4 of this doc.
 - **No Schemas level in the tree**, which is the rest of phase 1. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
 - Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
 
