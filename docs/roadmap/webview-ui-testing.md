@@ -107,9 +107,41 @@ Three concrete leads for whoever picks this up, all established by failing rathe
 
 The value here is still real: the Schema Designer's `render()`/`measureAll()` are precisely what `src/test/webview-harness.ts` names as out of its scope, so they remain the least-tested code in the repository.
 
+## Phase 4 — webview coverage (done)
+
+`npm run test:playwright:coverage` runs the same 15 specs with the webviews' JavaScript instrumented, harvests istanbul's counters out of each webview frame, restores the working tree, and merges the result with the unit tier's report. It answers a question nothing could answer before — **how much of the ~6 000 lines of webview code has any test ever executed?**
+
+```
+Webview scripts:
+    0.0%  src/mock-data/htmlContent/js/app.js          (never executed by any test)
+    0.0%  src/mock-data/htmlContent/js/formHelpers.js  (never executed by any test)
+    0.0%  src/mock-data/htmlContent/js/formOptions.js  (never executed by any test)
+    0.0%  src/profiler/htmlContent/js/app.js           (never executed by any test)
+   15.0%  src/query-plan-view/htmlContent/js/app.js
+   25.1%  src/result-view/htmlContent/js/app.js
+    1.9%  src/result-view/htmlContent/js/plan-view.js
+   37.0%  src/schema-designer/htmlContent/js/app.js
+```
+
+Those are the real numbers, and they are the point of the phase. The Schema Designer — named in this doc as the least-tested code in the repository — is now the *best*-covered webview at 37%. Mock Data and the Profiler have never had a line executed by anything.
+
+**Why instrumentation rather than V8 coverage.** c8 reads V8's counters from the Node process; a webview runs in an Electron *renderer* iframe the extension host cannot see. The only way to learn what ran inside one is to make the code count for itself, which is what istanbul's instrumenter does. This is the one place `nyc`-style instrumentation earns its keep, exactly as this doc predicted.
+
+Decisions worth recording:
+
+- **Instrumented in place, restored in a `finally`.** A webview loads its assets by path from `src/…/htmlContent/js/`, so serving an instrumented copy from elsewhere would mean teaching every view a second asset root purely for tests — changing product code to suit a test. The restore lives in a wrapper script rather than a shell `&&` chain because an instrumented tree that is never restored looks like a catastrophic six-file diff and would be easy to commit by accident; a `finally` survives a failing run, a non-zero exit and a Ctrl-C.
+- **Vendored bundles are excluded** by a `.min.js` filter. Instrumenting jQuery, DataTables and pdfmake would add tens of thousands of lines nobody will test and drown the numbers that matter.
+- **Files with no coverage are listed, not omitted.** The report enumerates the instrumented set rather than the coverage map, because a file nothing has run would otherwise simply be absent — which reads as "not applicable" rather than "not covered". Those four zeroes are the most actionable line in the output.
+- **No threshold.** The unit tier's gate still runs and still fails the build. This report exists to *show* a number nobody has aimed at yet; gating on it would only invite lowering it until it passes.
+- **The specs are unchanged.** Collection is hooked into `app.close()`, which every spec already calls in `afterAll` — asking fifteen specs to remember a teardown step is how coverage silently stops being collected.
+
+Covered by four unit tests, because both properties they pin fail silently: importing the script must not instrument anything (`merge-coverage.mjs` imports it to list the uncovered files), and a stray `.orig-for-coverage` backup in the tree means an interrupted run left instrumented source behind.
+
+The nightly workflow runs the coverage variant and uploads the merged report as an artifact.
+
 ## Suggested phases
 
 1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
 2. ~~**Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.~~ — **done**, see above.
 3. ~~**Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG.~~ — **done**. The Schema Designer needed its command to become palette-invocable; the plan view needed two product bugs fixed, both found by the spec itself.
-4. **Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.
+4. ~~**Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.~~ — **done**, see above. All four phases of this doc are complete.

@@ -10,3 +10,6 @@ package-lock.json
 pnpm-lock.yaml
 test-results
 playwright-report
+
+# Left behind only if an instrumented Playwright run was interrupted (scripts/instrument-webviews.mjs)
+*.orig-for-coverage

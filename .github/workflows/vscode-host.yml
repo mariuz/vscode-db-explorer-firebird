@@ -168,11 +168,27 @@ jobs:
         # CODE_VERSION is pinned to stable even on the nightly: the Insiders run above exists to
         # catch API breakage, and pointing DOM selectors at Insiders as well would mostly produce
         # noise from workbench markup churn.
+        #
+        # Run through the coverage wrapper rather than `playwright test` directly: it instruments
+        # the webviews' JS, harvests istanbul counters out of each webview frame, restores the
+        # working tree in a `finally`, and merges the result with the unit tier's report. The specs
+        # themselves are identical either way -- docs/roadmap/webview-ui-testing.md, phase 4.
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: xvfb-run -a npx playwright test
+        run: xvfb-run -a npm run test:playwright:coverage
         env:
           DISPLAY: ":99.0"
           CODE_VERSION: stable
+
+      - name: Upload webview coverage
+        # The interesting number here is which webviews any test has ever executed; the merged
+        # report names every one, including those still at 0%.
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: webview-coverage
+          path: coverage/combined
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload test results
         if: always()

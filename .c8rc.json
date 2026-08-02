@@ -1,17 +1,25 @@
 {
   "$schema": "https://json.schemastore.org/c8rc.json",
-  "src": ["out"],
+  "src": [
+    "out"
+  ],
   "excludeAfterRemap": true,
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "exclude": [
     "src/test/**",
     "src/interfaces/**",
     "**/node_modules/**"
   ],
-  "reporter": ["text-summary", "lcov", "cobertura"],
+  "reporter": [
+    "text-summary",
+    "lcov",
+    "cobertura",
+    "json"
+  ],
   "reports-dir": "coverage/unit",
   "temp-directory": "coverage/.tmp-unit",
-
   "statements": 70,
   "branches": 90,
   "functions": 62,

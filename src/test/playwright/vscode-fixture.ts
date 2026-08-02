@@ -124,8 +124,58 @@ export async function launchVSCode(workspaceDir: string): Promise<LaunchedVSCode
   // Every spec starts from "the extension has run", so none of them has to think about it.
   await waitForActivation(page);
 
+  // Harvest webview coverage on the way out rather than asking every spec to remember. `close()` is
+  // what each of them already calls in afterAll, and once the app is gone the frames — and the
+  // counters inside them — are unrecoverable.
+  const close = app.close.bind(app);
+  app.close = async () => {
+    await collectWebviewCoverage(page);
+    await close();
+  };
+
   return { app, page, workspaceDir };
 }
+
+/** Where a run's raw webview coverage lands, for scripts/merge-coverage.mjs to combine. */
+const WEBVIEW_COVERAGE_DIR = path.join(repoRoot, "coverage", ".tmp-webview");
+
+/**
+ * Reads istanbul's counters out of every webview frame in `page` and writes them to disk.
+ *
+ * Only does anything when the webview JS has been instrumented (`npm run test:playwright:coverage`);
+ * an ordinary run finds no `__coverage__` and writes nothing, which is why this can be unconditional.
+ *
+ * Every step is guarded: frames detach as panels close, and an evaluate against a frame that has
+ * gone away throws. Coverage is a by-product of this tier, so it must never be able to fail a spec.
+ */
+export async function collectWebviewCoverage(page: Page): Promise<void> {
+  const collected: unknown[] = [];
+  for (const frame of page.frames()) {
+    try {
+      // The expression is a string rather than a callback: this file is also compiled by
+      // tsconfig.test.json, whose `lib` has no DOM, so naming `window` in TypeScript would break
+      // the unit tier's build. Playwright evaluates a string in the page just as happily.
+      const data = await frame.evaluate("window.__coverage__");
+      if (data && typeof data === "object" && Object.keys(data).length > 0) {
+        collected.push(data);
+      }
+    } catch {
+      // Detached, cross-origin, or simply not a webview — nothing to collect.
+    }
+  }
+  if (collected.length === 0) {
+    return;
+  }
+  fs.mkdirSync(WEBVIEW_COVERAGE_DIR, { recursive: true });
+  for (const data of collected) {
+    // Content-addressed by a counter, not by time: the specs run sequentially and several may
+    // contribute, and a name collision would silently drop one file's worth of coverage.
+    const name = `webview-${process.pid}-${coverageFileCounter++}.json`;
+    fs.writeFileSync(path.join(WEBVIEW_COVERAGE_DIR, name), JSON.stringify(data));
+  }
+}
+
+let coverageFileCounter = 0;
 
 /**
  * Runs a command through the Command Palette, which is the only entry point a spec can rely on:

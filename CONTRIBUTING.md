@@ -216,11 +216,14 @@ Every tier writes JUnit XML into `test-reports/` alongside its normal console ou
 npm run test:coverage              # unit tier, via c8 -> coverage/unit/
 npm run test:coverage:check        # the same, then enforce the thresholds CI enforces
 npm run test:vscode-host:coverage  # suite tier, via @vscode/test-cli -> coverage/suite/
+npm run test:playwright:coverage   # Playwright tier *and* the webviews -> coverage/combined/
 ```
 
-Both use V8 coverage remapped to the TypeScript sources, so neither needs an instrumentation build step, and both emit `text-summary`, `lcov`, and `cobertura`. CI runs the unit tier's coverage on every push, prints the summary in the job summary, and uploads the report as an artifact.
+The first two use V8 coverage remapped to the TypeScript sources, so neither needs an instrumentation build step, and both emit `text-summary`, `lcov`, and `cobertura`. CI runs the unit tier's coverage on every push, prints the summary in the job summary, and uploads the report as an artifact.
 
 **CI fails if unit-tier coverage drops below the thresholds in `.c8rc.json`** (currently 70 % statements/lines, 90 % branches, 62 % functions). Those are the measured baseline rounded down, so they ratchet: if your change raises the real figure meaningfully, raise the thresholds with it. Run `npm run test:coverage:check` before pushing to see what CI will see.
+
+**Webview coverage is different, and is the only place instrumentation is used.** c8 reads V8's counters from the Node process, and a webview runs in an Electron renderer iframe the extension host cannot see — so `npm run test:playwright:coverage` rewrites `src/**/htmlContent/js/*.js` with istanbul's instrumenter, runs the specs, reads the counters back out of each webview frame, **restores the files**, and merges the result with `coverage/unit/`. The restore runs in a `finally`, so an interrupted run still leaves the tree clean; if you ever see a `.orig-for-coverage` file, a run was killed and the file beside it is instrumented source — run `node scripts/instrument-webviews.mjs restore`. There is no threshold on this report: it exists to show which webviews any test has ever executed (four are still at 0 %), and it prints that list per file.
 
 One caveat worth knowing before reading a percentage: the unit tier's report only includes files some test actually loads, so the `vscode`-API-heavy modules that tier deliberately does not reach (`extension.ts`, the tree provider, the webview hosts, the notebook, the Copilot integration) are *absent* from it rather than counted as 0 %. Those are the suite tier's job. See [`docs/roadmap/test-coverage-and-reporting.md`](docs/roadmap/test-coverage-and-reporting.md) for the full list and why `c8`'s `all` option cannot close the gap.
 
