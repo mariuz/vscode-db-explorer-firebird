@@ -119,7 +119,56 @@ Every **finalized, adoptable** item in this doc is now either done or deliberate
 | `env.isAppPortable` | not done — no concrete need surfaced in the native-driver path |
 | LSP 3.18 / languageclient 10 | not applicable, per `sql-language-features.md` |
 
-What remains in this doc is the **proposed-API watch list**, which cannot ship to the Marketplace until finalized. `approveCombination` (per-argument tool approval for `run_write_query`) is the one to re-check first.
+What remains in this doc is the **proposed-API watch list**, which cannot ship to the Marketplace until finalized — and which phase 5 below re-checked against the published type definitions: none of it has graduated, in twenty-one releases. `approveCombination` (per-argument tool approval for `run_write_query`) is still the one that matters most, because it changes a design rather than adding a feature; phase 5 records what that design is so it does not have to be re-derived.
+
+## Phase 5 — re-review (done)
+
+Re-run against the published type definitions rather than from memory, because the answer turned out to contradict this doc's own premise.
+
+**Nothing has graduated. Not one item, in twenty-one releases.** `vscode.d.ts` is byte-identical between **1.110** (this extension's floor) and **1.131** apart from a doc-comment reordering around `CompletionItemKind.Reference` — 14 diff lines, zero new top-level declarations:
+
+```
+$ diff node_modules/@types/vscode/index.d.ts  <1.125 from npm>   # 14 lines, all doc comments
+$ diff <vscode.d.ts @ 1.120>  <vscode.d.ts @ 1.131>              # 8 lines, the same reorder
+new top-level declarations 1.110 -> 1.125: 0
+```
+
+So the phase-5 note that "items graduate quickly at the current cadence" was wrong, and the schedule it implied — check back because the list will have moved — is the wrong reflex for this API. All the movement is in the 176 `vscode.proposed.*.d.ts` files, and every one of the seven items on the watch list is still among them at 1.131.
+
+Two consequences:
+
+- **The 1.110 floor is still exactly right.** Raising `engines.vscode` buys literally nothing today, which is worth knowing before the next dependency sweep proposes it as hygiene.
+- **The re-review is cheap to repeat and should be evidence-based.** `npm pack @types/vscode@latest` plus a diff answers "has anything graduated" in a minute. Note `@types/vscode` lags the product: 1.125.0 is the newest published while the shipping build is 1.131, so the tagged `vscode.d.ts` in the VS Code repository is the more current source.
+
+### `approveCombination` — still proposed, and here is the change it implies
+
+The exact shape, from `vscode.proposed.toolInvocationApproveCombination.d.ts` at 1.131:
+
+```ts
+export interface LanguageModelToolConfirmationMessages {
+    approveCombination?: {
+        message: string | MarkdownString;
+        arguments?: string;
+    };
+}
+```
+
+Today `run_write_query` asks for confirmation on **every** invocation (`prepareInvocation` in `src/copilot/lm-tools.ts` returns `confirmationMessages` unconditionally), and the user's only durable alternative is VS Code's blanket "always allow this tool" — which approves *every* future write statement against *every* connection. That is the gap: the choice is per-invocation or unlimited, with nothing in between.
+
+When this finalizes, the change is small and the design is already decided by the shape of the API: add `approveCombination` keyed on the **connection id, not the statement**. `{ message: "Always allow writes to <connection label>", arguments: JSON.stringify({ connectionId }) }`. Keying on the SQL text would approve a string nobody will ever send twice; keying on the connection matches how the existing `mcpWriteEnabled` opt-in is already scoped, so the two gates would agree rather than expressing different ideas of what "approved" means.
+
+**Deliberately not implemented now.** A proposed API cannot ship to the Marketplace — an extension enabling one is rejected at publish — and this one is a single optional property on an object the code already constructs, so waiting costs nothing. The reason to record it here is the inverse: it is the one item on the list that changes a *design* rather than adding a feature, so anyone reworking the write gate for another reason should read this first and not invent a second approval concept.
+
+### Four additions to the watch list
+
+Found by listing the proposed API set at 1.131 rather than by re-reading the old list — the point of a re-review is what appeared, not only what graduated. All four touch code this extension already has, and all four are proposed:
+
+- **`toolProgress`** — `LanguageModelTool.invoke()` gains a third `Progress<ToolProgressStep>` argument. The five tools in `src/copilot/lm-tools.ts` run real queries; `get_schema` against a large database is the obvious case where an agent currently sits silent.
+- **`languageModelToolResultAudience`** — `LanguageModelPartAudience` (`Assistant` / `User` / `Extension`) with a `LanguageModelTextPart2` carrying it. `get_schema` returns a large payload meant for the model, not the transcript; this is the API for saying so.
+- **`contribLanguageModelToolSets`** — a contribution point grouping tools into a named set. This extension contributes exactly the kind of cluster it is for: five `#firebird*` tools that are only ever useful together.
+- **`mcpToolDefinitions`** — `McpServerLanguageModelToolDefinition` and `McpToolAvailability` (`Initial` / `Dynamic`), i.e. an MCP server declaring its tools to VS Code. `src/mcp-server/` currently answers `tools/list` over stdio and nothing else knows what it offers.
+
+Also new and minor: `languageModelToolSupportsModel`, `quickPickItemTooltip`, `statusBarItemTooltip`.
 
 ## Suggested phases
 
@@ -127,4 +176,4 @@ What remains in this doc is the **proposed-API watch list**, which cannot ship t
 2. ~~**`secrets.keys()`**: activation-time reconciliation plus a "Clear All Saved Passwords" command.~~ — **done**, see above.
 3. ~~**`chatInstructions`** carrying the dialect rules, so agent mode writes Firebird SQL without going through `@firebird`.~~ — **done**; note the rules had to be written, not moved (see above).
 4. ~~**Presentation**: `ThemeIcon` webview tab icons, then the QuickInput toggle/prompt refinements.~~ — **done** (phases 4a and 4b).
-5. **Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.
+5. ~~**Re-review** the proposed list — items graduate quickly at the current cadence, and `approveCombination` in particular changes how the write-query gate should be designed, so it is worth checking before that gate is reworked for any other reason.~~ — **done**, see above. The premise did not survive: nothing graduated in twenty-one releases, `approveCombination` is still proposed, and the recorded outcome is the design it implies plus four newly-proposed items worth watching.
