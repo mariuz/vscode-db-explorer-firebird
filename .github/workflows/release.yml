@@ -51,9 +51,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - run: npm ci
+      # `npm install`, not `npm ci`, and no `cache: npm` — this repository does not commit a
+      # package-lock.json (it is in .gitignore), and both of those require one. `npm ci` fails
+      # outright with "no lockfile found", which would have made every release run die on its
+      # third step. The other four workflows here all use `npm install` for the same reason.
+      - run: npm install
 
       - name: Resolve the version being released
         id: version
