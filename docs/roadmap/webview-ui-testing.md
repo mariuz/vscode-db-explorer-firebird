@@ -109,39 +109,52 @@ The value here is still real: the Schema Designer's `render()`/`measureAll()` ar
 
 ## Phase 4 — webview coverage (done)
 
-`npm run test:playwright:coverage` runs the same 15 specs with the webviews' JavaScript instrumented, harvests istanbul's counters out of each webview frame, restores the working tree, and merges the result with the unit tier's report. It answers a question nothing could answer before — **how much of the ~6 000 lines of webview code has any test ever executed?**
+`npm run test:playwright:coverage` runs the Playwright specs with the webviews' JavaScript instrumented, harvests istanbul's counters out of each webview frame, and merges them with the unit tier's coverage of the same files. It answers a question nothing could answer before — **how much of the ~6 000 lines of webview code has any test ever executed?**
 
 ```
 Webview scripts:
-    0.0%  src/mock-data/htmlContent/js/app.js          (never executed by any test)
-    0.0%  src/mock-data/htmlContent/js/formHelpers.js  (never executed by any test)
-    0.0%  src/mock-data/htmlContent/js/formOptions.js  (never executed by any test)
-    0.0%  src/profiler/htmlContent/js/app.js           (never executed by any test)
-   15.0%  src/query-plan-view/htmlContent/js/app.js
-   25.1%  src/result-view/htmlContent/js/app.js
-    1.9%  src/result-view/htmlContent/js/plan-view.js
-   37.0%  src/schema-designer/htmlContent/js/app.js
+    0.0%  src/mock-data/htmlContent/js/app.js   (no test has executed this file)
+   26.9%  src/mock-data/htmlContent/js/formHelpers.js
+  100.0%  src/mock-data/htmlContent/js/formOptions.js
+   87.5%  src/profiler/htmlContent/js/app.js
+   61.0%  src/query-plan-view/htmlContent/js/app.js
+   68.0%  src/result-view/htmlContent/js/app.js
+   66.2%  src/result-view/htmlContent/js/plan-view.js
+   78.6%  src/schema-designer/htmlContent/js/app.js
 ```
 
-Those are the real numbers, and they are the point of the phase. The Schema Designer — named in this doc as the least-tested code in the repository — is now the *best*-covered webview at 37%. Mock Data and the Profiler have never had a line executed by anything.
+**Why instrumentation rather than V8 coverage.** c8 reads V8's counters from the Node process; a webview runs in an Electron *renderer* iframe the extension host cannot see. The only way to learn what ran inside one is to make the code count for itself. This is the one place `nyc`-style instrumentation earns its keep, exactly as this doc predicted.
 
-**Why instrumentation rather than V8 coverage.** c8 reads V8's counters from the Node process; a webview runs in an Electron *renderer* iframe the extension host cannot see. The only way to learn what ran inside one is to make the code count for itself, which is what istanbul's instrumenter does. This is the one place `nyc`-style instrumentation earns its keep, exactly as this doc predicted.
+**Three sources, merged.** The first version of this report was wrong, and wrong in the most misleading direction: it labelled five files "never executed by any test" when the unit tier loads them directly through `src/test/webview-harness.ts` and covers them well — the Profiler's `app.js` was reported at 0.0% when it was in fact at 74%. The cause was that `coverage/unit/` only contains `src/**/*.ts`: widening `.c8rc.json` to include the webview JS drags ~6 000 lines of mostly-DOM code into the *gated* report and drops it from 71.4% to 68.5%, failing a threshold for reasons unrelated to the change. So a second, ungated c8 run (`npm run test:coverage:webviews`) collects those files alone, and the merge unions all three sources.
 
-Decisions worth recording:
+Getting a union rather than two half-reports also required the instrumenter to key files by **absolute** path, matching c8. With a relative key the same file appeared twice in the merged report and each entry showed only its own tier's number — which is why `result-view/app.js` first read 25.1% (Playwright alone) rather than 68.0% (both).
 
-- **Instrumented in place, restored in a `finally`.** A webview loads its assets by path from `src/…/htmlContent/js/`, so serving an instrumented copy from elsewhere would mean teaching every view a second asset root purely for tests — changing product code to suit a test. The restore lives in a wrapper script rather than a shell `&&` chain because an instrumented tree that is never restored looks like a catastrophic six-file diff and would be easy to commit by accident; a `finally` survives a failing run, a non-zero exit and a Ctrl-C.
-- **Vendored bundles are excluded** by a `.min.js` filter. Instrumenting jQuery, DataTables and pdfmake would add tens of thousands of lines nobody will test and drown the numbers that matter.
-- **Files with no coverage are listed, not omitted.** The report enumerates the instrumented set rather than the coverage map, because a file nothing has run would otherwise simply be absent — which reads as "not applicable" rather than "not covered". Those four zeroes are the most actionable line in the output.
-- **No threshold.** The unit tier's gate still runs and still fails the build. This report exists to *show* a number nobody has aimed at yet; gating on it would only invite lowering it until it passes.
-- **The specs are unchanged.** Collection is hooked into `app.close()`, which every spec already calls in `afterAll` — asking fifteen specs to remember a teardown step is how coverage silently stops being collected.
+Other decisions worth recording:
 
-Covered by four unit tests, because both properties they pin fail silently: importing the script must not instrument anything (`merge-coverage.mjs` imports it to list the uncovered files), and a stray `.orig-for-coverage` backup in the tree means an interrupted run left instrumented source behind.
+- **Instrumented in place, restored in a `finally`.** A webview loads its assets by path from `src/…/htmlContent/js/`, so serving an instrumented copy from elsewhere would mean teaching every view a second asset root purely for tests. The restore lives in a wrapper script rather than a shell `&&` chain because an instrumented tree that is never restored looks like a catastrophic six-file diff and would be easy to commit by accident; a `finally` survives a failing run, a non-zero exit and a Ctrl-C.
+- **Vendored bundles are excluded** by a `.min.js` filter — instrumenting jQuery, DataTables and pdfmake would drown the numbers that matter.
+- **Files with no coverage are listed, not omitted**, and the label now means "no test in any tier", not "no Playwright spec".
+- **No threshold.** The unit gate still fails the build; gating on a number nobody has aimed at yet would only invite lowering it.
+- **The specs are unchanged.** Collection hooks `app.close()`, which every spec already calls in `afterAll`.
 
-The nightly workflow runs the coverage variant and uploads the merged report as an artifact.
+Four unit tests cover the scripts themselves, because both properties they pin fail silently: importing the instrumenter script must not instrument anything (`merge-coverage.mjs` imports it), and a stray `.orig-for-coverage` means an interrupted run left instrumented source in the tree.
+
+## Phase 5 — closing the gaps the report exposed (done)
+
+The report immediately paid for itself by naming what nothing had ever run.
+
+**Mock Data was the only genuinely untested webview** — 0% across all three tiers. Its three scripts now have the `module.exports.__test__` hook the other four webviews already use, and 15 unit tests take `formOptions.js` to **100%**. What they pin is the coupling *between* the files, which nothing else checks and which fails silently in every direction: `app.js` wires each row's autocomplete against an element id that `formOptions.js` generates, `validateForm()` scans for a class that `mockSearchInput()` emits, and `checkForm()` validates against the same `dataTypes()` list the form is built from. Also pinned: a `NOT NULL` column's null-percentage input is disabled, because Mockaroo would otherwise cheerfully generate nulls for it and the INSERT would fail on the server.
+
+`mock-data/app.js` stays at 0% and honestly so: the panel never opens without a Mockaroo API key — `NodeTable.generateMockData()` refuses before creating the webview — so covering it would need a live third-party account. `formHelpers.js` stops at 26.9% for a related reason: `populateForm`/`parseForm` are jQuery DOM manipulation, and exercising them against the stub DOM would assert the stub's behaviour rather than the code's.
+
+**The Live Profiler had 74% of its logic covered but had never rendered.** It now has a Playwright spec, which took it to **87.5%** — and, as with the Schema Designer in phase 3, reaching it needed a product fix rather than a test trick: `firebird.database.monitorDatabase` was contributed only as a tree context menu and took a `NodeDatabase`, so the Command Palette could not invoke it. It now falls back to the connection picker, which makes the Live Profiler reachable for users who have the tree scrolled or collapsed, not only for the test.
+
+The first run of that spec found something no amount of reading would have: the panel rendered perfectly and showed **"No other active connections."** The profiler's query excludes `CURRENT_CONNECTION` — it reports *other* activity — so with only the profiler attached there is nothing to render. The spec now holds its own Firebird attachment open for its duration. It also drives the view-mode buttons and the pause toggle, neither of which the stub DOM can meaningfully exercise: its `classList` is a no-op, so pane switching is invisible to the unit tier.
 
 ## Suggested phases
 
 1. ~~**VSIX packaging + install smoke test** — no webview automation, immediate value, and a prerequisite for publishing. Can run on every PR.~~ — **done**, see above; it found a packaging defect on its first run.
 2. ~~**Playwright harness**: launch real VS Code with the extension, one spec that opens the results grid and asserts it renders a known query's rows. Nightly, with artifacts on failure.~~ — **done**, see above.
 3. ~~**Broaden the specs** to the Schema Designer's real geometry and the plan view's SVG.~~ — **done**. The Schema Designer needed its command to become palette-invocable; the plan view needed two product bugs fixed, both found by the spec itself.
-4. ~~**Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.~~ — **done**, see above. All four phases of this doc are complete.
+4. ~~**Webview coverage** via the instrumented-bundle fixture, merged into the coverage report from phase 1 of the coverage doc.~~ — **done**, see above.
+5. ~~**Close the gaps the coverage report names**~~ — **done** (phase 5): Mock Data's form scripts and the Live Profiler's rendering. All five phases of this doc are complete.

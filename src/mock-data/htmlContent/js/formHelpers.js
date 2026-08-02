@@ -59,3 +59,9 @@ const parseForm = () => {
     });
   return data;
 };
+
+// Test-only hook — see formOptions.js. `checkForm` reads `dataTypes`, which is a global supplied by
+// formOptions.js in the browser, so a test must provide it before loading this file.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports.__test__ = { checkForm, parseForm, validateForm, populateForm };
+}

@@ -420,3 +420,13 @@ const dataTypes = id => {
   ];
   return data;
 };
+
+// Test-only hook: no-op in a real webview (there is no `module` global there). Matches the
+// convention the other webviews use — see src/test/webview-harness.ts.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports.__test__ = {
+    dataTypes, nullOptions, mockSearchInput,
+    phoneOptions, moneyOptions, charSeqOptions, dateOptions, numberOptions, timeOptions,
+    wordsOptions, fileNameOptions,
+  };
+}

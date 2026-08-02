@@ -13,6 +13,7 @@ All notable changes to the "vscode-firebird-studio" extension will be documented
 
 ### Changed
 
+- **Monitor Database now works from the Command Palette too.** The Live Profiler was reachable only by right-clicking a database in the tree; run it from the palette and it asks which connection you mean.
 - **Set Connection Password, Visualize Schema and Search Objects now work from the Command Palette.** All three previously did nothing there — they were only reachable by right-clicking a database in the tree, which is not obvious and is awkward when the tree is scrolled or collapsed. Run them from the palette and they ask which connection you mean.
 - **Refresh just one part of the connection tree.** Refresh was only available on the view's toolbar, where it re-reads every expanded node across every connection. Hosts, databases and folders such as **Tables** now have their own Refresh, so after creating a table you can re-read that one folder instead of the whole tree.
 - **Object Search can now include system tables, without leaving the search.** Searching only ever covered your own objects, and system tables were reachable only by turning on a setting and browsing the tree. The search box gains a toggle that pulls them in — `RDB$RELATIONS`, `MON$ATTACHMENTS` and the rest — merged into the same alphabetical list and marked as system. It also now says what pressing Enter will do, which differs by object type.

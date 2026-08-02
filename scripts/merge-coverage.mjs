@@ -23,6 +23,13 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const unitFinal = path.join(repoRoot, "coverage", "unit", "coverage-final.json");
+// The unit tier loads five of the eight webview scripts directly (src/test/webview-harness.ts), so
+// a large part of the webviews' logic is already covered there. It does not show up in
+// coverage/unit/ because .c8rc.json's `include` is `src/**/*.ts`, and widening it would drag ~6000
+// lines of mostly-DOM JavaScript into the *gated* report — which drops it from 71.4% to 68.5% and
+// fails a threshold that has nothing to do with this change. Hence a second, ungated c8 run
+// (`npm run test:coverage:webviews`) scoped to those files alone.
+const webviewUnitFinal = path.join(repoRoot, "coverage", "webview-unit", "coverage-final.json");
 const webviewDir = path.join(repoRoot, "coverage", ".tmp-webview");
 const outputDir = path.join(repoRoot, "coverage", "combined");
 
@@ -34,6 +41,13 @@ if (fs.existsSync(unitFinal)) {
   sources++;
 } else {
   console.warn(`No unit coverage at ${path.relative(repoRoot, unitFinal)} — run \`npm run test\` first.`);
+}
+
+if (fs.existsSync(webviewUnitFinal)) {
+  map.merge(JSON.parse(fs.readFileSync(webviewUnitFinal, "utf8")));
+  sources++;
+} else {
+  console.warn("No webview coverage from the unit tier — run `npm run test:coverage:webviews`.");
 }
 
 if (fs.existsSync(webviewDir)) {
@@ -71,7 +85,9 @@ if (allWebviews.length > 0) {
   for (const file of allWebviews.sort()) {
     const key = covered.get(file);
     const pct = key ? map.fileCoverageFor(key).toSummary().statements.pct : 0;
-    const label = key ? "" : "   (never executed by any test)";
+    // "no test" is now a claim across all three sources — the unit tier's harness, the unit tier's
+    // webview run, and the Playwright specs — rather than about the Playwright run alone.
+    const label = pct > 0 ? "" : "   (no test has executed this file)";
     console.log(`  ${pct.toFixed(1).padStart(5)}%  ${path.relative(repoRoot, file)}${label}`);
   }
 }

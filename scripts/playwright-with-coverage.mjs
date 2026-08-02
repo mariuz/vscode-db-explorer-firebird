@@ -49,6 +49,15 @@ try {
   restore();
 }
 
+// The webviews' coverage from the *unit* tier, which loads five of the eight scripts directly.
+// Without this the merged report would credit the Playwright specs alone and call a well-tested
+// file untested. Best-effort: it needs compiled tests, and a missing `out/` should degrade the
+// report rather than fail the run.
+const webviewUnit = run(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "test:coverage:webviews"]);
+if (webviewUnit.status !== 0) {
+  console.warn("Could not collect webview coverage from the unit tier — run `npm run test` first.");
+}
+
 // The merge runs even when specs failed: partial coverage from a partial run is still worth
 // reading, and hiding it would make a red run harder to diagnose rather than easier.
 run(process.execPath, [path.join(repoRoot, "scripts", "merge-coverage.mjs")]);

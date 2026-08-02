@@ -1385,10 +1385,15 @@ export function activate(context: ExtensionContext) {
     })
   );
 
-  /* DB: monitor active connections — opens the Live Profiler */
+  /* DB: monitor active connections — opens the Live Profiler.
+     Takes an optional node so the Command Palette can reach it: without the fallback the command
+     is right-click-only, which is both awkward for users and untestable — see
+     docs/roadmap/webview-ui-testing.md, where the same gap kept the Schema Designer uncovered. */
   context.subscriptions.push(
-    commands.registerCommand("firebird.database.monitorDatabase", (databaseNode: NodeDatabase) => {
-      databaseNode.monitorDatabase(firebirdProfilerView).catch(err => {
+    commands.registerCommand("firebird.database.monitorDatabase", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      if (!node) { return; }
+      node.monitorDatabase(firebirdProfilerView).catch(err => {
         logger.error(err.message ?? err);
         logger.showError("Could not open the Live Profiler. Check logs for details.", ["Show Log Output"]).then(sel => {
           if (sel === "Show Log Output") { logger.showOutput(); }

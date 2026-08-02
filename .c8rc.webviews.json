@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/c8rc.json",
+  "include": ["src/**/htmlContent/js/*.js"],
+  "exclude": ["**/*.min.js", "**/node_modules/**"],
+  "reporter": ["json"],
+  "reports-dir": "coverage/webview-unit",
+  "temp-directory": "coverage/.tmp-webview-unit",
+  "all": true
+}

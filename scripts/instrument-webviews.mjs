@@ -66,8 +66,6 @@ export function webviewScripts() {
 
 function instrument() {
   const instrumenter = createInstrumenter({
-    // Relative to the repo root so the report's file names line up with the ones the unit tier
-    // produces, rather than with an absolute path from whatever machine ran the tests.
     coverageVariable: "__coverage__",
     esModules: false,
     compact: false,
@@ -83,7 +81,10 @@ function instrument() {
     }
     const source = fs.readFileSync(file, "utf8");
     fs.writeFileSync(backup, source);
-    fs.writeFileSync(file, instrumenter.instrumentSync(source, path.relative(repoRoot, file)));
+    // Absolute path, matching the keys c8 writes. istanbul merges coverage by file name, so a
+    // relative key here would leave the same file present twice in the merged report — once from
+    // the Playwright run and once from the unit tier — and neither entry would show the union.
+    fs.writeFileSync(file, instrumenter.instrumentSync(source, file));
     count++;
   }
   console.log(`Instrumented ${count} webview script(s) for coverage.`);

@@ -52,6 +52,7 @@
     "test": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**' --exclude 'out/test/vsix/**'",
     "test:coverage": "node node_modules/typescript7/bin/tsc -p tsconfig.test.json --noEmitOnError false; c8 mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**' --exclude 'out/test/vsix/**'",
     "test:coverage:check": "npm run test:coverage && c8 report --check-coverage --reporter=text-summary",
+    "test:coverage:webviews": "c8 --config .c8rc.webviews.json mocha --require ./out/test/setup.js 'out/test/**/*.test.js' --exclude 'out/test/e2e/**' --exclude 'out/test/suite/**' --exclude 'out/test/vsix/**'",
     "test:e2e": "node node_modules/typescript7/bin/tsc -p tsconfig.e2e.json --noEmitOnError false; mocha 'out/test/e2e/**/*.test.js' --timeout 30000 --exit",
     "package": "vsce package --no-dependencies",
     "test:vsix": "node scripts/smoke-test-vsix.mjs",
