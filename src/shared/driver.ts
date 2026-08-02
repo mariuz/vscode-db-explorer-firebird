@@ -794,6 +794,9 @@ export class NativeClient implements ClientI<Attachment> {
     // with the attach the way it does on the pure-JS driver. Setting it as the session's first
     // statement reaches the same end state — the search path is attachment-scoped either way — at
     // the cost of one extra round trip, and only when a schema is actually configured.
+    //
+    // Requested upstream: asfernandes/node-firebird-drivers#172. If ConnectOptions gains a
+    // searchPath option, this block becomes one more field in the connect() call above.
     const defaultSchema = connectionOptions.defaultSchema?.trim();
     if (defaultSchema) {
       try {
