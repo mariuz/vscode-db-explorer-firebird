@@ -229,6 +229,35 @@ One caveat worth knowing before reading a percentage: the unit tier's report onl
 
 ---
 
+## Releasing
+
+Releases are cut by pushing a tag; `.github/workflows/release.yml` does the rest.
+
+```bash
+# 1. Move the CHANGELOG's "Unreleased" entries under a new heading, e.g. "## 0.2.3 - 2026-08-02".
+# 2. Bump the version in package.json to match.
+# 3. Commit both, then:
+git tag v0.2.3 && git push origin v0.2.3
+```
+
+The workflow refuses to release when the tag and `package.json` disagree, or when `CHANGELOG.md`
+has no section for that version — a release whose notes are empty is worse than one that did not
+happen, and the notes are read at exactly one moment. It then runs the unit gate, packages the
+`.vsix`, installs *that exact artifact* into a real VS Code and smoke-tests it, attaches it to a
+GitHub Release, and publishes to both registries.
+
+**Publishing is skipped when a token is missing, and says so** (a `::warning::` in the job log, so
+a half-published release cannot look like a complete one). Two repository secrets enable it:
+
+| Secret | Where it comes from |
+| --- | --- |
+| `VSCE_PAT` | An Azure DevOps personal access token with the Marketplace **Manage** scope, for publisher `AdrianMariusPopa`. |
+| `OVSX_TOKEN` | <https://open-vsx.org/user-settings/tokens>. Before the first publish only, run `npx ovsx create-namespace AdrianMariusPopa -p <token>` once. |
+
+Run the workflow manually from the Actions tab to rehearse it: the manual trigger defaults to a dry
+run, which packages, verifies and uploads the `.vsix` as a build artifact without publishing
+anything or creating a release.
+
 ## Submitting a Pull Request
 
 1. Ensure your branch is up to date with upstream `master`:

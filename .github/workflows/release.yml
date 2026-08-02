@@ -1,0 +1,149 @@
+name: Release
+
+# Packages the extension, proves the package works, publishes it to both registries, and attaches
+# the .vsix to a GitHub Release.
+#
+# Publishing to each registry is skipped when its token is not configured, so this workflow is
+# useful before either secret exists: tagging still produces a verified, downloadable .vsix and a
+# GitHub Release, and the two publish steps start working the moment the secrets are added.
+#
+#   VSCE_PAT    — Visual Studio Marketplace personal access token (Azure DevOps, Marketplace
+#                 "Manage" scope) for publisher AdrianMariusPopa.
+#   OVSX_TOKEN  — Open VSX access token from https://open-vsx.org/user-settings/tokens.
+#
+# One-time step for Open VSX before the first publish, which cannot be automated here because it
+# only ever runs once and would fail every run thereafter:
+#
+#   npx ovsx create-namespace AdrianMariusPopa -p <OVSX_TOKEN>
+#
+# Trigger by pushing a tag — `git tag v0.2.3 && git push origin v0.2.3` — or run it manually from
+# the Actions tab, which defaults to a dry run that packages and verifies without publishing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Package and verify only — no GitHub Release, no publishing"
+        type: boolean
+        default: true
+
+permissions:
+  # Creating the GitHub Release and uploading the .vsix to it.
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # `secrets` cannot be used in an `if:` directly, so the presence of each token is turned into
+      # a plain string here. Comparing to '' evaluates before interpolation, so no secret value is
+      # ever written into the environment.
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+      HAS_OVSX_TOKEN: ${{ secrets.OVSX_TOKEN != '' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Resolve the version being released
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix=vscode-firebird-studio-$VERSION.vsix" >> "$GITHUB_OUTPUT"
+          echo "Releasing version $VERSION"
+
+      - name: Check the tag matches package.json
+        # Publishing v0.2.3 from a tree that still says 0.2.2 produces a Marketplace entry nobody
+        # can correlate with a tag, and the Marketplace will not let the version be reused.
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$TAG" != "${{ steps.version.outputs.version }}" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version ${{ steps.version.outputs.version }}." >&2
+            exit 1
+          fi
+
+      - name: Extract the release notes
+        # Fails when the changelog still calls this version's work "Unreleased" — see
+        # scripts/release-notes.mjs for why that is worth stopping a release over.
+        run: node scripts/release-notes.mjs "${{ steps.version.outputs.version }}" > release-notes.md
+
+      - name: Unit tests
+        # The full gate CI already runs on every push; repeated here because a release is the one
+        # build where "it passed on main" is not good enough — the tag may point anywhere.
+        run: npm run test:coverage:check
+
+      - name: Package
+        run: npm run package
+
+      - name: Smoke-test the packaged extension
+        # Installs *this* .vsix into a real VS Code and asserts it activates and registers its
+        # commands. `npm run package` inside the smoke script is skipped via VSIX_PATH so the
+        # artifact that gets published is the one that was tested, not a second build of it.
+        run: xvfb-run -a npm run test:vsix
+        env:
+          VSIX_PATH: ${{ steps.version.outputs.vsix }}
+
+      - name: Upload the .vsix as a build artifact
+        # Always, including dry runs and failed publishes — the package is the useful output even
+        # when the release itself does not happen.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: "*.vsix"
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create the GitHub Release
+        # Tag pushes only: a GitHub Release needs a tag to hang off, so a manual non-dry run
+        # publishes to the registries without creating one. That asymmetry is deliberate — the
+        # normal path is a tag, and the manual path exists for re-publishing an already-tagged
+        # version when a registry was down or its token was missing.
+        if: github.event_name == 'push' && env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.version.outputs.vsix }}
+          body_path: release-notes.md
+          name: v${{ steps.version.outputs.version }}
+
+      - name: Publish to the Visual Studio Marketplace
+        if: env.DRY_RUN != 'true' && env.HAS_VSCE_PAT == 'true'
+        run: npx @vscode/vsce publish --no-dependencies --packagePath "${{ steps.version.outputs.vsix }}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX
+        # The reason this workflow exists: the extension is uninstallable in Cursor, VSCodium and
+        # every other non-Microsoft build without an Open VSX entry — while its own MCP server
+        # documentation names Cursor as a client.
+        if: env.DRY_RUN != 'true' && env.HAS_OVSX_TOKEN == 'true'
+        run: npx ovsx publish "${{ steps.version.outputs.vsix }}" --pat "$OVSX_TOKEN"
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+
+      - name: Say what was skipped
+        # A release that quietly published to only one registry looks identical to one that
+        # published to both. This is the line that tells them apart in the job log.
+        if: always()
+        run: |
+          echo "Dry run:               ${DRY_RUN:-false}"
+          echo "VS Marketplace token:  ${HAS_VSCE_PAT}"
+          echo "Open VSX token:        ${HAS_OVSX_TOKEN}"
+          if [ "$HAS_VSCE_PAT" != "true" ]; then
+            echo "::warning::VSCE_PAT is not configured — skipped publishing to the Visual Studio Marketplace."
+          fi
+          if [ "$HAS_OVSX_TOKEN" != "true" ]; then
+            echo "::warning::OVSX_TOKEN is not configured — skipped publishing to Open VSX."
+          fi

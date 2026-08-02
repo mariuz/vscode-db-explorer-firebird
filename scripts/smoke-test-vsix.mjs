@@ -14,8 +14,8 @@
  * the *installed* extension directory rather than the repository. The files under test are
  * therefore the ones the CLI unpacked from the .vsix, which is what matters here, even though
  * VS Code loads them in development mode. runTests() also always passes
- * --disable-workspace-trust, which this extension now needs to activate at all
- * (capabilities.untrustedWorkspaces is `supported: false`).
+ * --disable-workspace-trust; the extension declares `untrustedWorkspaces: "limited"` and would
+ * activate either way, but the flag keeps the smoke test measuring packaging rather than trust.
  */
 
 import { spawnSync } from "node:child_process";

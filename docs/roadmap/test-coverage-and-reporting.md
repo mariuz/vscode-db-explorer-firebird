@@ -135,6 +135,11 @@ A scheduled run cannot block a merge, which is exactly the intent: this reports,
 
 ### Workspace Trust: `supported: false`, declared
 
+> **Superseded by phase 6 below**, which widens this to `supported: "limited"`. The reasoning
+> recorded here was sound at the time and is kept because phase 6 is a response to it — including
+> the claim that no end-to-end untrusted-mode test was possible, which stopped being true the
+> moment the extension started loading in Restricted Mode.
+
 The declaration was missing entirely, and **the default for a missing declaration is already "disabled in Restricted Mode"** — so this changes no behaviour. What it changes is that the user now sees *why*, instead of an extension that silently does not load.
 
 The decision itself is not a formality. Three settings — `firebird.isqlPath`, `firebird.gbakPath`, `firebird.dockerPath` — carry no explicit `scope`, so they default to `window` scope and **can be set from a repository's own `.vscode/settings.json`**. Combined with `.vscode/firebird.json` supplying connection targets, opening an untrusted folder could point the extension at an arbitrary executable or an arbitrary server. That is precisely the threat Restricted Mode exists for, so `supported: false` is the honest answer rather than a cautious one.

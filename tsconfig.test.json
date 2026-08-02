@@ -65,7 +65,8 @@
     "src/result-view/index.ts",
     "src/test/result-view-paging.test.ts",
     "src/test/webview-coverage-scripts.test.ts",
-    "src/test/mock-data-webview.test.ts"
+    "src/test/mock-data-webview.test.ts",
+    "src/test/release-notes.test.ts"
   ],
   "exclude": [
     "node_modules"
