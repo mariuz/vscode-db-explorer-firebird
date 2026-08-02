@@ -12,6 +12,10 @@ import {
   schemaDisplayName,
   schemaQualifiedName,
   splitQualifiedName,
+  connectionSearchPath,
+  parseSearchPath,
+  effectiveSearchPath,
+  searchPathRank,
   DEFAULT_SCHEMA,
 } from '../shared/schema-support';
 
@@ -78,5 +82,95 @@ suite('splitQualifiedName()', function () {
   test('does not treat a leading or trailing dot as a schema separator', function () {
     assert.deepStrictEqual(splitQualifiedName('.ORDERS'), { name: '.ORDERS' });
     assert.deepStrictEqual(splitQualifiedName('ORDERS.'), { name: 'ORDERS.' });
+  });
+});
+
+suite('connectionSearchPath() — what the attach actually sends', function () {
+  test('no configured schema means no search path at all, not PUBLIC', function () {
+    // "" is not the same as ["PUBLIC"]: the first leaves the server's own default alone.
+    assert.deepStrictEqual(connectionSearchPath(undefined), []);
+    assert.deepStrictEqual(connectionSearchPath('   '), []);
+  });
+
+  test('a non-default schema keeps PUBLIC behind it as a fallback', function () {
+    // Mirrors node-firebird's buildSchemaSearchPath(), which is what reaches the wire.
+    assert.deepStrictEqual(connectionSearchPath('SALES'), ['SALES', 'PUBLIC']);
+  });
+
+  test('PUBLIC itself is not repeated', function () {
+    assert.deepStrictEqual(connectionSearchPath('PUBLIC'), ['PUBLIC']);
+  });
+});
+
+suite('parseSearchPath()', function () {
+  test('reads the schemas out of a SET SEARCH_PATH statement', function () {
+    assert.deepStrictEqual(parseSearchPath('SET SEARCH_PATH TO SALES;'), ['SALES']);
+    assert.deepStrictEqual(parseSearchPath('set search_path to sales, public;'), ['sales', 'public']);
+  });
+
+  test('the last statement wins, because that is what the session ends up with', function () {
+    const sql = 'SET SEARCH_PATH TO SALES;\nSELECT * FROM ORDERS;\nSET SEARCH_PATH TO HR;\n';
+    assert.deepStrictEqual(parseSearchPath(sql), ['HR']);
+  });
+
+  test('strips the quotes off a quoted identifier', function () {
+    assert.deepStrictEqual(parseSearchPath('SET SEARCH_PATH TO "MySchema", PUBLIC;'), ['MySchema', 'PUBLIC']);
+  });
+
+  test('is undefined when the document says nothing, so the connection default stands', function () {
+    assert.strictEqual(parseSearchPath('SELECT * FROM ORDERS;'), undefined);
+    assert.strictEqual(parseSearchPath(''), undefined);
+  });
+
+  test('a statement with no schemas after it does not read as an empty path', function () {
+    assert.strictEqual(parseSearchPath('SET SEARCH_PATH TO ;'), undefined);
+  });
+
+  test('terminates at the statement, not at the end of the document', function () {
+    assert.deepStrictEqual(parseSearchPath('SET SEARCH_PATH TO SALES;\nSELECT 1 FROM RDB$DATABASE;'), ['SALES']);
+  });
+});
+
+suite('effectiveSearchPath() — document over connection over default', function () {
+  test('a SET SEARCH_PATH in the document overrides the connection it was opened with', function () {
+    // The statement executes after the attach, so it is what the rest of the session sees.
+    assert.deepStrictEqual(effectiveSearchPath('SET SEARCH_PATH TO HR;', ['SALES', 'PUBLIC']), ['HR']);
+  });
+
+  test('falls back to the connection when the document says nothing', function () {
+    assert.deepStrictEqual(effectiveSearchPath('SELECT 1;', ['SALES', 'PUBLIC']), ['SALES', 'PUBLIC']);
+  });
+
+  test('falls back to Firebird own default when neither says anything', function () {
+    assert.deepStrictEqual(effectiveSearchPath('SELECT 1;'), [DEFAULT_SCHEMA]);
+    assert.deepStrictEqual(effectiveSearchPath('SELECT 1;', []), [DEFAULT_SCHEMA]);
+  });
+
+  test('does not hand back the caller own array to mutate', function () {
+    const connection = ['SALES', 'PUBLIC'];
+    const result = effectiveSearchPath('SELECT 1;', connection);
+    result.push('HR');
+    assert.deepStrictEqual(connection, ['SALES', 'PUBLIC']);
+  });
+});
+
+suite('searchPathRank()', function () {
+  test('ranks by position in the path, so the first entry wins', function () {
+    assert.strictEqual(searchPathRank('SALES', ['SALES', 'PUBLIC']), 0);
+    assert.strictEqual(searchPathRank('PUBLIC', ['SALES', 'PUBLIC']), 1);
+  });
+
+  test('anything off the path sorts after everything on it', function () {
+    assert.strictEqual(searchPathRank('HR', ['SALES', 'PUBLIC']), 2);
+  });
+
+  test('is case-insensitive, since unquoted identifiers reach the server upper-cased', function () {
+    assert.strictEqual(searchPathRank('SALES', ['sales', 'public']), 0);
+    assert.strictEqual(searchPathRank(' sales ', ['SALES']), 0);
+  });
+
+  test('an unknown schema is treated as off the path rather than as the first entry', function () {
+    assert.strictEqual(searchPathRank(undefined, ['SALES', 'PUBLIC']), 2);
+    assert.strictEqual(searchPathRank('', ['SALES', 'PUBLIC']), 2);
   });
 });

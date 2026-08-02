@@ -65,6 +65,98 @@ export function schemaQualifiedName(schema: string | undefined, name: string): s
 }
 
 /**
+ * The search path a *connection* attaches with, given its configured default schema.
+ *
+ * This mirrors node-firebird's own `buildSchemaSearchPath()` deliberately, because that function is
+ * what actually reaches the server: Firebird has no "default schema" attachment parameter, so
+ * `defaultSchema` is implemented by putting the schema at the front of `isc_dpb_search_path` and
+ * keeping `PUBLIC` behind it as a fallback. Duplicating the rule here rather than inferring it
+ * means anything that needs to *predict* name resolution — completion ranking, most of all — agrees
+ * with what the session will really do.
+ *
+ * `SYSTEM` is not listed: the engine appends it whether or not anyone asks, and naming it would
+ * suggest the caller controls something they do not.
+ *
+ * Returns an empty list when no schema is configured — meaning "leave the server's default alone",
+ * which is not the same as `['PUBLIC']`. Only {@link effectiveSearchPath} substitutes a default,
+ * because only a *reader* of the path needs one.
+ *
+ * The `PUBLIC` comparison is case-*sensitive*, which looks like an oversight and is not: the point
+ * is to predict what node-firebird sends, and it compares exactly the same way. A connection whose
+ * `defaultSchema` was hand-written as `public` in `.vscode/firebird.json` really does get
+ * `public,PUBLIC` on the wire. {@link searchPathRank} folds case when *reading* the result, so the
+ * duplicate ranks as one schema rather than two.
+ */
+export function connectionSearchPath(defaultSchema?: string): string[] {
+  const schema = defaultSchema?.trim();
+  if (!schema) {
+    return [];
+  }
+  return schema === DEFAULT_SCHEMA ? [DEFAULT_SCHEMA] : [schema, DEFAULT_SCHEMA];
+}
+
+/**
+ * The schemas named by the last `SET SEARCH_PATH TO …` statement in `sql`, or `undefined` when
+ * there is none.
+ *
+ * The last one wins because that is what the session ends up with once the whole text has run —
+ * matching what **New Query in Schema…** writes at the top of a document.
+ *
+ * Scope worth being honest about: this is a regex over raw text, so a `SET SEARCH_PATH` inside a
+ * comment or a string literal counts, and a quoted identifier containing a comma does not survive.
+ * That is acceptable *here specifically* because the only consumer is completion **ranking** — a
+ * misread reorders a list, it never changes what a statement does, and the fallback is the
+ * connection's own default. Do not reuse this to decide what a query will actually resolve to.
+ */
+export function parseSearchPath(sql: string): string[] | undefined {
+  const re = /\bSET\s+SEARCH_PATH\s+TO\s+([^;\r\n]+)/gi;
+  let last: RegExpExecArray | null = null;
+  for (let m = re.exec(sql); m; m = re.exec(sql)) {
+    last = m;
+  }
+  if (!last) {
+    return undefined;
+  }
+  const schemas = last[1]
+    .split(",")
+    .map(part => part.trim().replace(/^"(.*)"$/, "$1").trim())
+    .filter(Boolean);
+  return schemas.length ? schemas : undefined;
+}
+
+/**
+ * The search path a given document's statements will run under: what the document says, else what
+ * the connection was opened with, else Firebird's own default.
+ *
+ * The document wins over the connection because a `SET SEARCH_PATH` in the text executes after the
+ * attach and overrides it for the rest of the session — which is exactly what **New Query in
+ * Schema…** relies on.
+ */
+export function effectiveSearchPath(documentText: string, connectionPath: string[] = []): string[] {
+  const fromDocument = parseSearchPath(documentText);
+  if (fromDocument) {
+    return fromDocument;
+  }
+  return connectionPath.length ? [...connectionPath] : [DEFAULT_SCHEMA];
+}
+
+/**
+ * Where a schema sits in the search path — lower sorts first, and anything not on the path sorts
+ * after everything that is.
+ *
+ * Case-insensitive: unquoted identifiers reach the server folded to upper case, so a search path
+ * typed as `sales` and a catalogue schema of `SALES` are the same schema.
+ */
+export function searchPathRank(schema: string | undefined, searchPath: string[]): number {
+  const target = schema?.trim().toUpperCase();
+  if (!target) {
+    return searchPath.length;
+  }
+  const index = searchPath.findIndex(entry => entry.trim().toUpperCase() === target);
+  return index === -1 ? searchPath.length : index;
+}
+
+/**
  * Splits `SCHEMA.OBJECT` back into its parts, tolerating an unqualified name.
  *
  * Note this does not attempt to handle Firebird 6's `%` scope specifier or quoted identifiers

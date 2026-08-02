@@ -7,7 +7,11 @@
  */
 
 import * as assert from 'assert';
-import { getSqlContext, SqlContext, tableCompletionParts } from '../language-server/completionProvider';
+import { getSqlContext, SqlContext, tableCompletionParts, rankingSearchPath, rankedSortText } from '../language-server/completionProvider';
+import { Schema } from '../interfaces';
+
+/** A table as db-words.provider builds it — fields are irrelevant to every test below. */
+const table = (name: string, schema?: string): Schema.Table => ({ name, schema, fields: [] });
 
 // ── General context ───────────────────────────────────────────────────────────
 
@@ -146,5 +150,107 @@ suite('tableCompletionParts() — Firebird 6 schemas', function () {
     assert.strictEqual(parts.label, 'LEGACY');
     assert.strictEqual(parts.insertText, undefined);
     assert.strictEqual(parts.detail, undefined);
+  });
+});
+
+// ── Search-path-aware ranking ────────────────────────────────────────────────
+//
+// The case this exists for: SALES.ORDERS and PUBLIC.ORDERS both exist, the session resolves
+// unqualified names through SALES first, and the completion list must offer the one you would
+// actually get before the one you would not.
+
+suite('rankingSearchPath() — when ranking applies at all', function () {
+  test('a pre-Firebird-6 database is never ranked, so its ordering is unchanged', function () {
+    const tables = [table('ORDERS'), table('CUST')];
+    assert.strictEqual(rankingSearchPath(tables, 'SELECT 1;', undefined), undefined);
+  });
+
+  test('a single-schema Firebird 6 database is not ranked either — there is nothing to rank', function () {
+    // Every Firebird 6 database until someone runs CREATE SCHEMA. Ranking here would reorder
+    // tables against ~1400 keywords for no benefit whatsoever.
+    const tables = [table('ORDERS', 'PUBLIC'), table('CUST', 'PUBLIC')];
+    assert.strictEqual(rankingSearchPath(tables, 'SELECT 1;', ['PUBLIC']), undefined);
+  });
+
+  test('two schemas turn ranking on, using the connection path', function () {
+    const tables = [table('ORDERS', 'PUBLIC'), table('ORDERS', 'SALES')];
+    assert.deepStrictEqual(rankingSearchPath(tables, 'SELECT 1;', ['SALES', 'PUBLIC']), ['SALES', 'PUBLIC']);
+  });
+
+  test('a SET SEARCH_PATH in the document beats the connection default', function () {
+    // What "New Query in Schema…" writes at the top of the document.
+    const tables = [table('ORDERS', 'PUBLIC'), table('ORDERS', 'SALES')];
+    const sql = 'SET SEARCH_PATH TO HR;\n\nSELECT * FROM ';
+    assert.deepStrictEqual(rankingSearchPath(tables, sql, ['SALES', 'PUBLIC']), ['HR']);
+  });
+
+  test('with two schemas and no path known anywhere, Firebird own default is assumed', function () {
+    const tables = [table('ORDERS', 'PUBLIC'), table('ORDERS', 'SALES')];
+    assert.deepStrictEqual(rankingSearchPath(tables, 'SELECT 1;', undefined), ['PUBLIC']);
+  });
+
+  test('schema case does not split one schema into two', function () {
+    const tables = [table('ORDERS', 'PUBLIC'), table('CUST', 'public')];
+    assert.strictEqual(rankingSearchPath(tables, 'SELECT 1;', ['PUBLIC']), undefined);
+  });
+});
+
+suite('rankedSortText() — the tier itself', function () {
+  test('a table on the search path sorts before one that is not', function () {
+    const path = ['SALES', 'PUBLIC'];
+    const sales = rankedSortText('SALES.ORDERS', table('ORDERS', 'SALES'), path)!;
+    const hr = rankedSortText('HR.ORDERS', table('ORDERS', 'HR'), path)!;
+    assert.ok(sales < hr, `expected ${sales} to sort before ${hr}`);
+  });
+
+  test('earlier on the path sorts first, even against an alphabetically earlier label', function () {
+    // PUBLIC.ORDERS labels as bare "ORDERS", which sorts before "SALES.ORDERS" alphabetically —
+    // exactly the ordering that made the reachable table hard to find.
+    const path = ['SALES', 'PUBLIC'];
+    const sales = rankedSortText('SALES.ORDERS', table('ORDERS', 'SALES'), path)!;
+    const pub = rankedSortText('ORDERS', table('ORDERS', 'PUBLIC'), path)!;
+    assert.ok(sales < pub, `expected ${sales} to sort before ${pub}`);
+  });
+
+  test('within one tier the ordering stays alphabetical', function () {
+    const path = ['SALES'];
+    const a = rankedSortText('SALES.CUST', table('CUST', 'SALES'), path)!;
+    const b = rankedSortText('SALES.ORDERS', table('ORDERS', 'SALES'), path)!;
+    assert.ok(a < b, `expected ${a} to sort before ${b}`);
+  });
+
+  test('the rank is zero-padded, so tier 10 sorts after tier 9 rather than between 1 and 2', function () {
+    const path = Array.from({ length: 12 }, (_, i) => `S${i}`);
+    const ninth = rankedSortText('X', table('X', 'S9'), path)!;
+    const tenth = rankedSortText('X', table('X', 'S10'), path)!;
+    const second = rankedSortText('X', table('X', 'S2'), path)!;
+    assert.ok(second < ninth && ninth < tenth, `expected ${second} < ${ninth} < ${tenth}`);
+  });
+
+  test('no search path means no sortText, leaving VS Code to sort by label as before', function () {
+    assert.strictEqual(rankedSortText('ORDERS', table('ORDERS', 'PUBLIC'), undefined), undefined);
+  });
+});
+
+suite('tableCompletionParts() — ranking', function () {
+  test('carries the tier through without touching the label or the inserted text', function () {
+    // Ranking answers "which did you mean"; it must not change what accepting the item writes.
+    const parts = tableCompletionParts(table('ORDERS', 'SALES'), ['SALES', 'PUBLIC']);
+    assert.strictEqual(parts.label, 'SALES.ORDERS');
+    assert.strictEqual(parts.insertText, 'SALES.ORDERS');
+    assert.strictEqual(parts.sortText, '00SALES.ORDERS');
+  });
+
+  test('an off-path table is still offered, just later', function () {
+    const parts = tableCompletionParts(table('ORDERS', 'HR'), ['SALES', 'PUBLIC']);
+    assert.strictEqual(parts.label, 'HR.ORDERS');
+    assert.strictEqual(parts.sortText, '02HR.ORDERS');
+  });
+
+  test('an unranked list produces exactly what it always did', function () {
+    const parts = tableCompletionParts(table('ORDERS', 'PUBLIC'));
+    assert.strictEqual(parts.sortText, undefined);
+    assert.strictEqual(parts.label, 'ORDERS');
+    assert.strictEqual(parts.insertText, 'PUBLIC.ORDERS');
   });
 });

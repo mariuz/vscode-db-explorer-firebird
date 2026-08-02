@@ -1,6 +1,6 @@
 import {CompletionItemProvider, TextDocument, CompletionItem, CompletionItemKind, MarkdownString, Position, CompletionContext, Range} from "vscode";
 import {Schema, FirebirdSchema, FirebirdReserved} from "../interfaces";
-import { schemaDisplayName, schemaQualifiedName } from "../shared/schema-support";
+import { schemaDisplayName, schemaQualifiedName, effectiveSearchPath, searchPathRank } from "../shared/schema-support";
 import {firebirdReserved, firebirdPsqlKeywords, firebirdBuiltinFunctions} from "./firebird-reserved";
 
 interface SchemaProvider {
@@ -77,11 +77,12 @@ export class CompletionProvider implements CompletionItemProvider {
         context,
         schema?.reservedKeywords ? firebirdReserved : undefined,
         schema?.tables?.length > 0 ? schema.tables : undefined,
+        schema?.searchPath,
       );
     });
   }
 
-  private getCompletionItems(document: TextDocument, position: Position, context: CompletionContext, reservedWords?: FirebirdReserved[], tables?: Schema.Table[]) {
+  private getCompletionItems(document: TextDocument, position: Position, context: CompletionContext, reservedWords?: FirebirdReserved[], tables?: Schema.Table[], connectionSearchPath?: string[]) {
     const items: CompletionItem[] = [];
 
     let triggeredByDot = context.triggerCharacter === '.' || (context.triggerKind === 0 && document.lineAt(position).text[position.character - 1] === '.');
@@ -108,12 +109,14 @@ export class CompletionProvider implements CompletionItemProvider {
       if (!triggeredByDot) {
         // In FROM/JOIN context, prioritize table names
         if (sqlContext === SqlContext.FromClause || sqlContext === SqlContext.General) {
+          const searchPath = rankingSearchPath(tables, text, connectionSearchPath);
           tables.forEach(tbl => {
             const alias = text.match(RegExp(`((from)|(join)) ${tbl.name} (as )?(?!(on)|=|(with)|(using)|(as))(?<alias>\\w+)`, 'i'))?.groups?.alias;
-            const parts = tableCompletionParts(tbl);
-            tableItems.push(new TableCompletionItem(parts.label, parts.detail, tbl.fields, parts.insertText));
+            const parts = tableCompletionParts(tbl, searchPath);
+            tableItems.push(new TableCompletionItem(parts.label, parts.detail, tbl.fields, parts.insertText, parts.sortText));
             if (alias) {
-              tableItems.push(new TableCompletionItem(alias, tbl.name, tbl.fields));
+              // The alias stands for the same table, so it earns the same rank.
+              tableItems.push(new TableCompletionItem(alias, tbl.name, tbl.fields, undefined, rankedSortText(alias, tbl, searchPath)));
             }
           });
         }
@@ -179,6 +182,46 @@ class PsqlCompletionItem extends CompletionItem {
 }
 
 /**
+ * The search path table completions should be ranked by, or `undefined` for no ranking at all.
+ *
+ * Ranking is withheld unless the tables actually span more than one schema, and that restraint is
+ * the point rather than an optimisation. A `sortText` is absolute: it orders a table against the
+ * ~1 400 keywords and functions in the same list, not only against other tables. On a pre-Firebird-6
+ * database, or a Firebird 6 one where nobody has run `CREATE SCHEMA`, there is nothing to rank and
+ * no reason to disturb an ordering that has been stable for the extension's whole life — so those
+ * databases get byte-identical output to before.
+ *
+ * Where there *are* two schemas, tables do sort above keywords. That is a real change, and the
+ * trade is deliberate: the case this exists for is two identically-named tables where only one is
+ * reachable unqualified, and burying the reachable one alphabetically among keywords is the
+ * failure being fixed. Typing narrows by fuzzy score first in any case, so the effect is confined
+ * to an unfiltered list.
+ */
+export function rankingSearchPath(tables: Schema.Table[], documentText: string, connectionSearchPath?: string[]): string[] | undefined {
+  const schemas = new Set(tables.map(tbl => tbl.schema?.trim().toUpperCase()).filter(Boolean));
+  if (schemas.size < 2) {
+    return undefined;
+  }
+  return effectiveSearchPath(documentText, connectionSearchPath);
+}
+
+/**
+ * `sortText` placing `label` in its schema's search-path tier: on-path schemas in path order first,
+ * everything else after, alphabetical within each tier.
+ *
+ * The rank is zero-padded so tier 10 sorts after tier 9 rather than between 1 and 2 — `sortText` is
+ * compared as a string, not a number — and clamped at 99 because a search path that long is a
+ * pathology, not a case worth widening the format for.
+ */
+export function rankedSortText(label: string, table: Schema.Table, searchPath?: string[]): string | undefined {
+  if (!searchPath) {
+    return undefined;
+  }
+  const rank = Math.min(searchPathRank(table.schema, searchPath), 99);
+  return `${String(rank).padStart(2, "0")}${label}`;
+}
+
+/**
  * How a table is presented in the completion list.
  *
  * The label is what a human reads — bare in the default schema, qualified elsewhere, so two
@@ -186,16 +229,22 @@ class PsqlCompletionItem extends CompletionItem {
  * *inserted* text is qualified whenever a schema is known, so accepting a completion never leaves
  * the resulting SQL depending on the session's search path.
  *
+ * The label stays independent of the search path on purpose. Ranking answers "which of these did
+ * you most likely mean"; renaming the entries to match the path would answer "which one is this",
+ * and answering that from a heuristic parse of the document text is exactly the kind of confident
+ * wrongness the qualified `insertText` exists to avoid.
+ *
  * Pure, and exported for that reason: driving the whole provider needs a faithful TextDocument,
  * while this is the part with a decision in it.
  */
-export function tableCompletionParts(table: Schema.Table): { label: string; detail?: string; insertText?: string } {
+export function tableCompletionParts(table: Schema.Table, searchPath?: string[]): { label: string; detail?: string; insertText?: string; sortText?: string } {
   const label = schemaDisplayName(table.schema, table.name);
+  const sortText = rankedSortText(label, table, searchPath);
   if (!table.schema) {
-    return { label };
+    return { label, sortText };
   }
   const qualified = schemaQualifiedName(table.schema, table.name);
-  return { label, detail: qualified, insertText: qualified };
+  return { label, detail: qualified, insertText: qualified, sortText };
 }
 
 class TableCompletionItem extends CompletionItem {
@@ -204,11 +253,16 @@ class TableCompletionItem extends CompletionItem {
    * @param {string} label
    * @param {string} [detail]
    * @param {Schema.Field[]} [fields]
+   * @param {string} [insertText]
+   * @param {string} [sortText] search-path tier — see {@link rankedSortText}
    * @memberof TableCompletionItem
    */
-  constructor(label: string, detail?: string, fields?: Schema.Field[], insertText?: string) {
+  constructor(label: string, detail?: string, fields?: Schema.Field[], insertText?: string, sortText?: string) {
     super(label, CompletionItemKind.File);
     this.detail = detail;
+    if (sortText) {
+      this.sortText = sortText;
+    }
     if (insertText && insertText !== label) {
       this.insertText = insertText;
       // Without this VS Code filters on the inserted text, so typing `ord` would not match a

@@ -774,6 +774,20 @@ suite('setSearchPathQuery() (Firebird 6)', function () {
       assert.throws(() => setSearchPathQuery(bad), `accepted ${JSON.stringify(bad)}`);
     }
   });
+
+  test('emits a whole path when given one, which is what the native driver has to send', function () {
+    // node-firebird puts PUBLIC behind the configured schema as a fallback; the native driver
+    // reproduces that path with this statement, so both drivers resolve unqualified names alike.
+    assert.strictEqual(setSearchPathQuery(['SALES', 'PUBLIC']), 'SET SEARCH_PATH TO SALES, PUBLIC;');
+  });
+
+  test('validates every entry of a path, not just the first', function () {
+    assert.throws(() => setSearchPathQuery(['SALES', 'PUBLIC; DROP DATABASE']));
+  });
+
+  test('refuses an empty path rather than emitting a statement with no schemas', function () {
+    assert.throws(() => setSearchPathQuery([]));
+  });
 });
 
 suite('alterSchemaQuery() (Firebird 6)', function () {

@@ -189,7 +189,7 @@ Naming uses the split from phase 1h: routes and schema components take `displayN
 
 Three things remain, in the order they are worth doing:
 
-- **Search-path-aware completion ranking.** Completion distinguishes same-named tables across schemas and inserts qualified names — done in `8d56afa`, which has no phase section here — but it does not *rank* them — a table in the session's search path should be offered before one that is not. Self-contained, and the only remaining read-path gap.
+- ~~**Search-path-aware completion ranking.**~~ — **done**, see phase 3a. It was the last read-path gap.
 - **Per-schema project folders** (`schemas/SALES/tables/…`) for Database Projects. Phase 2b makes the current per-object layout correct, so this is a tidier long-term shape rather than a fix; it is a layout decision that will churn existing projects, which is why it is not a flag flip.
 - ~~**A per-connection default schema**~~ — **done**, unblocked by node-firebird 2.14.2. See phase 3.
 
@@ -372,10 +372,95 @@ Four privilege codes were also being displayed as bare letters: `G` (USAGE, Fire
 
 Covered at three levels, because each catches something the others cannot: the SQL shape in unit tests, the **manifest** entry (a `showPrivileges()` method with no `view/item/context` contribution is dead code that nothing else would notice), and the two catalogue facts above as extension-host tests against a real 6.0.0 server — if a later Firebird renumbers object type 38, that suite says so instead of the viewer quietly coming back empty.
 
+## Phase 3a — search-path-aware completion ranking (done)
+
+The last read-path gap. Completion could already tell `SALES.ORDERS` from `PUBLIC.ORDERS` and insert
+the qualified name (`8d56afa`), but it offered them in whatever order the label happened to sort in
+— so on a session whose search path is `SALES, PUBLIC`, the entry labelled bare `ORDERS`, the one
+you would *not* get by typing `ORDERS`, sorted first. Ranking closes that.
+
+**What the ranking is.** Three pure functions in `schema-support.ts`. `connectionSearchPath()` gives
+the path a connection attaches with; `effectiveSearchPath()` resolves a document's path as *document
+`SET SEARCH_PATH` > connection > `PUBLIC`*; `searchPathRank()` turns a schema into a tier — its
+index on the path, or one past the end when it is off the path entirely. `completionProvider.ts`
+renders that tier into a zero-padded `sortText`.
+
+### `connectionSearchPath()` mirrors node-firebird deliberately, and it was checked on the wire
+
+Firebird has no "default schema" attachment parameter — `CURRENT_SCHEMA` is just the first existing
+entry of the search path — so node-firebird implements `defaultSchema` by putting it at the front of
+`isc_dpb_search_path` and keeping `PUBLIC` behind it. Anything predicting name resolution has to
+reproduce that rule rather than infer it. Verified against a live 6.0.0 server rather than read off
+the source:
+
+```
+no defaultSchema      -> path="PUBLIC", "SYSTEM"            current=PUBLIC
+defaultSchema=SALES   -> path="SALES", "PUBLIC", "SYSTEM"   current=SALES
+defaultSchema=PUBLIC  -> path="PUBLIC", "SYSTEM"            current=PUBLIC
+```
+
+All three match what `connectionSearchPath()` returns, including that `PUBLIC` is not repeated when
+it *is* the configured schema.
+
+### The two drivers did not agree about what a default schema means
+
+Modelling the path surfaced a real defect. The native driver has no search-path field on
+`ConnectOptions`, so it applied `defaultSchema` by running `SET SEARCH_PATH TO <schema>` as the
+session's first statement — a single name, where node-firebird sends the schema *and* `PUBLIC`. The
+existing comment claimed this "reaches the same end state". It does not. Live, on a database with a
+table that exists only in `PUBLIC`:
+
+```
+SET SEARCH_PATH TO SALES;          -> path="SALES", "SYSTEM"
+  SELECT COUNT(*) FROM PW_ONLY_IN_PUBLIC;
+  -- SQLSTATE 42S02, -204, Table unknown
+
+SET SEARCH_PATH TO SALES, PUBLIC;  -> path="SALES", "PUBLIC", "SYSTEM"
+  SELECT COUNT(*) FROM PW_ONLY_IN_PUBLIC;   -- 0 rows, resolves fine
+```
+
+So on one saved connection with `defaultSchema: SALES`, toggling `firebird.useNativeDriver` — a
+setting presented as a transport/WireCrypt choice — broke every unqualified reference to a `PUBLIC`
+table. `setSearchPathQuery()` now takes a list (validating every entry, not just the first) and the
+native path sends the whole `connectionSearchPath()`. Both drivers now attach to the same path, and
+ranking has one thing to model instead of two.
+
+### Ranking is withheld unless there is something to rank
+
+`rankingSearchPath()` returns `undefined` — no `sortText` at all — unless the loaded tables span more
+than one schema. This is the load-bearing decision in the phase, not an optimisation.
+
+A `sortText` is absolute: it orders an item against the ~1 400 keywords, functions and PSQL words in
+the same list, not just against other tables. Ranking unconditionally would reorder table-vs-keyword
+completion for *every* user of the extension, including every pre-Firebird-6 database, to fix a
+problem only a multi-schema database has. Gated, a pre-6 database and a Firebird 6 database where
+nobody has run `CREATE SCHEMA` — which is every 6 database out of the box — get byte-identical
+output to before.
+
+Where there *are* two schemas, tables do sort above keywords. That is a real behaviour change and
+the trade is accepted: the case this exists for is two identically-named tables where only one is
+reachable unqualified, and burying the reachable one alphabetically among keywords is the failure
+being fixed. Typing narrows by fuzzy score before `sortText` breaks ties, so the effect is confined
+to an unfiltered list.
+
+### What was deliberately not done
+
+- **The label still does not follow the search path.** With a path of `SALES`, `PUBLIC.ORDERS` is
+  still labelled bare `ORDERS`, which is arguably misleading — bare is what `schemaDisplayName()`
+  gives the *default* schema, not the *current* one. Renaming entries to match the path would be
+  asserting which object a name resolves to, and `parseSearchPath()` is a regex over document text,
+  not a resolver. Ranking is a guess about intent and degrades to a reorder when wrong; a label is a
+  statement of fact and degrades to a lie. The qualified `insertText` already makes the accepted
+  text unambiguous either way.
+- **`parseSearchPath()` is not a general parser.** It matches inside comments and string literals
+  and does not survive a quoted identifier containing a comma. Acceptable *here specifically*
+  because the only consumer is ranking, where a misread reorders a list and never changes what a
+  statement does. It is documented as not for reuse.
+
 ## Suggested phases
 
 1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **done**: version cache, schema-aware listings for every object category, schema-filtered column metadata, qualified labels/SQL, and the Schemas tree level (phases 1a–1j).
 2. ~~**Write path**: two-part qualified identifiers threaded through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.~~ — **done**, and largely satisfied by the read path rather than separately: qualification lives in the names themselves. Audited table by table in "Phase 2 status" above.
-3. **Search path**: ~~"New Query in Schema"~~ and ~~the per-connection default schema~~ — both **done**; the second was unblocked by node-firebird 2.14.2 exposing `isc_dpb_search_path`. Search-path-aware completion *ranking* remains.
+3. ~~**Search path**: "New Query in Schema", the per-connection default schema, and search-path-aware completion *ranking*.~~ — all **done**; the second was unblocked by node-firebird 2.14.2 exposing `isc_dpb_search_path`, and the third (phase 3a) also reconciled the two drivers, which disagreed about what a default schema means.
 4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
 5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5); ~~`ALTER SCHEMA`~~ — **done**; ~~schema-level grants~~ — **done** (phase 6). Per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).

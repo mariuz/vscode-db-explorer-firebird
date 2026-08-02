@@ -11,6 +11,7 @@ import {splitStatements} from './sql-splitter';
 import {extractTableNames as extractTableNamesImpl, buildIndexMetadataQuery, renderIndexMetadataPlan, validateReadOnlyStatement} from './sql-analysis';
 import {PooledClient, ConnectionPoolOptions} from './connection-pool';
 import {setSearchPathQuery} from './queries';
+import {connectionSearchPath} from './schema-support';
 import {SshTunnelClient} from './ssh-tunnel';
 import {getOptions} from '../config';
 import {
@@ -795,17 +796,23 @@ export class NativeClient implements ClientI<Attachment> {
     // statement reaches the same end state — the search path is attachment-scoped either way — at
     // the cost of one extra round trip, and only when a schema is actually configured.
     //
+    // It must send the *whole* path connectionSearchPath() describes, not just the configured
+    // schema: node-firebird keeps PUBLIC behind it as a fallback, so sending `SET SEARCH_PATH TO
+    // SALES` alone would leave the native driver unable to resolve an unqualified PUBLIC table that
+    // the pure-JS driver resolves fine — the same saved connection behaving differently depending
+    // on a setting that is meant to be a performance choice.
+    //
     // Requested upstream: asfernandes/node-firebird-drivers#172. If ConnectOptions gains a
     // searchPath option, this block becomes one more field in the connect() call above.
-    const defaultSchema = connectionOptions.defaultSchema?.trim();
-    if (defaultSchema) {
+    const searchPath = connectionSearchPath(connectionOptions.defaultSchema);
+    if (searchPath.length) {
       try {
-        await this.queryPromise(attachment, setSearchPathQuery(defaultSchema));
+        await this.queryPromise(attachment, setSearchPathQuery(searchPath));
       } catch (err: any) {
         // A pre-6 server rejects the statement outright. That is not a reason to fail the
         // connection: the pure-JS driver silently ignores the same setting on such a server, and
         // the two drivers should not disagree about whether a connection can be opened at all.
-        logger.debug(`Could not apply default schema "${defaultSchema}": ${err?.message ?? err}`);
+        logger.debug(`Could not apply search path "${searchPath.join(", ")}": ${err?.message ?? err}`);
       }
     }
     return attachment;

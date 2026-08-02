@@ -184,12 +184,21 @@ export function getSchemasQuery(includeSystem = false): string {
  * `SET SEARCH_PATH` (Firebird 6+) — sets which schemas unqualified names resolve through for the
  * rest of the session.
  *
+ * Accepts a list because a search path *is* one: the native driver has to reproduce the whole path
+ * node-firebird sends as `isc_dpb_search_path` (see `connectionSearchPath()`), not just its first
+ * entry, or the two drivers resolve unqualified names differently for the same saved connection.
+ * A single name is still accepted, which is what **New Query in Schema…** writes.
+ *
  * `SYSTEM` is appended implicitly by the engine whether or not it is listed, so it is left out
  * here: naming it would suggest the caller controls something they do not.
  */
-export function setSearchPathQuery(schemaName: string): string {
-  assertValidIdentifier(schemaName, "schema name");
-  return `SET SEARCH_PATH TO ${schemaName};`;
+export function setSearchPathQuery(schemaName: string | string[]): string {
+  const schemas = (Array.isArray(schemaName) ? schemaName : [schemaName]).map(name => name.trim());
+  if (schemas.length === 0) {
+    throw new Error("Invalid schema name: the search path is empty");
+  }
+  schemas.forEach(name => assertValidIdentifier(name, "schema name"));
+  return `SET SEARCH_PATH TO ${schemas.join(", ")};`;
 }
 
 /** `CREATE SCHEMA` (Firebird 6+). The name is validated by the caller before it reaches here. */

@@ -5,7 +5,7 @@ import { ConnectionOptions, Schema } from '../interfaces';
 import { logger } from '../logger/logger';
 import { Driver } from '../shared/driver';
 import { getEngineMajorVersion } from "../shared/engine-version";
-import { supportsSchemas } from "../shared/schema-support";
+import { supportsSchemas, connectionSearchPath } from "../shared/schema-support";
 
 type ResultSet = Array<any>;
 
@@ -41,6 +41,15 @@ export class KeywordsDb {
         const withSchemas = supportsSchemas(
             await getEngineMajorVersion(conOptions.id, (sql: string) => Driver.client.queryPromise<any>(connection, sql))
         );
+        // What this connection's sessions actually attach with, so completion can rank a table
+        // reachable without qualification above one that is not. Only meaningful on Firebird 6.
+        if (withSchemas) {
+            const searchPath = connectionSearchPath(conOptions.defaultSchema);
+            if (searchPath.length) {
+                schema.searchPath = searchPath;
+            }
+        }
+
         const resultSet: ResultSet = await Driver.client.queryPromise(connection, getTablesQuery(maxTablesCount, withSchemas));
         if (!resultSet || resultSet.length === 0) {
             return undefined;
