@@ -83,7 +83,7 @@ Every one of these produced a silent or misleading failure, and each is now a co
 
 `firebird.database.setPassword` takes a `NodeDatabase` argument, so it is **not invocable from the Command Palette** — the only way to give a workspace connection (`.vscode/firebird.json`, which by design cannot carry a password) its password is the tree's context menu. The spec works around this by using the wizard's paste-a-connection-string path instead. A palette-invocable variant that falls back to the existing `connection-picker.ts` would be a small usability improvement in its own right, and would make workspace connections testable directly. Not done here — it is a product change, not a testing one.
 
-## Phase 3 — Schema Designer and plan view (Schema Designer now done)
+## Phase 3 — Schema Designer and plan view (both done)
 
 **Update.** The Schema Designer half is now covered, and what unblocked it was not a testing change at all: `firebird.schemaVisualizer.open` learned to fall back to the connection picker when invoked without a tree node, so the Command Palette can reach it. Lead 2 below diagnosed the blockage correctly — the command was tree-only — but treated it as something the test had to work around rather than something the product should fix. Making it palette-invocable removed the problem entirely, and `schema-designer.spec.ts` now drives the real designer and asserts a table name appears inside the webview, which is the first time `render()`/`measureAll()` have run in any test.
 
@@ -95,17 +95,29 @@ Underneath it was a second bug. With the error fixed, the diagram reported `Coul
 
 The spec asserts the native-driver message rather than a diagram, because that is the branch a default install actually reaches — a real `PLAN (...)` string needs `firebird.useNativeDriver`.
 
+### Superseded: the original "not delivered" record
+
+> Everything from here to the end of this phase was written when both halves had failed, and the
+> **Update** above replaces it: the Schema Designer and the plan view are both covered, and
+> `render()`/`measureAll()` run in `schema-designer.spec.ts`. Of the three leads below, **2 and 3
+> are resolved** — each is struck through with what actually happened — and **only lead 1 is still
+> open**. Kept rather than deleted because the leads record how each blockage was diagnosed, which
+> is worth having; annotated in place because a confident "here is what remains" list is exactly
+> what gets read as current, however out of date the prose above it says it is. That is not
+> hypothetical — this block was read as live work, and the Update was missed, because the leads
+> read like the newest thing in the section.
+
 **Originally recorded as not delivered:** Specs for both were written and neither could be made to pass, so neither was kept — a spec that does not pass is worse than no spec, and one that passes for the wrong reason is worse still. What was kept is the harness work that came out of the attempt: `addConnection()`, `runQueryInEditor()` and `expectWebviewText()` are now shared helpers in the fixture, and `results-grid.spec.ts` uses them.
 
 `expectWebviewText()` is worth keeping regardless of phase 3. Asserting straight through the two-deep `frameLocator` chain while a webview is still being created reports `element(s) not found` and never recovers, even with a 60-second timeout — the chain resolves against a frame tree that is still changing underneath it. Waiting for the outer `iframe.webview` *element* to be attached first makes the lookup deterministic.
 
-Three concrete leads for whoever picks this up, all established by failing rather than by guessing:
+Three concrete leads for whoever picks this up, all established by failing rather than by guessing — **only the first is still open**:
 
 1. **When the results webview opens is not obvious, and a spec cannot assume it.** A DDL-only run reports through a notification (`Info: Create executed successfully.`) and opens no webview at all. A mixed `RECREATE TABLE …; SELECT …;` batch opened a grid containing *both* statements in a one-off debug run, but the same batch inside a spec never produced one within 60 s. Pin down the actual rule in `runSqlBatch()`/`displayBatch()` before writing a spec that waits on it — this may be a product question (should a mixed batch show its SELECT results?) rather than a test one.
-2. **The Schema Designer can only be opened from the tree.** `firebird.schemaVisualizer.open` is contributed as a `view/item/context` menu on `viewItem == database` and takes a `NodeDatabase`, so the palette cannot invoke it. Right-clicking a `.monaco-list-row` matched by name produced VS Code's generic "Copy Text" menu instead of the tree's, so the row targeting needs to be worked out properly: expand the host node first, then identify the database row within `.sidebar` specifically.
-3. **"Show Graphical Query Plan" did not render within 60 s** with a `SELECT` in the active editor and an active connection. Whether it needs a selection, a saved (non-dirty) file, or something else is unknown — that is the first thing to check.
+2. ~~**The Schema Designer can only be opened from the tree.** `firebird.schemaVisualizer.open` is contributed as a `view/item/context` menu on `viewItem == database` and takes a `NodeDatabase`, so the palette cannot invoke it. Right-clicking a `.monaco-list-row` matched by name produced VS Code's generic "Copy Text" menu instead of the tree's, so the row targeting needs to be worked out properly: expand the host node first, then identify the database row within `.sidebar` specifically.~~ — **resolved**, and the diagnosis was right while the proposed fix was wrong: the row targeting never needed to be worked out, because the command became palette-invocable. See the Update above.
+3. ~~**"Show Graphical Query Plan" did not render within 60 s** with a `SELECT` in the active editor and an active connection. Whether it needs a selection, a saved (non-dirty) file, or something else is unknown — that is the first thing to check.~~ — **resolved**: none of those. The webview opened and rendered `No SQL document opened!`, because the plan was fetched after the webview had taken focus. Two real product bugs, both fixed. See the Update above.
 
-The value here is still real: the Schema Designer's `render()`/`measureAll()` are precisely what `src/test/webview-harness.ts` names as out of its scope, so they remain the least-tested code in the repository.
+~~The value here is still real: the Schema Designer's `render()`/`measureAll()` are precisely what `src/test/webview-harness.ts` names as out of its scope, so they remain the least-tested code in the repository.~~ — **no longer true.** `render()`/`measureAll()` execute in `schema-designer.spec.ts`, which is what took `schema-designer/app.js` to 78.6% merged. What is *not* asserted is layout correctness: the spec proves a table name reached the webview's document, not that boxes avoid overlapping or that an edge joins the right two columns. That is the remaining slice here, and it is a much narrower one than this sentence claims.
 
 ## Phase 4 — webview coverage (done)
 
