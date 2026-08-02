@@ -181,9 +181,17 @@ Naming uses the split from phase 1h: routes and schema components take `displayN
 
 ### What is still missing, precisely
 
-- **Database Projects still builds a schema-blind graph.** Its file layout is per object, so qualified names change file names, and the design doc's own preference is per-schema folders — that deserves its own decision rather than a flag flip.
-- **The Schema Designer shows `PUBLIC.` prefixes** on a single-schema Firebird 6 database; see phase 1g. The qualified label is a smaller change that fixes the ambiguity without restructuring the tree; the level is still the better long-term shape.
-- Phases 2–5 (full write-path qualification, search-path handling, the designer/diff/projects work) are untouched.
+> This list was written when phase 1i was the newest section here, and every item on it has since
+> been done — Database Projects in phase 2b, the designer's redundant `PUBLIC.` prefix in phase 1h,
+> and phases 2–5, which have their own sections below. It is replaced by what follows. Kept as a
+> heading because a stale "what is missing" list sitting above the sections that contradict it is
+> worse than none: it reads as authoritative, and it is the first thing anyone checks.
+
+Three things remain, in the order they are worth doing:
+
+- **Search-path-aware completion ranking.** Completion distinguishes same-named tables across schemas and inserts qualified names — done in `8d56afa`, which has no phase section here — but it does not *rank* them — a table in the session's search path should be offered before one that is not. Self-contained, and the only remaining read-path gap.
+- **Per-schema project folders** (`schemas/SALES/tables/…`) for Database Projects. Phase 2b makes the current per-object layout correct, so this is a tidier long-term shape rather than a fix; it is a layout decision that will churn existing projects, which is why it is not a flag flip.
+- **A per-connection default schema** — still blocked below this extension. Applying one when the session opens needs a hook in connection creation that survives pooling, and the pure-JS driver does not expose `isc_dpb_search_path` at all. See phase 3.
 
 ## Phase 2 status — the write path, mostly already done
 
