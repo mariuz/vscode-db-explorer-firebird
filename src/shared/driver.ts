@@ -1,4 +1,4 @@
-import {TextEditor, workspace, window, ViewColumn, ExtensionContext, commands} from "vscode";
+import {TextDocument, TextEditor, workspace, window, ViewColumn, ExtensionContext, commands} from "vscode";
 import * as Firebird from "node-firebird";
 import {Global} from "./global";
 import {ConnectionOptions, Options} from "../interfaces";
@@ -7,7 +7,8 @@ import type { Attachment, Client, ResultSet} from 'node-firebird-driver-native';
 import { TransactionIsolation, TransactionOptions as NativeTransactionOptions } from 'node-firebird-driver';
 import {simpleCallbackToPromise, getConnectionLabel} from './utils';
 import {CredentialStore} from './credential-store';
-import {splitStatements} from './sql-splitter';
+import {splitStatementsWithOffsets} from './sql-splitter';
+import {SourcePosition, positionAt, offsetAt, parseServerPosition, shiftPosition} from './statement-position';
 import {extractTableNames as extractTableNamesImpl, buildIndexMetadataQuery, renderIndexMetadataPlan, validateReadOnlyStatement} from './sql-analysis';
 import {PooledClient, ConnectionPoolOptions} from './connection-pool';
 import {setSearchPathQuery} from './queries';
@@ -138,6 +139,28 @@ export interface BatchResult {
   error?: string;
   /** Execution duration in milliseconds. */
   durationMs: number;
+  /**
+   * This statement's `[start, end)` offset range within the SQL text that was executed — see
+   * src/shared/statement-position.ts for what "the executed text" means and does not mean. Present
+   * on every result, failed or not, so a caller can tie any statement in a 60-statement script
+   * back to the characters it came from.
+   */
+  range?: { start: number; end: number };
+  /** 1-based line/column of the statement's first character within the executed text. */
+  position?: SourcePosition;
+  /**
+   * Where the failure points, within the executed text — Firebird's own `line N, column M` lifted
+   * onto the statement's position, or the statement's start when the server named no position.
+   * Only set alongside `error`.
+   */
+  errorPosition?: SourcePosition;
+  /**
+   * The same point as `errorPosition`, as an offset into the executed text. Both are kept because
+   * both are wanted raw: the webview prints line and column, while editor diagnostics need an
+   * offset to hand to `TextDocument.positionAt()` after adding the offset the executed text itself
+   * started at.
+   */
+  errorOffset?: number;
 }
 
 /** A single query execution recorded for the session query history. */
@@ -148,6 +171,33 @@ export interface HistoryLogEntry {
   rowCount?: number;
   durationMs: number;
   error?: string;
+}
+
+/**
+ * The SQL that `runQuery()`/`runBatch()` fall back to when they are handed no statement text — the
+ * active editor's selection, or its whole document — together with the document it came from and
+ * the offset it starts at.
+ *
+ * Exported so that a caller wanting to map results back onto the source (line numbers, editor
+ * diagnostics) derives the base offset from *the same rule that chose the text*, rather than
+ * reimplementing "selection if there is one, otherwise the whole file" and drifting from it the
+ * first time that rule changes. Returns undefined for the cases resolveSqlAndConnection() rejects
+ * with its own message, so callers can treat "nothing to map" and "nothing to run" alike.
+ */
+export function activeEditorSql(): { document: TextDocument; sql: string; baseOffset: number } | undefined {
+  const editor = window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "sql") {
+    return undefined;
+  }
+  const { document, selection } = editor;
+  if (selection.isEmpty) {
+    return { document, sql: document.getText(), baseOffset: 0 };
+  }
+  return {
+    document,
+    sql: document.getText(selection),
+    baseOffset: document.offsetAt(selection.start),
+  };
 }
 
 export class Driver {
@@ -378,9 +428,7 @@ export class Driver {
       throw { notify: true, message: "No Firebird database selected!", options: ["Cancel", "Set Active Database"] };
     }
     if (!sql) {
-      const editor = window.activeTextEditor!;
-      const selection = editor.selection;
-      sql = selection.isEmpty ? editor.document.getText() : editor.document.getText(selection);
+      sql = activeEditorSql()?.sql;
       if (!sql) {
         throw { notify: false, message: "No valid SQL commands found!" };
       }
@@ -401,7 +449,10 @@ export class Driver {
     logger.debug("runBatch start...");
 
     const resolved = await this.resolveSqlAndConnection(sql, connectionOptions);
-    const statements = splitStatements(resolved.sql);
+    // …WithOffsets rather than the text-only split: every result carries where its statement sat
+    // in the text, which is what lets a failure on statement 40 of 60 name a line instead of
+    // leaving the user to count semicolons.
+    const statements = splitStatementsWithOffsets(resolved.sql);
 
     if (statements.length === 0) {
       throw { notify: false, message: "No valid SQL commands found!" };
@@ -420,7 +471,10 @@ export class Driver {
     const results: BatchResult[] = [];
 
     try {
-      for (const stmt of statements) {
+      for (const statement of statements) {
+        const stmt = statement.text;
+        const range = { start: statement.start, end: statement.end };
+        const position = positionAt(resolved.sql, statement.start);
         const start = Date.now();
         try {
           const rows = await this.client.queryPromise(connection, stmt, undefined, txOptions);
@@ -439,7 +493,7 @@ export class Driver {
                 }
               });
             });
-            results.push({ sql: stmt, rows, durationMs });
+            results.push({ sql: stmt, rows, durationMs, range, position });
             this.logHistory(stmt, resolved.connectionOptions, durationMs, rows.length);
           } else {
             const ddl = this.constructResponse(stmt);
@@ -447,14 +501,23 @@ export class Driver {
               sql: stmt,
               message: `${ddl ?? "Statement"} executed successfully.`,
               durationMs,
+              range,
+              position,
             });
             this.logHistory(stmt, resolved.connectionOptions, durationMs);
           }
         } catch (err: any) {
           Global.reportConnectionOutcome(resolved.connectionOptions.id, err);
           const durationMs = Date.now() - start;
-          results.push({ sql: stmt, error: err?.message ?? String(err), durationMs });
-          logger.error(`Batch statement failed: ${err?.message ?? err}`);
+          const message = err?.message ?? String(err);
+          // The server counts from the start of the statement it was given, not from the start of
+          // the script — each statement is prepared on its own — so its position has to be lifted
+          // onto the statement's own before it means anything to the user.
+          const within = parseServerPosition(message);
+          const errorPosition = within ? shiftPosition(position, within) : position;
+          const errorOffset = within ? statement.start + offsetAt(stmt, within) : statement.start;
+          results.push({ sql: stmt, error: message, durationMs, range, position, errorPosition, errorOffset });
+          logger.error(`Batch statement failed at line ${errorPosition.line}: ${message}`);
           this.logHistory(stmt, resolved.connectionOptions, durationMs, undefined, err?.message ?? String(err));
         }
       }

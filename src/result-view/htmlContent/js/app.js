@@ -33,6 +33,9 @@ $(() => {
 
   let shortcuts = {};
   let activeTableId = null;
+  // Whether a failed statement's line is a link back into an open document, or just text. Set per
+  // batch by the extension host, which is the only side that knows where the SQL came from.
+  let revealable = false;
   const tableActions = {}; // tableId -> { toggleEdit, addRow, apply, freeze, copyInsert, copyIn }
 
   // ── Grid font customization (firebird.resultsFontSize/resultsFontFamily, mirroring
@@ -74,6 +77,7 @@ $(() => {
       shortcuts = msg.data.shortcuts || {};
       applyResultsFont(msg.data.resultsFontSize, msg.data.resultsFontFamily);
       activeTableId = null;
+      revealable = msg.data.revealable === true;
       renderBatch(msg.data.results, msg.data.recordsPerPage);
       $("body").addClass("loaded");
       return;
@@ -118,6 +122,49 @@ $(() => {
 
   // ── Batch rendering ───────────────────────────────────────────────────────
 
+  /**
+   * "Line 12, column 8", or "" when the position is unknown — which is the case for any batch run
+   * through a path that carries no source, and for results produced before the driver reported one.
+   * Pure, so the wording is pinned by a test without a DOM.
+   */
+  function statementLocationLabel(position) {
+    if (!position || !position.line) { return ""; }
+    return `Line ${position.line}, column ${position.column}`;
+  }
+
+  /**
+   * What a batch tab's badge says. A failed statement shows the line it failed on rather than a
+   * bare warning sign: the point of a tab strip sixty statements wide is to find the broken one
+   * without opening each in turn.
+   */
+  function batchTabBadge(result) {
+    if (result.error) {
+      const line = result.errorPosition && result.errorPosition.line;
+      return line ? `⚠ ${line}` : "⚠";
+    }
+    return result.rowCount != null ? String(result.rowCount) : "✓";
+  }
+
+  /**
+   * The location line above a failed statement's error text — a button back to the source when the
+   * batch came from a document still open in an editor, plain text otherwise.
+   */
+  function statementLocation(position) {
+    const label = statementLocationLabel(position);
+    if (!label) { return null; }
+    if (!revealable) {
+      return $("<div>").addClass("result-error-location").text(label);
+    }
+    return $("<button>")
+      .addClass("result-error-location result-error-link")
+      .attr("type", "button")
+      .attr("title", "Go to this statement in the editor")
+      .text(label)
+      .on("click", () => {
+        vscode.postMessage({ command: "revealStatement", data: { line: position.line, column: position.column } });
+      });
+  }
+
   function renderBatch(results, recordsPerPage) {
     const $tabBar   = $("#tab-bar");
     const $batchDiv = $("#batch-results");
@@ -134,13 +181,14 @@ $(() => {
     results.forEach((r, i) => {
       // Tab button
       const tabClass = i === 0 ? "fb-tab active" : "fb-tab";
-      const badge = r.error ? "⚠" : (r.rowCount != null ? r.rowCount : "✓");
-      $tabBar.append(
-        $("<button>")
-          .addClass(tabClass)
-          .attr("data-tab", i)
-          .html(`<span class="tab-label">${escHtml(r.sql)}</span><span class="tab-badge">${badge}</span>`)
-      );
+      const failedAt = r.error && r.errorPosition && r.errorPosition.line;
+      const badge = batchTabBadge(r);
+      const $tab = $("<button>")
+        .addClass(tabClass)
+        .attr("data-tab", i)
+        .html(`<span class="tab-label">${escHtml(r.sql)}</span><span class="tab-badge">${badge}</span>`);
+      if (failedAt) { $tab.attr("title", `Failed on line ${failedAt}`); }
+      $tabBar.append($tab);
 
       // Panel
       const $panel = $("<div>").addClass("batch-panel").attr("id", `panel-${i}`);
@@ -153,7 +201,11 @@ $(() => {
       if (note) { $panel.append($("<div>").addClass("result-message").text(note)); }
 
       if (r.error) {
-        $panel.append($("<div>").addClass("result-error").text(r.error));
+        const $error = $("<div>").addClass("result-error");
+        const $where = statementLocation(r.errorPosition);
+        if ($where) { $error.append($where); }
+        $error.append($("<div>").addClass("result-error-message").text(r.error));
+        $panel.append($error);
       } else if (r.message) {
         $panel.append($("<div>").addClass("result-message").text(r.message));
       } else if (r.tableBody && r.tableBody.length) {
@@ -1222,6 +1274,7 @@ $(() => {
       parseShortcut, matchesShortcut,
       detectNumericColumns, buildBarChartSvg, buildLineChartSvg, buildPieChartSvg, buildScatterChartSvg,
       buildTextView, truncationNote, pageRangeLabel, pagingOrderWarning, FILTER_OPERATOR_CHOICES,
+      statementLocationLabel, batchTabBadge,
       computeSelectionStats, formatSelectionStats,
       resultsFontProperties,
     };

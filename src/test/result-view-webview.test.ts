@@ -315,6 +315,33 @@ suite('result-view app.js – pure helpers (via __test__ hook)', function () {
   });
 
 
+  suite('statementLocationLabel() / batchTabBadge() — naming the line a statement failed on', function () {
+    test('phrases a known position the same way the extension host logs it', function () {
+      assert.strictEqual(hooks.statementLocationLabel({ line: 12, column: 8 }), 'Line 12, column 8');
+    });
+
+    test('says nothing rather than "Line undefined" when no position came through', function () {
+      // Bookmarks and history re-runs have no source to point into, and a result from before the
+      // driver carried positions has none either.
+      assert.strictEqual(hooks.statementLocationLabel(undefined), '');
+      assert.strictEqual(hooks.statementLocationLabel({}), '');
+    });
+
+    test('a failed tab shows the line it failed on, not just a warning sign', function () {
+      assert.strictEqual(hooks.batchTabBadge({ error: 'boom', errorPosition: { line: 40, column: 1 } }), '⚠ 40');
+    });
+
+    test('a failure with no position still marks the tab', function () {
+      assert.strictEqual(hooks.batchTabBadge({ error: 'boom' }), '⚠');
+    });
+
+    test('a successful statement still badges its row count, and zero rows is not "no count"', function () {
+      assert.strictEqual(hooks.batchTabBadge({ rowCount: 7 }), '7');
+      assert.strictEqual(hooks.batchTabBadge({ rowCount: 0 }), '0');
+      assert.strictEqual(hooks.batchTabBadge({ message: 'Create executed successfully.' }), '✓');
+    });
+  });
+
   suite('truncationNote() — a trimmed result must say so (docs/roadmap/large-result-sets.md)', function () {
     test('says nothing when nothing was dropped', function () {
       assert.strictEqual(hooks.truncationNote(undefined, 10), '');

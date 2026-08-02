@@ -736,6 +736,117 @@ suite('Driver.runBatch() (fake client, no live database)', function () {
   });
 });
 
+// ── Driver.runBatch() statement positions ────────────────────────────────────
+//
+// "A script that fails on statement 40 of 60 reports the server's message with nothing tying it to
+// a line" was the complaint; these pin the answer. Positions are counted from the start of the
+// text handed to runBatch() -- lifting them onto a document, when the text was a selection, is
+// extension.ts's job and is tested through shiftPosition() separately.
+
+suite('Driver.runBatch() – statement positions', function () {
+  const originalClient = Driver.client;
+
+  teardown(function () {
+    Driver.client = originalClient;
+  });
+
+  const script = [
+    'SELECT 1 FROM RDB$DATABASE;',   // line 1
+    '',                              // line 2
+    'SELECT 2 FROM RDB$DATABASE;',   // line 3
+    'SELECT 3 FROM RDB$DATABASE;',   // line 4
+  ].join('\n');
+
+  test('every result carries its statement\'s line and offset range', async function () {
+    Driver.client = new FakeClient(() => [{ N: 1 }]);
+
+    const results = await Driver.runBatch(script, baseConnectionOptions());
+
+    assert.strictEqual(results.length, 3);
+    assert.deepStrictEqual(results.map(r => r.position?.line), [1, 3, 4]);
+    assert.deepStrictEqual(results.map(r => r.position?.column), [1, 1, 1]);
+    for (const result of results) {
+      assert.ok(result.range, 'every result should carry its range');
+      assert.strictEqual(
+        script.slice(result.range!.start, result.range!.end),
+        result.sql,
+        'the range must span exactly the text that was executed'
+      );
+    }
+  });
+
+  test('a DDL/DML result carries a position too, not just failures', async function () {
+    Driver.client = new FakeClient(() => undefined);
+
+    const results = await Driver.runBatch('\n\nCREATE TABLE T (ID INTEGER);', baseConnectionOptions());
+
+    assert.strictEqual(results[0].position?.line, 3);
+    assert.strictEqual(results[0].errorPosition, undefined, 'a statement that worked has no error position');
+  });
+
+  test('a failure with no server position points at the statement\'s own first line', async function () {
+    Driver.client = new FakeClient(sql => {
+      if (sql.includes('2')) { throw new Error('Dynamic SQL Error, Table unknown, NOPE'); }
+      return [{ N: 1 }];
+    });
+
+    const results = await Driver.runBatch(script, baseConnectionOptions());
+
+    assert.deepStrictEqual(results[1].errorPosition, { line: 3, column: 1 });
+    assert.strictEqual(script.slice(results[1].errorOffset!, results[1].errorOffset! + 6), 'SELECT');
+  });
+
+  test('the server\'s own line and column are lifted onto the statement', async function () {
+    // Firebird counts from the start of the statement it was given, because each is prepared
+    // separately -- so its "line 1" here is the script's line 3.
+    Driver.client = new FakeClient(sql => {
+      if (sql.includes('2')) {
+        throw new Error('Dynamic SQL Error, SQL error code = -104, Token unknown - line 1, column 8, 2');
+      }
+      return [{ N: 1 }];
+    });
+
+    const results = await Driver.runBatch(script, baseConnectionOptions());
+
+    assert.deepStrictEqual(results[1].errorPosition, { line: 3, column: 8 });
+    assert.strictEqual(script[results[1].errorOffset!], '2', 'the offset should land on the offending token');
+  });
+
+  test('a multi-line statement maps a later line correctly', async function () {
+    const psql = [
+      'SELECT 1 FROM RDB$DATABASE;',
+      'CREATE PROCEDURE P AS',
+      'BEGIN',
+      '  SELCT 1;',
+      'END;',
+    ].join('\n');
+    Driver.client = new FakeClient(sql => {
+      if (sql.startsWith('CREATE')) {
+        throw new Error('Dynamic SQL Error, SQL error code = -104, Token unknown - line 3, column 3, SELCT');
+      }
+      return [{ N: 1 }];
+    });
+
+    const results = await Driver.runBatch(psql, baseConnectionOptions());
+
+    // Statement starts on line 2, error on its line 3 -> line 4 of the script. The column is *not*
+    // shifted, because line 3 of the statement starts at column 1 of the script too.
+    assert.deepStrictEqual(results[1].errorPosition, { line: 4, column: 3 });
+    assert.strictEqual(psql.slice(results[1].errorOffset!, results[1].errorOffset! + 5), 'SELCT');
+  });
+
+  test('a PSQL stack frame is not mistaken for a position in the script', async function () {
+    Driver.client = new FakeClient(() => {
+      throw new Error('exception 1, EX_TOTALS, At procedure \'TOTALS\' line: 5, col: 5');
+    });
+
+    const results = await Driver.runBatch('\nEXECUTE PROCEDURE TOTALS;', baseConnectionOptions());
+
+    // Line 2 -- where the statement is -- rather than line 5 of a routine body that is not here.
+    assert.deepStrictEqual(results[0].errorPosition, { line: 2, column: 1 });
+  });
+});
+
 // ── Driver.runQuery() (fake client, no live database) ───────────────────────
 
 suite('Driver.runQuery() (fake client, no live database)', function () {

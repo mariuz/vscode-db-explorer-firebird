@@ -7,13 +7,15 @@ import {connectionPicker, pickConnectionOptions} from "./shared/connection-picke
 import {getEngineMajorVersion} from "./shared/engine-version";
 import {supportsSchemas} from "./shared/schema-support";
 import {createSchemaQuery, dropSchemaQuery, getSchemasQuery, setSearchPathQuery, alterSchemaQuery} from "./shared/queries";
-import {Driver} from "./shared/driver";
+import {Driver, BatchResult, activeEditorSql} from "./shared/driver";
+import {ExecutionDiagnostics} from "./shared/execution-diagnostics";
+import {shiftPosition} from "./shared/statement-position";
 import * as vscode from 'vscode';
 import {Global} from "./shared/global";
 import {CredentialStore} from "./shared/credential-store";
 import {logger} from "./logger/logger";
 import {KeywordsDb} from "./language-server/db-words.provider";
-import QueryResultsView, {AnalyzeResultsRequest, AnalyzePlanRequest, ViewTableDiagramRequest} from "./result-view";
+import QueryResultsView, {AnalyzeResultsRequest, AnalyzePlanRequest, ViewTableDiagramRequest, RevealStatementRequest} from "./result-view";
 import {SchemaDesigner} from "./schema-designer";
 import {QueryPlanView} from "./query-plan-view";
 import {ProfilerView} from "./profiler";
@@ -105,6 +107,38 @@ async function showWhatsNewIfUpdated(context: ExtensionContext): Promise<void> {
   } catch (err) {
     logger.error(err);
   }
+}
+
+/** The document a batch was run from, and where in it the executed text began. */
+interface BatchOrigin {
+  document: vscode.TextDocument;
+  sql: string;
+  baseOffset: number;
+}
+
+/**
+ * Re-counts each statement's reported line and column from the start of the *document* rather than
+ * from the start of the text that was executed.
+ *
+ * They are the same thing only when the whole file was run. Run a selection starting on line 40,
+ * or one statement out of sixty, and the driver's line 1 is the document's line 40 — reporting it
+ * as line 1 would be worse than reporting nothing, because it looks like an answer.
+ *
+ * `range` and `errorOffset` are deliberately left alone: they are offsets into the executed text,
+ * and the one consumer that wants document offsets (execution diagnostics) adds `baseOffset`
+ * itself. Shifting them here too would double-count for that caller.
+ */
+function locateInDocument(results: BatchResult[], origin: BatchOrigin): BatchResult[] {
+  if (origin.baseOffset === 0) {
+    return results;
+  }
+  const at = origin.document.positionAt(origin.baseOffset);
+  const base = { line: at.line + 1, column: at.character + 1 };
+  return results.map(result => ({
+    ...result,
+    position: result.position && shiftPosition(base, result.position),
+    errorPosition: result.errorPosition && shiftPosition(base, result.errorPosition),
+  }));
 }
 
 /** Prompts for a new object name, validated as a safe Firebird identifier. */
@@ -204,6 +238,11 @@ export function activate(context: ExtensionContext) {
   const sqlLinter = new SqlLinter();
   sqlLinter.setSchemaProvider(() => firebirdDatabaseWords.getSchema());
   sqlLinter.activate(context);
+
+  /* Execution errors as editor diagnostics — a separate collection from the linter's, which
+     rewrites its own wholesale on every keystroke. See src/shared/execution-diagnostics.ts. */
+  const executionDiagnostics = new ExecutionDiagnostics();
+  executionDiagnostics.activate(context);
 
   /* Background Tasks — discoverability panel for long-running operations (container
      provisioning, backup/restore) alongside their existing withProgress/status-bar notifications */
@@ -351,6 +390,7 @@ export function activate(context: ExtensionContext) {
     firebirdProfilerView,
     firebirdLanguageServer,
     sqlLinter,
+    executionDiagnostics,
     bookmarkProvider,
     queryHistoryProvider
   );
@@ -829,6 +869,22 @@ export function activate(context: ExtensionContext) {
   );
 
   /**
+   * The document the last batch was run from, if it was run from one. Held so that clicking a
+   * failed statement's reported line in the results panel can jump back to it — the webview
+   * knows the line, only this side knows the file.
+   */
+  let lastBatchDocument: vscode.TextDocument | undefined;
+
+  /* "Line 12, column 8" clicked in a failed statement's result tab. */
+  firebirdQueryResults.on("revealStatement", (data: RevealStatementRequest) => {
+    if (!lastBatchDocument) { return; }
+    const position = new vscode.Position(Math.max(0, data.line - 1), Math.max(0, data.column - 1));
+    Promise.resolve(
+      window.showTextDocument(lastBatchDocument, { selection: new vscode.Range(position, position) })
+    ).catch((err: any) => logger.error(err?.message ?? err));
+  });
+
+  /**
    * Shared implementation behind both "Run Firebird Query" and "Run Statement Under Cursor":
    * executes `sql` (or, when omitted, Driver.runBatch()'s own selection/whole-document default)
    * and routes the results the same way for both — a lone DDL/DML statement becomes an info
@@ -836,11 +892,26 @@ export function activate(context: ExtensionContext) {
    * function so the two commands can't drift apart on the DDL/refresh handling or on the
    * notify-vs-generic error branches, as they previously had.
    */
-  const runSqlBatch = (sql?: string) => {
+  const runSqlBatch = (sql?: string, origin?: BatchOrigin) => {
+    // Where the SQL about to run sits in a document, when it sits in one at all. Two cases: the
+    // caller picked the text out itself (Run Statement Under Cursor, which passes its origin), or
+    // the driver is about to fall back to the active editor — in which case the same helper the
+    // driver uses reports what it will choose, so the offsets cannot disagree with the text.
+    const source = origin ?? (sql === undefined ? activeEditorSql() : undefined);
+    lastBatchDocument = source?.document;
+
     Driver.runBatch(sql)
-      .then(batchResults => {
+      .then(rawResults => {
         // Driver.runBatch() already logged each statement to session history
         // via the historyLogger registered above.
+
+        // Positions come back counted from the start of the text that was executed. That is the
+        // document only when the whole document was run; for a selection or a single statement it
+        // has to be lifted onto the document before anyone is shown a line number.
+        const batchResults = source ? locateInDocument(rawResults, source) : rawResults;
+        if (source) {
+          executionDiagnostics.report(source.document, source.sql, source.baseOffset, rawResults);
+        }
 
         // If every result is a DDL/DML message (no row data), show notification
         const allMessages = batchResults.every(r => !r.rows && !r.error);
@@ -849,7 +920,7 @@ export function activate(context: ExtensionContext) {
           logger.showInfo(batchResults[0].message);
           commands.executeCommand("firebird.explorer.refresh");
         } else {
-          firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage);
+          firebirdQueryResults.displayBatch(batchResults, config.recordsPerPage, source !== undefined);
         }
       })
       .catch(error => {
@@ -904,14 +975,20 @@ export function activate(context: ExtensionContext) {
       }
 
       let sql: string | undefined;
+      let origin: BatchOrigin | undefined;
       if (editor.selection.isEmpty) {
         const offset = editor.document.offsetAt(editor.selection.active);
         const statement = splitStatementsWithOffsets(editor.document.getText())
           .find(range => offset >= range.start && offset <= range.end);
         sql = statement?.text;
+        // The statement's own start is the base offset here: its line 1 is wherever in the file it
+        // happens to begin, and a failure in it must name that line, not line 1.
+        if (statement) {
+          origin = { document: editor.document, sql: statement.text, baseOffset: statement.start };
+        }
       }
 
-      runSqlBatch(sql);
+      runSqlBatch(sql, origin);
     })
   );
 

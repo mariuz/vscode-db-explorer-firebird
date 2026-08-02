@@ -25,6 +25,8 @@
     "src/shared/parameterized-query.ts",
     "src/shared/sql-linter.ts",
     "src/shared/driver.ts",
+    "src/shared/statement-position.ts",
+    "src/shared/execution-diagnostics.ts",
     "src/shared/connection-pool.ts",
     "src/shared/ssh-tunnel.ts",
     "src/shared/workspace-config.ts",

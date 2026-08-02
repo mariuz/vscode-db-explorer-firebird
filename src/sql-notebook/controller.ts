@@ -7,6 +7,7 @@ import { ConnectionOptions } from "../interfaces";
 import { Constants } from "../config";
 import { logger } from "../logger/logger";
 import { renderRowsAsMarkdown, rowsToResultTable } from "../shared/notebook-render";
+import { describePosition } from "../shared/statement-position";
 
 export const FIREBIRD_NOTEBOOK_TYPE = "firebird-notebook";
 const CONTROLLER_ID = "firebird-sql-notebook-controller";
@@ -87,7 +88,13 @@ async function executeCell(
  */
 export function resultToOutputItems(result: BatchResult): NotebookCellOutputItem[] {
   if (result.error) {
-    return [NotebookCellOutputItem.error(new Error(result.error))];
+    // A cell holding several statements has the same "which one broke?" problem a .sql script
+    // does, and the same answer — the position is counted within the cell, which is exactly the
+    // unit the user is looking at. Suppressed when it points at the very start of the cell, where
+    // it would only restate that the cell failed.
+    const at = result.errorPosition;
+    const prefix = at && (at.line > 1 || at.column > 1) ? `${describePosition(at)}: ` : "";
+    return [NotebookCellOutputItem.error(new Error(`${prefix}${result.error}`))];
   }
   if (result.rows) {
     return [

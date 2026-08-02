@@ -30,6 +30,12 @@ export interface PreparedResultSet {
   durationMs: number;
   message?: string;
   error?: string;
+  /**
+   * Where the failure is, in the source the batch was run from — `{ line, column }`, 1-based, and
+   * already mapped onto the document when the run came from one (see extension.ts#runSqlBatch).
+   * Present only alongside `error`.
+   */
+  errorPosition?: { line: number; column: number };
   /** Table name auto-detected from the statement's FROM clause, pre-filled for row editing. */
   editableTable?: string;
   /**
@@ -98,6 +104,16 @@ export interface AnalyzePlanRequest {
   plan: string;
 }
 
+/**
+ * Payload for the "revealStatement" message — a click on a failed statement's reported line.
+ * Already document coordinates, 1-based, because extension.ts mapped them before the results were
+ * handed over; the webview only echoes back what it was given.
+ */
+export interface RevealStatementRequest {
+  line: number;
+  column: number;
+}
+
 /** Payload for the "viewTableDiagram" message sent from the webview's "🗺 View Table Diagram" button. */
 export interface ViewTableDiagramRequest {
   tableName: string;
@@ -110,6 +126,8 @@ export default class ResultView extends QueryResultsView implements Disposable {
   private resultSql?: string;
   private probedForMore = false;
   private batchResults?: PreparedResultSet[];
+  /** Whether a failed statement's line can be clicked back to its source — see {@link displayBatch}. */
+  private revealable = false;
   private recordsPerPage!: string;
   /** Keyed by statement SQL text, so switching back to an already-viewed "Query Plan" tab (or
    *  another statement that happens to share identical SQL) doesn't re-fetch. Cleared on every
@@ -148,8 +166,16 @@ export default class ResultView extends QueryResultsView implements Disposable {
     this.show(join(this.extensionPath, "src", "result-view", "htmlContent", "index.html"));
   }
 
-  /** Display results from a batch run (multiple statements). */
-  displayBatch(batchResults: BatchResult[], recordsPerPage: string) {
+  /**
+   * Display results from a batch run (multiple statements).
+   *
+   * `revealable` says the batch came from a document that is still open, so a failed statement's
+   * reported line can be a link back to it. Bookmarks and history re-runs pass nothing: their SQL
+   * has no place in an editor to jump to, and offering a dead link is worse than printing the
+   * line plainly.
+   */
+  displayBatch(batchResults: BatchResult[], recordsPerPage: string, revealable = false) {
+    this.revealable = revealable;
     this.batchResults = batchResults.map(r => this.prepareBatchResult(r));
     this.resultSet = undefined;
     this.recordsPerPage = recordsPerPage;
@@ -176,6 +202,13 @@ export default class ResultView extends QueryResultsView implements Disposable {
 
     if (message.command === "applyChanges") {
       this.handleApplyChanges(message.data as ApplyChangesRequest);
+      return;
+    }
+
+    if (message.command === "revealStatement") {
+      // Same EventEmitter delegation as "analyzeResults" below: this class has no idea which
+      // document the batch came from, and extension.ts — which chose the text that was run — does.
+      this.emit("revealStatement", message.data as RevealStatementRequest);
       return;
     }
 
@@ -234,7 +267,10 @@ export default class ResultView extends QueryResultsView implements Disposable {
       }));
       this.send({
         command: "batchData",
-        data: { results, recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily },
+        data: {
+          results, recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily,
+          revealable: this.revealable,
+        },
       });
       return;
     }
@@ -495,7 +531,10 @@ export default class ResultView extends QueryResultsView implements Disposable {
     const sql = fullSql.length > 80 ? fullSql.slice(0, 77) + "..." : fullSql;
 
     if (r.error) {
-      return { sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs, error: r.error };
+      return {
+        sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs,
+        error: r.error, errorPosition: r.errorPosition,
+      };
     }
     if (r.message || !r.rows || r.rows.length === 0) {
       return { sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs, message: r.message };

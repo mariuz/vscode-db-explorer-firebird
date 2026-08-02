@@ -35,7 +35,14 @@ div.img-wrapper img {
   z-index: 100;
 }
 
+/* Flex, not plain inline content, so the badge survives a long statement: with the label and the
+   badge as inline text inside a 200px box that clips its overflow, any SQL wider than the tab
+   pushed the badge out of sight entirely — the row count, and now the line a statement failed on,
+   were invisible on exactly the tabs long enough to need them. The label truncates instead. */
 .fb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 5px 12px;
   border: none;
   background: var(--vscode-tab-inactiveBackground, #2d2d2d);
@@ -45,7 +52,6 @@ div.img-wrapper img {
   max-width: 200px;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   border-top: 2px solid transparent;
 }
 .fb-tab.active {
@@ -57,9 +63,12 @@ div.img-wrapper img {
   background: var(--vscode-tab-hoverBackground, #3a3a3a);
 }
 .tab-label {
-  margin-right: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .tab-badge {
+  flex: none;
   font-size: 11px;
   padding: 1px 5px;
   border-radius: 10px;
@@ -83,6 +92,33 @@ div.img-wrapper img {
   padding: 8px;
   background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
   border-radius: 4px;
+}
+/* The "Line 12, column 8" line above a failure's text. Reads as a heading rather than as part of
+   the server's message, which is why it sits outside the pre-wrapped monospace block below it. */
+.result-error-location {
+  display: block;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-weight: 600;
+  margin-bottom: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+}
+.result-error-link {
+  cursor: pointer;
+  text-decoration: underline;
+}
+/* Deliberately not a link colour on hover: this sits on the error background, where the theme's
+   blue link foreground is close to unreadable. Brightening what is already there keeps the
+   affordance without fighting the panel it is in. */
+.result-error-link:hover {
+  filter: brightness(1.25);
+}
+.result-error-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
 }
 .result-message {
   color: var(--vscode-notificationsInfoIconForeground, #75beff);
