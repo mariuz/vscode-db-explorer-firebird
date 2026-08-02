@@ -18,6 +18,8 @@ import * as assert from 'assert';
 import { Driver, NodeClient } from '../../shared/driver';
 import { getProcedureBodyQuery, getTriggerBodyQuery, getViewDefinitionQuery } from '../../shared/queries';
 import { getTestConnectionOptions } from './firebird-test-env';
+import { getEngineMajorVersion } from '../../shared/engine-version';
+import { supportsSchemas } from '../../shared/schema-support';
 import { extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue } from '../../shared/parameterized-query';
 
 suite('Driver – real Firebird integration (extension host)', function () {
@@ -227,5 +229,77 @@ suite('Driver – real Firebird integration (extension host)', function () {
     } finally {
       await Driver.runQuery('DROP VIEW DRIVER_IT_SRC_VIEW', conn).catch(() => { /* best-effort cleanup */ });
     }
+  });
+});
+
+/**
+ * Per-connection default schema (docs/roadmap/firebird6-schemas.md, phase 3).
+ *
+ * The point of this tier for this feature: everything else about it is plumbing that unit tests can
+ * check, but whether `ConnectionOptions.defaultSchema` actually changes how the *server* resolves an
+ * unqualified name can only be established by asking a real Firebird 6. The probe table exists in
+ * one schema only, so resolving it is proof the search path arrived — a table present in both
+ * schemas would resolve either way and prove nothing.
+ */
+suite('Driver – per-connection default schema (extension host)', function () {
+  this.timeout(30000);
+
+  const SCHEMA = 'DRIVER_SP_TEST';
+  const TABLE = 'SP_PROBE';
+  let major = 0;
+
+  suiteSetup(async function () {
+    Driver.client = new NodeClient();
+    major = await getEngineMajorVersion('suite-default-schema', sql => Driver.runQuery(sql, getTestConnectionOptions()));
+    if (!supportsSchemas(major)) {
+      return;
+    }
+    await Driver.runQuery(`CREATE SCHEMA ${SCHEMA}`, getTestConnectionOptions()).catch(() => undefined);
+    await Driver.runQuery(`CREATE TABLE ${SCHEMA}.${TABLE} (ID INTEGER)`, getTestConnectionOptions()).catch(() => undefined);
+    await Driver.runQuery(`INSERT INTO ${SCHEMA}.${TABLE} VALUES (7)`, getTestConnectionOptions()).catch(() => undefined);
+  });
+
+  suiteTeardown(async function () {
+    if (!supportsSchemas(major)) {
+      return;
+    }
+    await Driver.runQuery(`DROP TABLE ${SCHEMA}.${TABLE}`, getTestConnectionOptions()).catch(() => undefined);
+    await Driver.runQuery(`DROP SCHEMA ${SCHEMA}`, getTestConnectionOptions()).catch(() => undefined);
+  });
+
+  test('an unqualified name resolves through the connection\'s default schema', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip();
+    }
+    const rows = await Driver.runQuery(
+      `SELECT ID FROM ${TABLE}`,
+      { ...getTestConnectionOptions(), defaultSchema: SCHEMA }
+    );
+    assert.strictEqual(Number(rows[0].ID), 7);
+  });
+
+  test('without it, the same statement fails — which is what makes the test above mean something', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip();
+    }
+    await assert.rejects(
+      Driver.runQuery(`SELECT ID FROM ${TABLE}`, getTestConnectionOptions()),
+      /Table unknown|SP_PROBE/i
+    );
+  });
+
+  test('the search path reported by the server names the schema first', async function () {
+    if (!supportsSchemas(major)) {
+      this.skip();
+    }
+    // PUBLIC stays behind it as a fallback and the server appends SYSTEM itself, so this asserts
+    // position rather than the whole string.
+    const rows = await Driver.runQuery(
+      "SELECT RDB$GET_CONTEXT('SYSTEM','SEARCH_PATH') AS SP FROM RDB$DATABASE",
+      { ...getTestConnectionOptions(), defaultSchema: SCHEMA }
+    );
+    const path = String(rows[0].SP);
+    assert.ok(path.startsWith(`"${SCHEMA}"`), `expected ${SCHEMA} first, got ${path}`);
+    assert.ok(path.includes('PUBLIC'), `expected PUBLIC kept as a fallback, got ${path}`);
   });
 });

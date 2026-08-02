@@ -3,7 +3,9 @@
   "title": "Firebird Studio workspace connection configuration",
   "description": "Declares Firebird connections for this workspace so opening the folder is enough to connect — no need for each teammate to add a connection manually. Never put a password here: it's entered once via the tree's \"Set Connection Password\" action and stored in VS Code's secure SecretStorage instead.",
   "type": "object",
-  "required": ["connections"],
+  "required": [
+    "connections"
+  ],
   "additionalProperties": false,
   "properties": {
     "connections": {
@@ -11,7 +13,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["database"],
+        "required": [
+          "database"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -34,7 +38,10 @@
             "default": "SYSDBA"
           },
           "role": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "embedded": {
             "type": "boolean",
@@ -43,12 +50,20 @@
           },
           "wireCrypt": {
             "type": "string",
-            "enum": ["Required", "Enabled", "Disabled"],
+            "enum": [
+              "Required",
+              "Enabled",
+              "Disabled"
+            ],
             "description": "Wire encryption mode for Firebird 4.x/5.x."
           },
           "authPlugin": {
             "type": "string",
             "description": "Authentication plugin override, e.g. Srp256, Srp, Legacy_Auth."
+          },
+          "defaultSchema": {
+            "type": "string",
+            "description": "Firebird 6+ only. The schema unqualified names resolve through on this connection, applied when the session opens. Sent as the front of the search path, with PUBLIC kept behind it; ignored by servers older than 6."
           },
           "default": {
             "type": "boolean",

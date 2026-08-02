@@ -20,6 +20,16 @@ export interface ConnectionOptions {
   wireCrypt?: 'Required' | 'Enabled' | 'Disabled';
   /** Authentication plugin for Firebird 4.x/5.x (e.g. Srp256, Srp, Legacy_Auth). */
   authPlugin?: string;
+  /**
+   * Firebird 6+ only: the schema unqualified names in this connection resolve through, applied when
+   * the session opens rather than by a statement in a document.
+   *
+   * Firebird has no "default schema" attachment parameter — `CURRENT_SCHEMA` is simply the first
+   * existing entry of the search path — so this is sent as the front of `isc_dpb_search_path`, with
+   * `PUBLIC` kept behind it as a fallback and `SYSTEM` appended by the server. Ignored by servers
+   * older than 6, which negotiate a protocol that has no such parameter.
+   */
+  defaultSchema?: string;
   /** True for connections sourced from a workspace's .vscode/firebird.json rather than globalState — never persisted there, and re-derived from disk on every tree refresh. */
   workspace?: boolean;
   /** Whether this workspace connection was marked "default": true — see workspace-config.ts. */

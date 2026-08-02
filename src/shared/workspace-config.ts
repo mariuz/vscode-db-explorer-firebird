@@ -137,6 +137,12 @@ export function parseWorkspaceConfig(jsonText: string, folderPath: string, folde
       embedded,
       wireCrypt,
       authPlugin: typeof entry.authPlugin === "string" ? entry.authPlugin : undefined,
+      // Firebird 6 schemas: a project can declare which schema its unqualified names mean,
+      // which is exactly the kind of thing that belongs beside the database path in version
+      // control rather than in each contributor's own settings.
+      defaultSchema: typeof entry.defaultSchema === "string" && entry.defaultSchema.trim()
+        ? entry.defaultSchema.trim()
+        : undefined,
       workspace: true,
       isDefault: Boolean(entry.default),
       sshTunnel,

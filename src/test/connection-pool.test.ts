@@ -3,7 +3,7 @@
  */
 
 import * as assert from 'assert';
-import { PooledClient } from '../shared/connection-pool';
+import { PooledClient, poolKey } from '../shared/connection-pool';
 import { ClientI } from '../shared/driver';
 import { ConnectionOptions } from '../interfaces';
 
@@ -138,5 +138,64 @@ suite('PooledClient', function () {
     assert.strictEqual(pool.idleCount('conn-a'), 0);
     assert.strictEqual(pool.idleCount('conn-b'), 0);
     assert.strictEqual(inner.detachCalls.length, 2);
+  });
+});
+
+// ── Default schema and the pool key ──────────────────────────────────────────
+//
+// A connection's default schema is applied when the session opens (isc_dpb_search_path), so it
+// belongs to the *attachment*, not to the saved definition. Pooling by id alone would hand a
+// caller an idle connection still attached with the previous search path — unqualified names
+// would quietly resolve in the old schema until the idle sweeper happened to evict it, which is
+// the failure the roadmap flagged before this feature was built.
+
+suite('PooledClient – default schema', function () {
+  test('two schemas on the same connection id do not share a pooled session', async function () {
+    const inner = new FakeClient();
+    const pool = new PooledClient<any>(inner, { maxSize: 4, idleTimeoutMs: 60_000 });
+
+    const sales = await pool.createConnection(baseConnection({ defaultSchema: 'SALES' }));
+    await pool.detach(sales);
+
+    // Same id, different schema: must be a fresh attachment, not the idle SALES one.
+    await pool.createConnection(baseConnection({ defaultSchema: 'HR' }));
+    assert.strictEqual(inner.createConnectionCalls, 2, 'the HR session must not reuse the SALES one');
+
+    await pool.shutdown();
+  });
+
+  test('the same schema still reuses its pooled session', async function () {
+    const inner = new FakeClient();
+    const pool = new PooledClient<any>(inner, { maxSize: 4, idleTimeoutMs: 60_000 });
+
+    const first = await pool.createConnection(baseConnection({ defaultSchema: 'SALES' }));
+    await pool.detach(first);
+    await pool.createConnection(baseConnection({ defaultSchema: 'SALES' }));
+    assert.strictEqual(inner.createConnectionCalls, 1, 'pooling must still work when the schema is unchanged');
+
+    await pool.shutdown();
+  });
+
+  test('clearing the schema does not reuse a session that still has one', async function () {
+    const inner = new FakeClient();
+    const pool = new PooledClient<any>(inner, { maxSize: 4, idleTimeoutMs: 60_000 });
+
+    const scoped = await pool.createConnection(baseConnection({ defaultSchema: 'SALES' }));
+    await pool.detach(scoped);
+    await pool.createConnection(baseConnection());
+    assert.strictEqual(inner.createConnectionCalls, 2);
+
+    await pool.shutdown();
+  });
+
+  test('poolKey is the bare id when no schema is set, so existing buckets are unaffected', function () {
+    assert.strictEqual(poolKey(baseConnection()), 'conn-a');
+    assert.notStrictEqual(poolKey(baseConnection({ defaultSchema: 'SALES' })), 'conn-a');
+  });
+
+  test('a whitespace-only schema is treated as unset, matching the attach options', function () {
+    // toNodeFirebirdOptions() drops a blank schema, so keying on it would split the pool for a
+    // setting that never reaches the server.
+    assert.strictEqual(poolKey(baseConnection({ defaultSchema: '   ' })), 'conn-a');
   });
 });

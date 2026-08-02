@@ -658,6 +658,15 @@ export function activate(context: ExtensionContext) {
     return picked ? new NodeDatabase(picked) : undefined;
   };
 
+  /* DB ITEM: the schema unqualified names resolve through on this connection (Firebird 6+).
+     Optional node argument so the Command Palette can reach it, like its neighbours. */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.setDefaultSchema", async (databaseNode?: NodeDatabase) => {
+      const node = await resolveDatabaseNode(databaseNode);
+      node?.setDefaultSchema(context, firebirdTreeDataProvider).catch(err => logger.error(err));
+    })
+  );
+
   /* DB ITEM: set/update the stored password for this connection */
   context.subscriptions.push(
     commands.registerCommand("firebird.database.setPassword", async (databaseNode?: NodeDatabase) => {

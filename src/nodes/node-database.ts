@@ -449,7 +449,7 @@ export class NodeDatabase implements FirebirdTree {
   }
 
   /** Patches one field of this connection's saved globalState entry (color/group/mcpExposed/mcpWriteEnabled tags — not password, which never lives there). */
-  private async updateSavedConnectionField<K extends "color" | "group" | "mcpExposed" | "mcpWriteEnabled">(
+  private async updateSavedConnectionField<K extends "color" | "group" | "mcpExposed" | "mcpWriteEnabled" | "defaultSchema">(
     context: ExtensionContext, field: K, value: ConnectionOptions[K]
   ): Promise<void> {
     const connections = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey);
@@ -459,6 +459,66 @@ export class NodeDatabase implements FirebirdTree {
     if (Global.activeConnection?.id === this.dbDetails.id) {
       Global.patchActiveConnection({ [field]: value });
     }
+  }
+
+  /**
+   * Sets the schema unqualified names resolve through on this connection, for the whole session
+   * rather than per document (docs/roadmap/firebird6-schemas.md, phase 3).
+   *
+   * Distinct from **New Query in Schema…**, which puts a `SET SEARCH_PATH` at the top of one
+   * document: this applies before the first statement of every session, so the tree, completion
+   * and every command see the same resolution the editor does.
+   */
+  public async setDefaultSchema(context: ExtensionContext, firebirdTreeDataProvider: FirebirdTreeDataProvider): Promise<void> {
+    if (this.dbDetails.workspace) {
+      logger.showInfo("This connection comes from this workspace's .vscode/firebird.json — set \"defaultSchema\" there instead.");
+      return;
+    }
+
+    const resolved = await this.resolvedDetails();
+    const major = await getEngineMajorVersion(resolved.id, sql => Driver.runQuery(sql, resolved));
+    if (!supportsSchemas(major)) {
+      logger.showInfo(
+        major > 0
+          ? `SQL schemas need Firebird 6 or later; this server reports version ${major}.`
+          : "SQL schemas need Firebird 6 or later, and this server's version could not be read."
+      );
+      return;
+    }
+
+    const schemas = await this.userSchemas();
+    const current = this.dbDetails.defaultSchema?.trim();
+    // "Use the server default" is an explicit item rather than an empty input: clearing a setting
+    // by deleting text is a guess, and the server default (PUBLIC, SYSTEM) is a real choice.
+    const items: QuickPickItem[] = [
+      {
+        label: "$(discard) Use the server default",
+        description: current ? "clears the current setting" : "current",
+      },
+      ...schemas.map(schema => ({
+        label: schema,
+        description: schema === current ? "current" : undefined,
+      })),
+    ];
+    const picked = await window.showQuickPick(items, {
+      title: `Default schema for ${getDatabaseFileName(this.dbDetails.database)}`,
+      placeHolder: "Unqualified names in this connection resolve through this schema first",
+    });
+    if (!picked) {
+      return;
+    }
+
+    const chosen = picked.label.startsWith("$(discard)") ? undefined : picked.label;
+    await this.updateSavedConnectionField(context, "defaultSchema", chosen);
+    // The schema is applied when a session opens, so connections already open — including idle
+    // pooled ones — still carry the old search path. Saying so is better than a silent partial
+    // effect; PooledClient keys its buckets by schema, so new sessions are correct immediately.
+    firebirdTreeDataProvider.refresh();
+    logger.showInfo(
+      chosen
+        ? `Unqualified names on ${getDatabaseFileName(this.dbDetails.database)} will resolve through ${chosen} first, from the next connection onwards.`
+        : `${getDatabaseFileName(this.dbDetails.database)} will use the server's default search path from the next connection onwards.`
+    );
   }
 
   // delete database connection details and remove it from explorer view

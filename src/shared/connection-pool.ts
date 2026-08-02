@@ -23,6 +23,21 @@ interface PoolEntry<K> {
  * Assumes each distinct logical connection (saved or otherwise) carries a stable, unique `id` —
  * true for every ConnectionOptions persisted via FirebirdTreeDataProvider#addConnection().
  */
+/**
+ * The bucket an idle connection is filed under.
+ *
+ * Not the connection id alone. A connection's default schema is applied when the session opens
+ * (`isc_dpb_search_path`), so it is a property of the *attachment*, not of the saved definition —
+ * and changing it would otherwise hand back an idle connection still attached with the old search
+ * path, silently resolving unqualified names in the previous schema until the idle sweeper happened
+ * to evict it. Including it in the key means a change starts a new bucket and the stale one ages
+ * out on its own.
+ */
+export function poolKey(connectionOptions: ConnectionOptions): string {
+  const schema = connectionOptions.defaultSchema?.trim();
+  return schema ? `${connectionOptions.id}\u0000${schema}` : connectionOptions.id;
+}
+
 export class PooledClient<K extends Firebird.Database | Attachment> implements ClientI<K> {
   private readonly idle = new Map<string, PoolEntry<K>[]>();
   private readonly keyOf = new Map<K, string>();
@@ -46,7 +61,7 @@ export class PooledClient<K extends Firebird.Database | Attachment> implements C
   }
 
   public async createConnection(connectionOptions: ConnectionOptions): Promise<K> {
-    const key = connectionOptions.id;
+    const key = poolKey(connectionOptions);
     const bucket = this.idle.get(key);
     while (bucket && bucket.length > 0) {
       const entry = bucket.pop()!;
@@ -103,9 +118,14 @@ export class PooledClient<K extends Firebird.Database | Attachment> implements C
     await Promise.all(all.map((e) => this.forceDetach(e.connection)));
   }
 
-  /** Number of currently idle (pooled, not checked out) connections for a given connection id. Exposed for testing. */
-  public idleCount(connectionId: string): number {
-    return this.idle.get(connectionId)?.length ?? 0;
+  /**
+   * Number of currently idle (pooled, not checked out) connections for a given connection. Exposed
+   * for testing. Takes the whole options object rather than an id because the pool key is not the
+   * id alone — see {@link poolKey}.
+   */
+  public idleCount(connection: string | ConnectionOptions): number {
+    const key = typeof connection === "string" ? connection : poolKey(connection);
+    return this.idle.get(key)?.length ?? 0;
   }
 
   /** Database create/drop bypass pooling entirely — there's no live connection to reuse or return. */

@@ -10,6 +10,7 @@ import {CredentialStore} from './credential-store';
 import {splitStatements} from './sql-splitter';
 import {extractTableNames as extractTableNamesImpl, buildIndexMetadataQuery, renderIndexMetadataPlan, validateReadOnlyStatement} from './sql-analysis';
 import {PooledClient, ConnectionPoolOptions} from './connection-pool';
+import {setSearchPathQuery} from './queries';
 import {SshTunnelClient} from './ssh-tunnel';
 import {getOptions} from '../config';
 import {
@@ -632,6 +633,13 @@ export function toNodeFirebirdOptions(connectionOptions: ConnectionOptions): Fir
   if (connectionOptions.authPlugin) {
     (opts as any).authPlugin = connectionOptions.authPlugin;
   }
+  // Firebird 6 SQL schemas. node-firebird sends this as isc_dpb_search_path only when the
+  // negotiated protocol is 20+, so passing it to an older server is inert rather than an error —
+  // no version probe is needed before attaching.
+  const defaultSchema = connectionOptions.defaultSchema?.trim();
+  if (defaultSchema) {
+    (opts as any).defaultSchema = defaultSchema;
+  }
 
   return opts;
 }
@@ -776,12 +784,28 @@ export class NativeClient implements ClientI<Attachment> {
       throw new Error("Unable to initialize native driver: " + ((e as any)?.message ?? e));
     }
 
-    return await client.connect(connectionStr, {
+    const attachment = await client.connect(connectionStr, {
       username: connectionOptions.user,
       password: connectionOptions.password ?? "",
       role: connectionOptions.role ?? undefined
     });
 
+    // The native driver's ConnectOptions has no search-path field, so the schema cannot ride along
+    // with the attach the way it does on the pure-JS driver. Setting it as the session's first
+    // statement reaches the same end state — the search path is attachment-scoped either way — at
+    // the cost of one extra round trip, and only when a schema is actually configured.
+    const defaultSchema = connectionOptions.defaultSchema?.trim();
+    if (defaultSchema) {
+      try {
+        await this.queryPromise(attachment, setSearchPathQuery(defaultSchema));
+      } catch (err: any) {
+        // A pre-6 server rejects the statement outright. That is not a reason to fail the
+        // connection: the pure-JS driver silently ignores the same setting on such a server, and
+        // the two drivers should not disagree about whether a connection can be opened at all.
+        logger.debug(`Could not apply default schema "${defaultSchema}": ${err?.message ?? err}`);
+      }
+    }
+    return attachment;
   }
 
   public async detach(connection: Attachment) {

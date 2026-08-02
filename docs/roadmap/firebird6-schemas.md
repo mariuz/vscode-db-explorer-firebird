@@ -191,7 +191,7 @@ Three things remain, in the order they are worth doing:
 
 - **Search-path-aware completion ranking.** Completion distinguishes same-named tables across schemas and inserts qualified names — done in `8d56afa`, which has no phase section here — but it does not *rank* them — a table in the session's search path should be offered before one that is not. Self-contained, and the only remaining read-path gap.
 - **Per-schema project folders** (`schemas/SALES/tables/…`) for Database Projects. Phase 2b makes the current per-object layout correct, so this is a tidier long-term shape rather than a fix; it is a layout decision that will churn existing projects, which is why it is not a flag flip.
-- **A per-connection default schema** — still blocked below this extension. Applying one when the session opens needs a hook in connection creation that survives pooling, and the pure-JS driver does not expose `isc_dpb_search_path` at all. See phase 3.
+- ~~**A per-connection default schema**~~ — **done**, unblocked by node-firebird 2.14.2. See phase 3.
 
 ## Phase 2 status — the write path, mostly already done
 
@@ -293,7 +293,7 @@ ALTER SCHEMA SALES SET DEFAULT CHARACTER SET UTF8    -> accepted; RDB$CHARACTER_
 
 Schema-level grants in the privileges viewer were left open here pending catalogue research; that research is done — see phase 6.
 
-## Phase 3 — New Query in Schema (done); per-connection default schema (not done)
+## Phase 3 — New Query in Schema (done); per-connection default schema (done)
 
 **New Query in Schema…** — pgsql 1.21.0's own feature — opens an untitled SQL document already scoped to a schema you pick. What it does is worth showing rather than describing, verified live:
 
@@ -315,7 +315,27 @@ Under the default path that same unqualified statement returns `{ID: 1, NOTE: "p
 
 It is a separate exported function precisely because driving the whole provider needs a faithful `TextDocument` — an attempt to test through `provideCompletionItems()` failed on the mock rather than on the logic, so the decision was extracted to where it can be tested directly.
 
-**Still not done — the per-connection default schema.** Storing a schema on the saved connection and applying it when the session opens needs a hook in connection creation that survives pooling; `isc_dpb_search_path` (the DPB item meant for exactly this) is not exposed by the pure-JS driver. That is a driver-level change, not a UI one, and is the remaining piece of this phase along with search-path-aware completion ranking.
+**The per-connection default schema is now done**, unblocked by node-firebird 2.14.2 exposing `isc_dpb_search_path`. **Set Default Schema…** on a database (or from the Command Palette) picks from the server's own schema list and stores it on the saved connection; every session opened for that connection then resolves unqualified names through it, before its first statement runs.
+
+This is deliberately different from **New Query in Schema…**, which puts a `SET SEARCH_PATH` at the top of *one document*: this applies to the tree, completion and every command as well, so they cannot disagree with the editor about what `ORDERS` means.
+
+Firebird has no default-schema attachment parameter — `CURRENT_SCHEMA` is simply the first existing entry of the search path — so the driver implements it by putting the schema at the front, keeping `PUBLIC` behind it as a fallback while the server appends `SYSTEM`. Verified against the live 6.0.0 server through the extension's own `Driver`, using a probe table that exists in **one** schema only, since a table present in both would resolve either way and prove nothing:
+
+```
+with defaultSchema     SELECT ID FROM SP_PROBE -> 7
+without it             SELECT ID FROM SP_PROBE -> -204 Table unknown
+SEARCH_PATH            "DRIVER_SP_TEST", "PUBLIC", "SYSTEM"
+```
+
+**The pooling question this doc flagged was real, and it is the interesting part of the change.** `PooledClient` keyed its idle buckets on the connection id alone. The search path is a property of the *attachment*, not of the saved definition, so changing a connection's schema would have handed back an idle session still attached with the old one — unqualified names quietly resolving in the previous schema until the idle sweeper happened to evict it, which is the kind of bug that looks like the server misbehaving. The key now includes the schema, so a change starts a new bucket and the stale one ages out on its own. Three tests cover it, including that pooling still *works* when the schema is unchanged — a fix that disabled pooling would also have passed the first test.
+
+**No version probe before attaching.** node-firebird sends the parameter only when the negotiated protocol is 20+, so setting it against a Firebird 5 server is inert rather than an error. The *UI* does check, and refuses to offer the picker on a pre-6 server rather than storing a setting that would silently do nothing.
+
+**The native driver has no equivalent attach option** — `node-firebird-driver`'s `ConnectOptions` has no schema field at all. Rather than let the setting silently do nothing there, `NativeClient` issues `SET SEARCH_PATH` as the session's first statement, which reaches the same end state for one extra round trip. A pre-6 server rejects that statement, and the failure is logged rather than raised: the pure-JS driver ignores the same setting on such a server, and the two drivers should not disagree about whether a connection can be opened at all.
+
+A workspace can declare it too — `"defaultSchema"` in `.vscode/firebird.json`, with the JSON schema updated so the editor completes it. Which schema a project's unqualified names mean belongs beside the database path in version control rather than in each contributor's own settings.
+
+**Still open in this phase: search-path-aware completion ranking.** Completion distinguishes same-named tables and inserts qualified names, but does not yet rank a table in the search path above one that is not.
 
 ## Phase 1j — the Schemas tree level (done)
 
@@ -354,8 +374,8 @@ Covered at three levels, because each catches something the others cannot: the S
 
 ## Suggested phases
 
-1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **partly done (phase 1a above)**: version cache, schema-aware Tables listing and qualified labels/SQL for tables. The other object categories, schema-filtered column metadata, and the Schemas tree level remain.
-2. **Write path**: two-part qualified identifiers in `identifier-quoting.ts`, then thread them through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.
-3. **Search path**: ~~"New Query in Schema"~~ — **done**. The per-connection default schema and search-path-aware completion ranking remain; see phase 3 above for why the first is a driver-level change.
+1. **Read path**: cache the engine major version per connection (reusing `parseEngineMajorVersion()`), add the schema-aware query variants behind that gate, and surface the Schemas level in the tree. No write-path changes — the tree stops lying first. — **done**: version cache, schema-aware listings for every object category, schema-filtered column metadata, qualified labels/SQL, and the Schemas tree level (phases 1a–1j).
+2. ~~**Write path**: two-part qualified identifiers threaded through `ddl-builders.ts`, `row-edit.ts`, `selectAllRecordsQuery()`, and the designers' DDL generation.~~ — **done**, and largely satisfied by the read path rather than separately: qualification lives in the names themselves. Audited table by table in "Phase 2 status" above.
+3. **Search path**: ~~"New Query in Schema"~~ and ~~the per-connection default schema~~ — both **done**; the second was unblocked by node-firebird 2.14.2 exposing `isc_dpb_search_path`. Search-path-aware completion *ranking* remains.
 4. ~~**Presentation and tooling**: color-coded schemas plus legend in the Schema Designer; schema names in `get_schema` for the MCP/LM tools.~~ — **done** (phases 1g and 4).
 5. **Lifecycle**: ~~`CREATE`/`DROP SCHEMA` actions~~ — **done** (phase 5); ~~`ALTER SCHEMA`~~ — **done**; ~~schema-level grants~~ — **done** (phase 6). Per-schema project folders remain; schema-qualified schema-diff is done (phase 2a).

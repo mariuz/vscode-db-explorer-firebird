@@ -531,6 +531,12 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.database.setDefaultSchema",
+        "title": "Set Default Schema…",
+        "category": "Firebird",
+        "icon": "$(symbol-namespace)"
+      },
+      {
         "command": "firebird.mcp.showWriteAuditLog",
         "title": "Show MCP Write Audit Log",
         "category": "Firebird"
@@ -1610,6 +1616,11 @@
           "command": "firebird.database.alterSchema",
           "when": "view == firebird-explorer && viewItem == database",
           "group": "firebird@9"
+        },
+        {
+          "command": "firebird.database.setDefaultSchema",
+          "when": "view == firebird-explorer && viewItem == database",
+          "group": "manage@2"
         }
       ]
     },

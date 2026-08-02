@@ -143,6 +143,34 @@ suite('Driver – toNodeFirebirdOptions()', function () {
     };
   }
 
+  suite('defaultSchema (Firebird 6 SQL schemas)', function () {
+    test('passes the schema through as node-firebird\'s defaultSchema option', function () {
+      // node-firebird turns this into the isc_dpb_search_path attachment parameter, so the search
+      // path is in place before the session's first statement rather than after it.
+      const opts = toNodeFirebirdOptions(baseConnection({ defaultSchema: 'SALES' })) as any;
+      assert.strictEqual(opts.defaultSchema, 'SALES');
+    });
+
+    test('omits the option entirely when no schema is set', function () {
+      // Not `undefined` but absent: the driver only builds a search path when one of its two schema
+      // options is present, and an explicit undefined would be indistinguishable here but is worth
+      // pinning as "we do not send it".
+      assert.ok(!('defaultSchema' in (toNodeFirebirdOptions(baseConnection()) as any)));
+    });
+
+    test('treats a blank or whitespace-only schema as unset', function () {
+      // An empty string would otherwise reach the driver and build a search path of nothing.
+      for (const blank of ['', '   ']) {
+        assert.ok(!('defaultSchema' in (toNodeFirebirdOptions(baseConnection({ defaultSchema: blank })) as any)), JSON.stringify(blank));
+      }
+    });
+
+    test('trims surrounding whitespace', function () {
+      const opts = toNodeFirebirdOptions(baseConnection({ defaultSchema: '  SALES  ' })) as any;
+      assert.strictEqual(opts.defaultSchema, 'SALES');
+    });
+  });
+
   test('maps wireCrypt "Disabled" to Firebird.WIRE_CRYPT_DISABLE', function () {
     const opts = toNodeFirebirdOptions(baseConnection({ wireCrypt: 'Disabled' }));
     assert.strictEqual(opts.wireCrypt, Firebird.WIRE_CRYPT_DISABLE);
