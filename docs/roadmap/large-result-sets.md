@@ -76,8 +76,32 @@ The batch view built its DataTable against a panel that was not yet in the docum
 
 It survived three weeks of test runs because the one spec that could have caught it asserted `expectWebviewText(page, "8675309")` — and the sentinel is in the query text, which the batch tab label shows verbatim. The assertion passed on a grid containing nothing. It now asserts on a grid *cell*, and the init runs against the element rather than an id lookup, so neither half of the mistake can recur quietly.
 
+## Phase 3 — filter and sort push-down (done)
+
+The grid's filter and its column-header sort now go into the query rather than being applied to the rows on screen, so both cover the whole table. Sorting `BIGT` descending surfaces id 25000 — a row that is nowhere near the first page and that no client-side sort of the five rows in the grid could ever reach. That is the whole point, and it is what the Playwright spec asserts.
+
+**Push-down is offered only for a plain whole-table `SELECT`**, decided by `wholeTableSelect()` in `sql-analysis.ts`. Filtering means *rewriting* the statement as `SELECT * FROM t WHERE …`, which is equivalent to what the user is looking at only when the statement really is the whole table: doing it to `SELECT ID FROM BIGT WHERE ID > 100` would silently drop their predicate and change the columns on screen. An existing `ORDER BY` is tolerated, because sorting replaces it wholesale; a `WHERE`, a join, a `GROUP BY`, an explicit column list or a CTE disqualifies the statement, which then keeps plain paging and shows no filter controls.
+
+That is narrower than this doc proposed — it suggested keying on the row-editing table name, which the user can type or which is auto-detected from the `FROM` clause. Using it would mean trusting a *name* to describe a statement it may not describe. The statement itself is the honest source.
+
+**The SQL is built on the extension side, never in the webview.** The controls post a column, an operator name and a value; `buildFilteredTableQuery()` validates the table and column as identifiers (they cannot be bound — Firebird binds values, not names) and passes every value as a positional parameter through `Driver.runQuery()`'s existing `params` argument, as this doc required. The operator list is a closed set, and an unrecognised name throws rather than producing SQL.
+
+Details worth recording:
+
+- **Firebird's own spellings** where they differ from the generic ones: `CONTAINING` for substring and `STARTING WITH` for prefix, both case-insensitive, which is what someone typing into a filter box means.
+- **An empty value drops the filter** rather than becoming `WHERE C CONTAINING ''`, which matches every non-null row and reads as a broken filter.
+- **Filtering resets to the first page.** The row at offset 900 of the unfiltered table is not the row at offset 900 of the filtered one, so keeping the offset would land somewhere arbitrary.
+- **`isNull`/`isNotNull` bind nothing** and hide the value box, rather than leaving a box whose contents are silently ignored.
+- **Our own redraw is not a sort.** Swapping the grid's rows is guarded with a flag, or replacing them would fire DataTables' `order.dt` and trigger another fetch.
+
+### A spec that passed by accident
+
+The order-warning test asserted that no warning was present without running a query of its own — it inherited whatever the previous test had left on screen. Adding tests between them changed that, and it failed. It now runs both an ordered and an unordered query and asserts each. These specs share one VS Code instance, so depending on a previous test's state is exactly how a spec passes alone and fails in the suite.
+
+The same run also hit `runCommand()` twice: the Command Palette widget exists in the DOM whether or not it is open, so a `Control+Shift+P` that never took effect surfaces as an input that resolves and then is not visible when filled, thirty seconds later. Opening the palette is now retried rather than awaited once.
+
 ## Suggested phases
 
 1. ~~**`firebird.maxResultRows` cap + truncation disclosure in the grid.** Smallest change that removes the unbounded case; no protocol or paging work.~~ — **done**, see above.
 2. ~~**Server-side paging** for wrappable single-`SELECT` statements, including the deterministic-order requirement and the row-count decision.~~ — **done**, see above.
-3. **Query-level filter/sort push-down** for the single-table (row-editing) case, reusing `parameterized-query.ts` for values.
+3. ~~**Query-level filter/sort push-down** for the single-table (row-editing) case, reusing `parameterized-query.ts` for values.~~ — **done**, see above; keyed on the statement being a whole-table SELECT rather than on the row-editing table name, for the reason given there. All three phases of this doc are complete.

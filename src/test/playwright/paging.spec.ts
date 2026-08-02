@@ -79,10 +79,83 @@ test.describe("Results grid – server-side paging", () => {
     await expect(frame.locator(".btn-page-prev")).toBeDisabled();
   });
 
-  test("an ordered query gets no order warning", async () => {
-    // The warning is only correct for a statement whose row order Firebird is free to change; this
-    // query has an ORDER BY, so showing it would be crying wolf.
-    const frame = webviewFrame(vscode.page);
+  test("filtering re-queries the whole table, not the page on screen", async () => {
+    // The point of push-down: BIGT's row 24999 is nowhere near the first page, so a client-side
+    // filter over the five rows in the grid could never find it. Only a re-issued query can.
+    const { page } = vscode;
+    const frame = webviewFrame(page);
+
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("SELECT * FROM BIGT");
+    await runQueryInEditor(page);
+
+    // A whole-table SELECT, so the filter controls appear.
+    await expect(frame.locator(".fb-filter-row")).toBeVisible({ timeout: 60_000 });
+
+    await frame.locator(".fb-filter-column").selectOption("NOTE");
+    await frame.locator(".fb-filter-operator").selectOption("equals");
+    await frame.locator(".fb-filter-value").fill("row 24999");
+    await frame.locator(".btn-filter-apply").click();
+
+    await expect(frame.locator(".fb-page-label")).toHaveText("Rows 1–1 of 1", { timeout: 60_000 });
+    await expect(frame.locator("table.dataTable tbody tr td:nth-child(2)")).toHaveText(["24999"]);
+  });
+
+  test("sorting a column header re-queries, so it sorts the whole table", async () => {
+    // BIGT's largest id is 25000, which is not on the first page — a client-side sort of the five
+    // rows in the grid could only ever surface 5. Reaching 25000 proves the server re-sorted.
+    const { page } = vscode;
+    const frame = webviewFrame(page);
+
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("SELECT * FROM BIGT");
+    await runQueryInEditor(page);
+    await expect(frame.locator(".fb-page-label")).toHaveText("Rows 1–5 of more", { timeout: 60_000 });
+
+    // DataTables sorts ascending on the first click and descending on the second.
+    const idHeader = frame.locator("th", { hasText: "ID" }).first();
+    await idHeader.click();
+    await expect(frame.locator("table.dataTable tbody tr td:nth-child(2)")).toHaveText(["1", "2", "3", "4", "5"]);
+    await idHeader.click();
+    await expect(frame.locator("table.dataTable tbody tr td:nth-child(2)")).toHaveText(["25000", "24999", "24998", "24997", "24996"]);
+  });
+
+  test("a query that is not a whole table gets paging but no filter controls", async () => {
+    // Rewriting `SELECT ID FROM BIGT WHERE ID > 100` as `SELECT * FROM BIGT WHERE …` would drop
+    // the user's own predicate and change the columns, so push-down is deliberately not offered.
+    const { page } = vscode;
+    const frame = webviewFrame(page);
+
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("SELECT ID FROM BIGT WHERE ID > 100");
+    await runQueryInEditor(page);
+
+    await expect(frame.locator(".fb-page-label")).toHaveText("Rows 1–5 of more", { timeout: 60_000 });
+    await expect(frame.locator(".fb-filter-row")).toHaveCount(0);
+  });
+
+  test("the order warning appears only when the query has no ORDER BY", async () => {
+    // The warning is only correct for a statement whose row order Firebird is free to change.
+    // Both halves are asserted here, and the query is re-run rather than inherited from an earlier
+    // test: these share one VS Code, so depending on what a previous test left on screen is how a
+    // spec passes alone and fails in the suite.
+    const { page } = vscode;
+    const frame = webviewFrame(page);
+
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("SELECT ID FROM BIGT");
+    await runQueryInEditor(page);
+    await expect(frame.locator(".fb-page-warning")).toHaveCount(1, { timeout: 60_000 });
+
+    await page.locator(".monaco-editor").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("SELECT ID FROM BIGT ORDER BY ID");
+    await runQueryInEditor(page);
+    await expect(frame.locator(".fb-page-label")).toHaveText("Rows 1–5 of more", { timeout: 60_000 });
     await expect(frame.locator(".fb-page-warning")).toHaveCount(0);
   });
 });

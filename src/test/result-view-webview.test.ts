@@ -375,6 +375,24 @@ suite('result-view app.js – pure helpers (via __test__ hook)', function () {
     });
   });
 
+  suite('FILTER_OPERATOR_CHOICES — phase 3 push-down', function () {
+    test('every operator the grid offers is one the extension host understands', function () {
+      // The two lists are in different files and different languages; buildFilteredTableQuery()
+      // throws on an unknown operator, so a typo here would be a runtime error in the user's face.
+      const known = ['contains', 'startsWith', 'equals', 'notEquals', 'greaterThan', 'lessThan', 'isNull', 'isNotNull'];
+      for (const choice of hooks.FILTER_OPERATOR_CHOICES) {
+        assert.ok(known.includes(choice.value), `unknown operator: ${choice.value}`);
+        assert.ok(choice.label && choice.label.length > 0, `no label for ${choice.value}`);
+      }
+    });
+
+    test('offers the null checks, which need no value', function () {
+      const values = hooks.FILTER_OPERATOR_CHOICES.map((c: any) => c.value);
+      assert.ok(values.includes('isNull'));
+      assert.ok(values.includes('isNotNull'));
+    });
+  });
+
   suite('pagingOrderWarning()', function () {
     test('warns when the statement has no ORDER BY', function () {
       const warning = hooks.pagingOrderWarning(false);

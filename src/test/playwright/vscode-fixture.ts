@@ -133,10 +133,18 @@ export async function launchVSCode(workspaceDir: string): Promise<LaunchedVSCode
  * but the ones that don't are all reachable here.
  */
 export async function runCommand(page: Page, command: string): Promise<void> {
-  await page.keyboard.press("Control+Shift+P");
   const input = page.locator(".quick-input-widget .input");
-  await input.waitFor({ state: "visible", timeout: 30_000 });
-  await input.fill(`>${command}`);
+  // Opening the palette is retried rather than awaited once. The widget exists in the DOM whether
+  // or not it is open, so a Control+Shift+P that never took effect — swallowed before the
+  // workbench was listening, or undone by something else taking focus — shows up as an input that
+  // resolves and then is not visible when filled, 30 seconds later. Reopening is the only recovery,
+  // and this tier is slow enough that a spurious failure costs more than a retry.
+  await expectFromBase(async () => {
+    if (!(await input.isVisible())) {
+      await page.keyboard.press("Control+Shift+P");
+    }
+    await input.fill(`>${command}`, { timeout: 5_000 });
+  }).toPass({ timeout: 60_000 });
   // Let the palette filter before committing — pressing Enter too early runs whatever was
   // highlighted for the previous keystroke.
   await page.locator(".quick-input-list .monaco-list-row").first().waitFor({ timeout: 30_000 });

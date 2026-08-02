@@ -281,3 +281,28 @@ export function buildPagedQuery(sql: string, offset: number, limit: number): str
   }
   return `${sql.slice(0, end)}\nOFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
 }
+
+/**
+ * The table behind a statement that selects a whole table and nothing else, or undefined.
+ *
+ * This is the gate for filter/sort push-down (docs/roadmap/large-result-sets.md, phase 3). Pushing
+ * a filter down means *re-writing* the statement as `SELECT * FROM t WHERE …`, which is only
+ * equivalent to what the user is looking at when the statement really is the whole table: doing it
+ * to `SELECT ID FROM T WHERE X > 5` would silently drop their predicate and change the columns.
+ *
+ * An existing ORDER BY is allowed, since sorting replaces it wholesale; anything else — a WHERE, a
+ * join, a GROUP BY, an explicit column list, a CTE — disqualifies the statement, which then keeps
+ * plain paging.
+ */
+export function wholeTableSelect(sql: string): string | undefined {
+  const statements = splitStatements(sql);
+  if (statements.length !== 1) {
+    return undefined;
+  }
+  const stmt = stripLeadingCommentsAndWhitespace(statements[0]).replace(/;\s*$/, "").trim();
+  // Two-part names are Firebird 6 schema-qualified ones (SALES.ORDERS); the trailing ORDER BY is
+  // consumed rather than rejected because push-down rewrites it.
+  const match = /^SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)?)\s*(ORDER\s+BY\s+[^;]*)?$/i
+    .exec(stmt);
+  return match ? match[1] : undefined;
+}

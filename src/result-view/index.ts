@@ -4,10 +4,10 @@ import { join } from "path";
 
 import { QueryResultsView, Message } from "./queryResultsView";
 import { BatchResult, Driver, extractTableNames } from "../shared/driver";
-import { analyzePaging, buildPagedQuery } from "../shared/sql-analysis";
+import { analyzePaging, buildPagedQuery, wholeTableSelect } from "../shared/sql-analysis";
 import { getEngineMajorVersion } from "../shared/engine-version";
 import { Global } from "../shared/global";
-import { getPrimaryKeyColumnsQuery } from "../shared/queries";
+import { getPrimaryKeyColumnsQuery, buildFilteredTableQuery, ColumnFilter, ColumnSort } from "../shared/queries";
 import { RowChange, buildStatementForChange } from "../shared/row-edit";
 import { interpretPlanText, PlanInterpretation } from "../shared/plan-parser";
 import { ActualPlanNode } from "../shared/actual-plan";
@@ -64,6 +64,12 @@ export interface PagingInfo {
    * rather than presenting the pages as a window onto a stable set.
    */
   ordered: boolean;
+  /**
+   * The table to re-query when filtering or sorting is pushed down, set only when the statement is
+   * a plain whole-table SELECT. Anything else keeps plain paging: rewriting `SELECT ID FROM T
+   * WHERE X > 5` as `SELECT * FROM T WHERE …` would silently drop the user's own predicate.
+   */
+  filterTable?: string;
 }
 
 /** Payload for the "applyChanges" message sent from the webview's edit toolbar. */
@@ -277,14 +283,26 @@ export default class ResultView extends QueryResultsView implements Disposable {
    * page itself — so the grid can say which rows it is showing and whether more exist, but not how
    * many there are in total.
    */
-  private async handleFetchPage(data: { requestId: string; sql: string; offset: number }): Promise<void> {
-    const { requestId, sql, offset } = data;
+  private async handleFetchPage(data: {
+    requestId: string;
+    sql: string;
+    offset: number;
+    table?: string;
+    filters?: ColumnFilter[];
+    sort?: ColumnSort;
+  }): Promise<void> {
+    const { requestId, sql, offset, table, filters, sort } = data;
     const pageSize = getOptions().maxResultRows;
     try {
       if (!Number.isInteger(pageSize) || pageSize <= 0) {
         throw new Error("Paging needs a positive firebird.maxResultRows.");
       }
-      const rows: any[] = (await Driver.runQuery(buildPagedQuery(sql, offset, pageSize + 1))) ?? [];
+      // Filters and sort are pushed into the statement rather than applied to the page, so they
+      // cover the whole table (docs/roadmap/large-result-sets.md, phase 3). The SQL is built here
+      // and never in the webview: identifier validation and value binding belong on this side.
+      const base = table ? buildFilteredTableQuery(table, filters ?? [], sort) : { sql, params: [] };
+      const rows: any[] =
+        (await Driver.runQuery(buildPagedQuery(base.sql, offset, pageSize + 1), undefined, base.params)) ?? [];
       const hasMore = rows.length > pageSize;
       const page = hasMore ? rows.slice(0, pageSize) : rows;
       const decoder = new TextDecoder();
@@ -513,7 +531,14 @@ export function buildPagingInfo(
   if (!analysis.pageable) {
     return undefined;
   }
-  return { sql, pageSize, offset: 0, hasMore: true, ordered: analysis.ordered };
+  return {
+    sql,
+    pageSize,
+    offset: 0,
+    hasMore: true,
+    ordered: analysis.ordered,
+    filterTable: wholeTableSelect(sql),
+  };
 }
 
 /**

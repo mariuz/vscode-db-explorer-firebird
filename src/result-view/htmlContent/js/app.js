@@ -100,6 +100,22 @@ $(() => {
     }
   });
 
+  /**
+   * Filter comparisons offered by the grid, in menu order. The `value`s are the operator names the
+   * extension host's buildFilteredTableQuery() understands -- it rejects anything it does not
+   * recognise, so a typo here fails loudly rather than producing broken SQL.
+   */
+  const FILTER_OPERATOR_CHOICES = [
+    { value: "contains", label: "contains" },
+    { value: "equals", label: "=" },
+    { value: "notEquals", label: "≠" },
+    { value: "startsWith", label: "starts with" },
+    { value: "greaterThan", label: ">" },
+    { value: "lessThan", label: "<" },
+    { value: "isNull", label: "is null" },
+    { value: "isNotNull", label: "is not null" },
+  ];
+
   // ── Batch rendering ───────────────────────────────────────────────────────
 
   function renderBatch(results, recordsPerPage) {
@@ -337,6 +353,7 @@ $(() => {
       let hasMore = !!paging.hasMore;
       let shown = tableBody.length;
       let loading = false;
+      let applyingRows = false;
 
       const $prev = $("<button>").addClass("btn-grid-action btn-page-prev").text("‹ Previous");
       const $next = $("<button>").addClass("btn-grid-action btn-page-next").text("Next ›");
@@ -347,6 +364,73 @@ $(() => {
       const warning = pagingOrderWarning(paging.ordered);
       if (warning) {
         $pager.append($("<div>").addClass("fb-page-warning").text(warning));
+      }
+
+      // ── Filter and sort push-down (phase 3) ────────────────────────────────
+      //
+      // Offered only when the statement is a plain whole-table SELECT, which the extension host
+      // decides -- filtering anything else would mean rewriting the user's own query. The controls
+      // send column/operator/value, never SQL: the statement is built on the extension side, where
+      // identifiers are validated and values are bound as parameters.
+      let filters = [];
+      let sort = null;
+      if (paging.filterTable) {
+        const $filterColumn = $("<select>").addClass("fb-filter-column");
+        headers.forEach(h => $filterColumn.append($("<option>").val(h.title).text(h.title)));
+        const $filterOperator = $("<select>").addClass("fb-filter-operator");
+        FILTER_OPERATOR_CHOICES.forEach(choice =>
+          $filterOperator.append($("<option>").val(choice.value).text(choice.label))
+        );
+        const $filterValue = $("<input>").attr("type", "text").attr("placeholder", "Filter value").addClass("fb-filter-value");
+        const $filterApply = $("<button>").addClass("btn-grid-action btn-filter-apply").text("Filter");
+        const $filterClear = $("<button>").addClass("btn-grid-action btn-filter-clear").text("Clear");
+
+        const readFilters = () => {
+          const operator = String($filterOperator.val());
+          const value = String($filterValue.val());
+          const needsValue = operator !== "isNull" && operator !== "isNotNull";
+          if (needsValue && !value) { return []; }
+          return [{ column: String($filterColumn.val()), operator, value: needsValue ? value : undefined }];
+        };
+
+        const applyFilters = () => {
+          filters = readFilters();
+          // Back to the first page: the row at offset 900 of the unfiltered table is not the row at
+          // offset 900 of the filtered one, and keeping the offset would land somewhere arbitrary.
+          goTo(0);
+        };
+
+        $filterApply.on("click", applyFilters);
+        $filterValue.on("keydown", event => { if (event.key === "Enter") { applyFilters(); } });
+        $filterClear.on("click", () => { $filterValue.val(""); filters = []; goTo(0); });
+        // Toggling to a null check makes the value box meaningless -- hide it rather than leave a
+        // box whose contents are silently ignored.
+        $filterOperator.on("change", () => {
+          const operator = String($filterOperator.val());
+          $filterValue.toggle(operator !== "isNull" && operator !== "isNotNull");
+        });
+
+        $pager.append(
+          $("<div>").addClass("fb-filter-row").append(
+            $("<span>").addClass("fb-filter-label").text("Filter the whole table:"),
+            $filterColumn, $filterOperator, $filterValue, $filterApply, $filterClear
+          )
+        );
+
+        // Sorting a column header re-queries rather than reordering the page. DataTables sorts the
+        // page client-side as well, which is harmless -- the rows are replaced by the response.
+        dt.on("order.dt", () => {
+          if (loading || applyingRows) { return; } // our own draw(), not a user-initiated sort
+          const order = dt.order();
+          if (!order || !order.length) { return; }
+          // Column 0 is the row-delete button, so header i maps to headers[i - 1].
+          const header = headers[order[0][0] - 1];
+          if (!header) { return; }
+          const next = { column: header.title, descending: order[0][1] === "desc" };
+          if (sort && sort.column === next.column && sort.descending === next.descending) { return; }
+          sort = next;
+          goTo(0);
+        });
       }
 
       function refreshPager() {
@@ -369,7 +453,13 @@ $(() => {
         loading = true;
         refreshPager();
         $pageStatus.text("Fetching…");
-        requestFromExtension("fetchPage", { sql: paging.sql, offset: nextOffset }).then(result => {
+        const request = { sql: paging.sql, offset: nextOffset };
+        if (paging.filterTable) {
+          request.table = paging.filterTable;
+          request.filters = filters;
+          if (sort) { request.sort = sort; }
+        }
+        requestFromExtension("fetchPage", request).then(result => {
           loading = false;
           if (result.error) {
             $pageStatus.text(result.error);
@@ -379,9 +469,16 @@ $(() => {
           offset = result.offset;
           hasMore = !!result.hasMore;
           shown = (result.tableBody || []).length;
-          dt.clear();
-          dt.rows.add((result.tableBody || []).map(row => [""].concat(row)));
-          dt.draw();
+          // Swapping the rows must not look like a user sorting a column, or a fetch would
+          // trigger another fetch.
+          applyingRows = true;
+          try {
+            dt.clear();
+            dt.rows.add((result.tableBody || []).map(row => [""].concat(row)));
+            dt.draw();
+          } finally {
+            applyingRows = false;
+          }
           refreshPager();
         });
       }
@@ -1124,7 +1221,7 @@ $(() => {
       sqlLiteral, buildInsertStatement, buildInClause, selectionRange,
       parseShortcut, matchesShortcut,
       detectNumericColumns, buildBarChartSvg, buildLineChartSvg, buildPieChartSvg, buildScatterChartSvg,
-      buildTextView, truncationNote, pageRangeLabel, pagingOrderWarning,
+      buildTextView, truncationNote, pageRangeLabel, pagingOrderWarning, FILTER_OPERATOR_CHOICES,
       computeSelectionStats, formatSelectionStats,
       resultsFontProperties,
     };

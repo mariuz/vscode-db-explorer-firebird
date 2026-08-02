@@ -1086,3 +1086,90 @@ export function getMaxParallelWorkersQuery(): string {
           FROM RDB$CONFIG
           WHERE RDB$CONFIG_NAME = 'MaxParallelWorkers'`;
 }
+
+// ── Filter/sort push-down (docs/roadmap/large-result-sets.md, phase 3) ───────
+
+/**
+ * Comparisons the results grid can push into the query.
+ *
+ * Firebird spellings rather than SQL-generic ones where they differ: CONTAINING is a
+ * case-insensitive substring match and STARTING WITH a case-insensitive prefix match, which is
+ * what someone typing into a grid's filter box means, and neither has a portable equivalent that
+ * behaves the same.
+ */
+export const FILTER_OPERATORS = {
+  contains: "CONTAINING",
+  startsWith: "STARTING WITH",
+  equals: "=",
+  notEquals: "<>",
+  greaterThan: ">",
+  lessThan: "<",
+} as const;
+
+export type FilterOperator = keyof typeof FILTER_OPERATORS | "isNull" | "isNotNull";
+
+export interface ColumnFilter {
+  column: string;
+  operator: FilterOperator;
+  /** Ignored — and not bound — for `isNull`/`isNotNull`. */
+  value?: string;
+}
+
+export interface ColumnSort {
+  column: string;
+  descending?: boolean;
+}
+
+export interface ParameterizedQuery {
+  sql: string;
+  /** Positional values for the `?` placeholders, in order — see Driver.runQuery()'s third argument. */
+  params: any[];
+}
+
+/**
+ * `SELECT * FROM table` with the grid's filters and sort pushed into the statement, so they apply
+ * to the whole table rather than to the rows that happen to be on screen.
+ *
+ * Column and table names are validated as identifiers (they cannot be parameterized — Firebird
+ * binds values, not names); every filter *value* is bound as a positional parameter and never
+ * interpolated. Only callable for a statement {@link wholeTableSelect} accepted, which is what
+ * makes rewriting it equivalent to what the user is looking at.
+ */
+export function buildFilteredTableQuery(
+  tableName: string,
+  filters: ColumnFilter[] = [],
+  sort?: ColumnSort
+): ParameterizedQuery {
+  assertValidIdentifier(tableName, "table name");
+
+  const conditions: string[] = [];
+  const params: any[] = [];
+  for (const filter of filters) {
+    assertValidIdentifier(filter.column, "column name");
+    if (filter.operator === "isNull" || filter.operator === "isNotNull") {
+      conditions.push(`${filter.column} IS ${filter.operator === "isNull" ? "" : "NOT "}NULL`);
+      continue;
+    }
+    const sqlOperator = FILTER_OPERATORS[filter.operator];
+    if (!sqlOperator) {
+      throw new Error(`Unknown filter operator: "${filter.operator}".`);
+    }
+    // An empty value is a no-op rather than a match-everything predicate: a filter box the user
+    // has cleared should behave as though it were not there.
+    if (filter.value === undefined || filter.value === "") {
+      continue;
+    }
+    conditions.push(`${filter.column} ${sqlOperator} ?`);
+    params.push(filter.value);
+  }
+
+  let sql = `SELECT * FROM ${tableName}`;
+  if (conditions.length > 0) {
+    sql += ` WHERE ${conditions.join(" AND ")}`;
+  }
+  if (sort) {
+    assertValidIdentifier(sort.column, "column name");
+    sql += ` ORDER BY ${sort.column}${sort.descending ? " DESC" : ""}`;
+  }
+  return { sql, params };
+}

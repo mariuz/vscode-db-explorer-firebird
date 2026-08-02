@@ -13,7 +13,8 @@
  */
 
 import * as assert from "assert";
-import { analyzePaging, buildPagedQuery, PAGING_MIN_ENGINE_VERSION } from "../shared/sql-analysis";
+import { analyzePaging, buildPagedQuery, wholeTableSelect, PAGING_MIN_ENGINE_VERSION } from "../shared/sql-analysis";
+import { buildFilteredTableQuery } from "../shared/queries";
 
 const FB = 6;
 
@@ -174,5 +175,107 @@ suite("buildPagedQuery", function () {
     assert.throws(() => buildPagedQuery("SELECT * FROM T", 1.5, 10), /Invalid page offset/);
     assert.throws(() => buildPagedQuery("SELECT * FROM T", 0, 0), /Invalid page size/);
     assert.throws(() => buildPagedQuery("SELECT * FROM T", 0, NaN), /Invalid page size/);
+  });
+});
+
+suite("wholeTableSelect – the gate for filter/sort push-down", function () {
+  test("a plain whole-table select yields its table", function () {
+    assert.strictEqual(wholeTableSelect("SELECT * FROM ORDERS"), "ORDERS");
+    assert.strictEqual(wholeTableSelect("select * from orders;"), "orders");
+  });
+
+  test("a schema-qualified table survives", function () {
+    assert.strictEqual(wholeTableSelect("SELECT * FROM SALES.ORDERS"), "SALES.ORDERS");
+  });
+
+  test("an existing ORDER BY is allowed, because sorting replaces it", function () {
+    assert.strictEqual(wholeTableSelect("SELECT * FROM ORDERS ORDER BY ID DESC"), "ORDERS");
+  });
+
+  test("anything that is not the whole table is refused", function () {
+    // Each of these would have its meaning changed by rewriting it as SELECT * FROM t WHERE …:
+    // the predicate would be dropped, or the column list, or the join.
+    for (const sql of [
+      "SELECT ID FROM ORDERS",
+      "SELECT * FROM ORDERS WHERE ID > 5",
+      "SELECT * FROM ORDERS JOIN CUSTOMERS ON 1=1",
+      "SELECT * FROM ORDERS GROUP BY ID",
+      "WITH C AS (SELECT * FROM T) SELECT * FROM C",
+      "SELECT FIRST 10 * FROM ORDERS",
+      "SELECT * FROM A; SELECT * FROM B;",
+      "UPDATE ORDERS SET X = 1",
+    ]) {
+      assert.strictEqual(wholeTableSelect(sql), undefined, sql);
+    }
+  });
+});
+
+suite("buildFilteredTableQuery", function () {
+  test("no filters and no sort is just the table", function () {
+    assert.deepStrictEqual(buildFilteredTableQuery("ORDERS"), { sql: "SELECT * FROM ORDERS", params: [] });
+  });
+
+  test("a value is bound, never interpolated", function () {
+    const result = buildFilteredTableQuery("ORDERS", [{ column: "NOTE", operator: "contains", value: "o'brien" }]);
+    assert.strictEqual(result.sql, "SELECT * FROM ORDERS WHERE NOTE CONTAINING ?");
+    assert.deepStrictEqual(result.params, ["o'brien"]);
+    assert.ok(!result.sql.includes("brien"), "the value must not reach the SQL text");
+  });
+
+  test("uses Firebird's own spellings for substring and prefix matching", function () {
+    assert.ok(buildFilteredTableQuery("T", [{ column: "C", operator: "contains", value: "x" }]).sql.includes("CONTAINING ?"));
+    assert.ok(buildFilteredTableQuery("T", [{ column: "C", operator: "startsWith", value: "x" }]).sql.includes("STARTING WITH ?"));
+  });
+
+  test("null checks bind nothing, since IS NULL takes no operand", function () {
+    const result = buildFilteredTableQuery("T", [{ column: "C", operator: "isNull" }]);
+    assert.strictEqual(result.sql, "SELECT * FROM T WHERE C IS NULL");
+    assert.deepStrictEqual(result.params, []);
+    assert.strictEqual(buildFilteredTableQuery("T", [{ column: "C", operator: "isNotNull" }]).sql,
+      "SELECT * FROM T WHERE C IS NOT NULL");
+  });
+
+  test("an empty value is dropped rather than matching everything", function () {
+    // A filter box the user has cleared should behave as though it were not there -- not as
+    // `WHERE C CONTAINING ''`, which matches every non-null row and looks like a broken filter.
+    const result = buildFilteredTableQuery("T", [{ column: "C", operator: "contains", value: "" }]);
+    assert.strictEqual(result.sql, "SELECT * FROM T");
+    assert.deepStrictEqual(result.params, []);
+  });
+
+  test("several filters are ANDed, and their values keep their order", function () {
+    const result = buildFilteredTableQuery("T", [
+      { column: "A", operator: "equals", value: "1" },
+      { column: "B", operator: "greaterThan", value: "2" },
+    ]);
+    assert.strictEqual(result.sql, "SELECT * FROM T WHERE A = ? AND B > ?");
+    assert.deepStrictEqual(result.params, ["1", "2"]);
+  });
+
+  test("sorting appends an ORDER BY", function () {
+    assert.strictEqual(buildFilteredTableQuery("T", [], { column: "ID" }).sql, "SELECT * FROM T ORDER BY ID");
+    assert.strictEqual(buildFilteredTableQuery("T", [], { column: "ID", descending: true }).sql,
+      "SELECT * FROM T ORDER BY ID DESC");
+  });
+
+  test("filter and sort compose, in that order", function () {
+    const result = buildFilteredTableQuery("T", [{ column: "C", operator: "equals", value: "x" }], { column: "ID" });
+    assert.strictEqual(result.sql, "SELECT * FROM T WHERE C = ? ORDER BY ID");
+  });
+
+  test("identifiers are validated — they cannot be bound, so they must be checked", function () {
+    assert.throws(() => buildFilteredTableQuery("T; DROP TABLE X"), /Invalid table name/);
+    assert.throws(
+      () => buildFilteredTableQuery("T", [{ column: "C = 1 OR 1", operator: "equals", value: "x" }]),
+      /Invalid column name/
+    );
+    assert.throws(() => buildFilteredTableQuery("T", [], { column: "ID DESC, X" }), /Invalid column name/);
+  });
+
+  test("an unknown operator is refused rather than producing broken SQL", function () {
+    assert.throws(
+      () => buildFilteredTableQuery("T", [{ column: "C", operator: "nonsense" as any, value: "x" }]),
+      /Unknown filter operator/
+    );
   });
 });
