@@ -175,6 +175,17 @@ export function activate(context: ExtensionContext) {
     firebirdJsonWatcher.onDidDelete(() => commands.executeCommand("firebird.explorer.refresh"))
   );
 
+  /* Workspace connections are withheld in an untrusted folder (see loadWorkspaceConnections()).
+     Granting trust does not reload the window, so without this the tree would keep showing the
+     folder's connections as absent until the user restarted — looking like the file was broken
+     rather than withheld. */
+  context.subscriptions.push(
+    workspace.onDidGrantWorkspaceTrust(() => {
+      void activateDefaultWorkspaceConnection();
+      void commands.executeCommand("firebird.explorer.refresh");
+    })
+  );
+
   async function activateDefaultWorkspaceConnection(): Promise<void> {
     if (Global.activeConnection) { return; }
     const conns = await loadWorkspaceConnections();

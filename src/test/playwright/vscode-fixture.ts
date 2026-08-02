@@ -81,7 +81,16 @@ export function activityBarItem(page: Page) {
   return page.locator('.activitybar [aria-label*="Firebird" i]').first();
 }
 
-export async function launchVSCode(workspaceDir: string): Promise<LaunchedVSCode> {
+export interface LaunchOptions {
+  /**
+   * Whether to bypass the Workspace Trust prompt. Default true — every spec but the trust one
+   * wants the extension fully enabled. Pass `false` to land in Restricted Mode, which is the only
+   * way to exercise `untrustedWorkspaces: "limited"`.
+   */
+  trust?: boolean;
+}
+
+export async function launchVSCode(workspaceDir: string, options: LaunchOptions = {}): Promise<LaunchedVSCode> {
   const executablePath = await downloadAndUnzipVSCode(process.env.CODE_VERSION || "stable");
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fb-pw-"));
 
@@ -92,9 +101,9 @@ export async function launchVSCode(workspaceDir: string): Promise<LaunchedVSCode
       `--extensionDevelopmentPath=${repoRoot}`,
       `--user-data-dir=${path.join(scratch, "user-data")}`,
       `--extensions-dir=${path.join(scratch, "extensions")}`,
-      // The extension declares `untrustedWorkspaces: supported: false`, so without this it would
-      // not activate in a freshly created folder at all.
-      "--disable-workspace-trust",
+      // Bypasses the trust prompt for a freshly created folder. Omitted only by the Workspace
+      // Trust spec, which needs to *be* in Restricted Mode.
+      ...(options.trust === false ? [] : ["--disable-workspace-trust"]),
       // Noise that would otherwise steal focus from, or overlay, whatever a spec is asserting on.
       "--skip-release-notes",
       "--skip-welcome",
@@ -121,6 +130,15 @@ export async function launchVSCode(workspaceDir: string): Promise<LaunchedVSCode
   // The workbench renders progressively; every locator below would race a splash screen without
   // waiting for the shell itself to exist first.
   await page.locator(".monaco-workbench").waitFor({ state: "visible", timeout: 120_000 });
+
+  if (options.trust === false) {
+    // Best-effort: on a fresh profile VS Code opens the folder in Restricted Mode without prompting
+    // at all, so waiting for a dialog that never appears would hang the launch for a minute and
+    // then fail — which is exactly what the first version of this did. When a prompt *is* shown it
+    // is modal and has to be declined before anything else can be clicked.
+    const decline = page.locator(".monaco-dialog-box .monaco-button", { hasText: /don't trust/i });
+    await decline.click({ timeout: 5_000 }).catch(() => undefined);
+  }
   // Every spec starts from "the extension has run", so none of them has to think about it.
   await waitForActivation(page);
 

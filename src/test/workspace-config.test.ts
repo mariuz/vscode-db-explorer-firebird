@@ -237,6 +237,7 @@ suite('loadWorkspaceConnections()', function () {
 
   teardown(function () {
     (workspace as any).workspaceFolders = undefined;
+    delete (workspace as any).isTrusted;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -265,5 +266,41 @@ suite('loadWorkspaceConnections()', function () {
     fs.mkdirSync(path.join(tmpDir, '.vscode'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, '.vscode', 'firebird.json'), '{ not valid json');
     assert.deepStrictEqual(await loadWorkspaceConnections(), []);
+  });
+
+  suite('Workspace Trust', function () {
+    const config = JSON.stringify({
+      connections: [{ name: 'Staging', host: 'db.example.com', database: '/srv/app.fdb' }],
+    });
+
+    test('an untrusted folder\'s connections are withheld', async function () {
+      // The file cannot carry a password by design, so a malicious repository's entry would instead
+      // *prompt* for one — a connection called "Staging" pointing at a server the attacker controls,
+      // with the user typing real credentials into it. This is the whole reason the extension
+      // declares `untrustedWorkspaces: "limited"` rather than full support.
+      fs.mkdirSync(path.join(tmpDir, '.vscode'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, '.vscode', 'firebird.json'), config);
+      (workspace as any).isTrusted = false;
+      assert.deepStrictEqual(await loadWorkspaceConnections(), []);
+    });
+
+    test('a trusted folder\'s connections load normally', async function () {
+      fs.mkdirSync(path.join(tmpDir, '.vscode'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, '.vscode', 'firebird.json'), config);
+      (workspace as any).isTrusted = true;
+      const connections = await loadWorkspaceConnections();
+      assert.strictEqual(connections.length, 1);
+      assert.strictEqual(connections[0].host, 'db.example.com');
+    });
+
+    test('an older VS Code with no trust API is treated as trusted', async function () {
+      // `isTrusted` is undefined on hosts that predate Workspace Trust. Treating unknown as
+      // untrusted would silently break workspace connections for those users; the check is
+      // deliberately `=== false`, not falsy.
+      fs.mkdirSync(path.join(tmpDir, '.vscode'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, '.vscode', 'firebird.json'), config);
+      delete (workspace as any).isTrusted;
+      assert.strictEqual((await loadWorkspaceConnections()).length, 1);
+    });
   });
 });

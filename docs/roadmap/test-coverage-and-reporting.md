@@ -151,4 +151,23 @@ The decision itself is not a formality. Three settings — `firebird.isqlPath`, 
 4. ~~**Platform matrix** for the unit tier (Windows + macOS), which is where the `isql`/`gbak`/`docker` spawn and path logic finally gets exercised off Linux.~~ — **done**, though the stated rationale turned out to be wrong: that logic takes an injected platform parameter and was already tested for Windows from Linux. See phase 4 above for what the matrix actually buys.
 5. ~~**Insiders + Workspace Trust**: a nightly Insiders suite run, and an explicit `untrustedWorkspaces` declaration with a test config that verifies it.~~ — **done**, except the "test config" half, which is not achievable for a `supported: false` extension and is replaced by manifest-level tests. See phase 5 above.
 
-All five phases of this doc are complete. What remains open, tracked here so it is not lost: **patch/diff coverage** (needs a `CODECOV_TOKEN` secret), and **`supported: "limited"` Workspace Trust** (needs the executable-path settings to become machine-scoped first).
+All five phases of this doc are complete, and the `supported: "limited"` item it tracked is now done too — see below. What remains open: **patch/diff coverage**, which needs a `CODECOV_TOKEN` secret.
+
+## Phase 6 — `supported: "limited"` Workspace Trust (done)
+
+The extension now loads in an untrusted folder. Previously it declared `supported: false`, so VS Code disabled it entirely: opening a repository you had not trusted meant no Object Explorer, no SQL completion, no connections — including the ones saved in *your* global state, which have nothing to do with the folder.
+
+Two things the folder controls are withheld instead:
+
+- **Its executable paths.** `firebird.isqlPath`/`gbakPath`/`dockerPath` name programs the extension spawns, and a repository's own `.vscode/settings.json` can set any window-scoped setting.
+- **Its connections.** `.vscode/firebird.json` cannot carry a password by design — which means a malicious entry would *prompt* for one. A connection called "Staging DB" pointing at a server the attacker chose, with the user typing real credentials into it, is a more plausible attack than anything involving the executable paths.
+
+**`restrictedConfigurations`, not machine scope.** This doc's earlier note said the prerequisite was making the three path settings machine-scoped. That would work, but it is heavier than necessary: machine scope forbids setting them per-workspace *even in a folder you trust*, and pointing a project at a particular Firebird version's `isql` is a legitimate thing to want. `restrictedConfigurations` is the mechanism designed for exactly this — VS Code ignores the workspace value while untrusted and honours it once trusted.
+
+The connection gate is a single check in `loadWorkspaceConnections()`, which all five callers (the tree, activation's default-connection lookup, the language-model tools, and the cross-extension API) already go through. It tests `isTrusted === false` rather than falsiness, so a host predating the trust API is treated as trusted rather than silently losing its workspace connections.
+
+Granting trust does not reload the window, so `onDidGrantWorkspaceTrust` re-runs the default-connection lookup and refreshes the tree. Without it, trusting the folder would leave the connections missing until a restart — indistinguishable from a broken `firebird.json`.
+
+**Verified in Restricted Mode, not just asserted in the manifest.** A new Playwright spec launches VS Code *without* `--disable-workspace-trust`, confirms the status bar really says Restricted Mode (otherwise the rest would pass for the boring reason that trust was granted anyway), confirms the Firebird view container exists at all — which is the feature, since `supported: false` removed it — and confirms the folder's own connection is absent from the tree.
+
+Two things that spec found by failing: VS Code opens a fresh profile's untrusted folder in Restricted Mode **without prompting**, so waiting for a trust dialog hangs for a minute and then fails; and clicking the Activity Bar item when the view is already open *toggles it closed*, which is a mistake that only shows up in a spec that is not the first in its file.

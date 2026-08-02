@@ -26,41 +26,45 @@ suite("package.json – Workspace Trust", function () {
     );
   });
 
-  test("does not claim to support untrusted workspaces", function () {
-    // Deliberately `false`, not `true` or "limited": firebird.isqlPath / firebird.gbakPath /
-    // firebird.dockerPath are window-scoped, so a checked-out repository can point them at any
-    // executable, and .vscode/firebird.json supplies connection targets. Supporting "limited"
-    // would first require those settings to be machine-scoped — see
-    // docs/roadmap/test-coverage-and-reporting.md, phase 5.
-    assert.strictEqual(
-      packageJson.capabilities.untrustedWorkspaces.supported,
-      false,
-      "Untrusted-workspace support must not be widened without also restricting the " +
-        "executable-path settings that make it unsafe."
-    );
+  test("supports untrusted workspaces in limited mode", function () {
+    // "limited", not `true`: the extension is useful in an untrusted folder — your own saved
+    // connections are yours, not the folder's — but two things the folder controls are withheld.
+    // See the two tests below for what each of them is.
+    assert.strictEqual(packageJson.capabilities.untrustedWorkspaces.supported, "limited");
   });
 
-  test("explains why trust is required", function () {
-    const description = packageJson.capabilities.untrustedWorkspaces.description;
-    assert.strictEqual(
-      typeof description,
-      "string",
-      "A `supported: false` declaration requires a description; it is what the user is shown " +
-        "in place of the extension."
-    );
-    assert.ok(description.length > 0, "The description must not be empty");
-  });
-
-  test("the settings named in the description still exist", function () {
-    // The description justifies the restriction by naming specific settings. If one is renamed
-    // or removed, the justification silently becomes wrong — this keeps the two in step.
-    const properties = packageJson?.contributes?.configuration?.properties ?? {};
+  test("the executable-path settings cannot be set by an untrusted folder", function () {
+    // A repository's own .vscode/settings.json can set any window-scoped setting, so without this
+    // list, opening an untrusted folder could point isql/gbak/docker at any binary on disk and the
+    // next backup would run it. `restrictedConfigurations` makes VS Code ignore the *workspace*
+    // value while untrusted — which is why these stay window-scoped rather than becoming machine-
+    // scoped: setting a per-project isql is legitimate in a folder you trust.
+    const restricted = packageJson.capabilities.untrustedWorkspaces.restrictedConfigurations ?? [];
     for (const setting of ["firebird.isqlPath", "firebird.gbakPath", "firebird.dockerPath"]) {
       assert.ok(
-        setting in properties,
-        `The Workspace Trust description names ${setting}, which no longer exists`
+        restricted.includes(setting),
+        `${setting} runs an external program and must be restricted in untrusted workspaces; ` +
+          `restrictedConfigurations was ${JSON.stringify(restricted)}`
       );
     }
+  });
+
+  test("every restricted setting still exists", function () {
+    // A renamed setting would leave a restriction pointing at nothing — silently unrestricting the
+    // real one, since VS Code does not warn about an unknown id here.
+    const properties = packageJson?.contributes?.configuration?.properties ?? {};
+    for (const setting of packageJson.capabilities.untrustedWorkspaces.restrictedConfigurations ?? []) {
+      assert.ok(setting in properties, `restrictedConfigurations names ${setting}, which no longer exists`);
+    }
+  });
+
+  test("explains what is withheld", function () {
+    // This text is what the user is shown when deciding whether to trust the folder, so it has to
+    // say what they lose by not doing so rather than merely that something is restricted.
+    const description = packageJson.capabilities.untrustedWorkspaces.description;
+    assert.strictEqual(typeof description, "string");
+    assert.ok(description.length > 0, "The description must not be empty");
+    assert.ok(/firebird\.json/.test(description), "it should name the file whose connections are withheld");
   });
 });
 

@@ -153,6 +153,16 @@ export function parseWorkspaceConfig(jsonText: string, folderPath: string, folde
  * a typo can't break the tree or block activation.
  */
 export async function loadWorkspaceConnections(): Promise<ConnectionOptions[]> {
+  // Never in an untrusted folder. The file cannot carry a password by design, which means a
+  // malicious repository's entry would instead *prompt* for one — a connection called "Staging DB"
+  // pointing at a server the attacker controls, with the user typing their real credentials into
+  // it. That is the whole reason this extension declares `untrustedWorkspaces: "limited"` rather
+  // than full support; see capabilities.untrustedWorkspaces in package.json.
+  if (workspace.isTrusted === false) {
+    logger.info("Workspace connections from .vscode/firebird.json are ignored until you trust this folder.");
+    return [];
+  }
+
   const folders = workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return [];
