@@ -26,7 +26,14 @@
 
 function makeStubElement(): any {
   const target: Record<string, any> = {
-    style: new Proxy({}, { get: () => "", set: () => true }),
+    // Writes are remembered rather than discarded, and an unset property still reads as "" the way
+    // a real element's inline style does. Discarding them made every `style.display = "none"`
+    // invisible to a test, so any code branching on what it had just set could not be driven at
+    // all — schema-designer's loading placeholder is the concrete caller.
+    style: new Proxy({} as Record<string, string>, {
+      get: (t, prop: string) => (prop in t ? t[prop] : ""),
+      set: (t, prop: string, value) => { t[prop] = String(value); return true; },
+    }),
     classList: {
       add() { /* no-op */ },
       remove() { /* no-op */ },
@@ -58,7 +65,10 @@ function makeStubElement(): any {
       // element that simply doesn't have that property.
       return (..._args: any[]) => undefined;
     },
-    set() { return true; },
+    // Remembered, not discarded, for the same reason as `style` above: `textContent`/`value`
+    // assignments are how most of this webview code reports anything, and a stub that swallows
+    // them can only ever prove a function did not throw.
+    set(t, prop: string, value) { t[prop] = value; return true; },
   });
 }
 

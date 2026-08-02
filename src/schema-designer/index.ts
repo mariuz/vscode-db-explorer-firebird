@@ -4,7 +4,7 @@ import { QueryResultsView, Message } from "../result-view/queryResultsView";
 import { ConnectionOptions } from "../interfaces";
 import { Driver, BatchResult } from "../shared/driver";
 import { getSchemaColumnsQuery, getForeignKeysQuery, getAllPrimaryKeyConstraintNamesQuery } from "../shared/queries";
-import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow } from "./schema-graph";
+import { buildSchemaGraph, describeTableCount, SchemaColumnRow, ForeignKeyRow } from "./schema-graph";
 import { getEngineMajorVersion } from "../shared/engine-version";
 import { supportsSchemas } from "../shared/schema-support";
 import { extractJson } from "../copilot/json-extraction";
@@ -145,6 +145,19 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
     }
   }
 
+  /**
+   * Names the stage the load has reached, for the webview's loading placeholder.
+   *
+   * The stages are the three the fetch genuinely has, and it stops there deliberately. The
+   * catalogue reads are one `runBatch()` of three `SELECT`s over a single connection, so reporting
+   * per-query progress would mean splitting them into three round trips — paying real latency for
+   * a more granular caption. A stage boundary that costs nothing is worth showing; one that costs
+   * a round trip is not.
+   */
+  private sendProgress(text: string): void {
+    this.send({ command: "schemaProgress", data: { text } });
+  }
+
   private async fetchAndSend(): Promise<void> {
     if (!this.dbDetails) {
       this.send({ command: "schemaData", data: { error: "No active database connection." } });
@@ -157,6 +170,11 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
       // the flag comes from the cached version probe.
       const withSchemas = supportsSchemas(
         await getEngineMajorVersion(this.dbDetails.id, async sql => {
+          // Inside the runner rather than before the call, so the caption appears only when a
+          // probe actually runs. getEngineMajorVersion() caches per connection and skips the
+          // runner entirely on a hit, and announcing a round trip that is not happening is the
+          // exact dishonesty a progress indicator exists to avoid.
+          this.sendProgress("Checking the server version…");
           const [row] = await Driver.runBatch(sql, this.dbDetails!);
           return (row?.rows ?? []) as any[];
         })
@@ -164,6 +182,7 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
 
       // Three SELECTs over one connection (runBatch also resolves the connection's stored
       // password automatically, the same as every other Driver-backed query in the extension).
+      this.sendProgress("Reading tables, columns and relationships…");
       const sql = `${getSchemaColumnsQuery(withSchemas)}\n${getForeignKeysQuery(withSchemas)}\n${getAllPrimaryKeyConstraintNamesQuery()}`;
       const results = await Driver.runBatch(sql, this.dbDetails);
       const [columnsResult, fkResult, pkResult] = results;
@@ -177,8 +196,12 @@ export class SchemaDesigner extends QueryResultsView implements vscode.Disposabl
         throw new Error(pkResult.error);
       }
 
+      // The table count is free here — the rows are already in hand — and is the one number that
+      // tells you whether the wait ahead is a moment or a minute.
+      const columnRows = (columnsResult?.rows ?? []) as SchemaColumnRow[];
+      this.sendProgress(`Laying out ${describeTableCount(columnRows)}…`);
       const graph = buildSchemaGraph(
-        (columnsResult?.rows ?? []) as SchemaColumnRow[],
+        columnRows,
         (fkResult?.rows ?? []) as ForeignKeyRow[]
       );
       const pkConstraintNames: Record<string, string> = {};

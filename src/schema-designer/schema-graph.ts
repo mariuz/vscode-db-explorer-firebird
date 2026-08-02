@@ -146,3 +146,21 @@ export function buildSchemaGraph(columnRows: SchemaColumnRow[], fkRows: ForeignK
     relationships,
   };
 }
+
+/**
+ * "12 tables" / "1 table", for the Schema Designer's layout progress caption.
+ *
+ * Counts distinct tables straight from the column rows rather than from a built graph, because the
+ * caption is shown *before* `buildSchemaGraph()` runs — deriving the number from the work being
+ * announced would mean doing that work first, which defeats the point of announcing it.
+ *
+ * Keyed by schema *and* name for the same reason the graph is: on Firebird 6, `SALES.ORDERS` and
+ * `PUBLIC.ORDERS` are two tables, and counting by bare name would under-report exactly the
+ * databases where the wait is longest.
+ */
+export function describeTableCount(columnRows: Pick<SchemaColumnRow, "TABLE_NAME" | "SCHEMA_NAME">[]): string {
+  const names = new Set(
+    columnRows.map(row => `${(row.SCHEMA_NAME ?? "").trim()}.${String(row.TABLE_NAME ?? "").trim()}`)
+  );
+  return names.size === 1 ? "1 table" : `${names.size} tables`;
+}

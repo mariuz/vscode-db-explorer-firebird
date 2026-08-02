@@ -11,6 +11,7 @@
     minimapNodes: document.getElementById("minimap-nodes"),
     minimapViewport: document.getElementById("minimap-viewport"),
     loading: document.getElementById("loading"),
+    loadingText: document.getElementById("loading-text"),
     errorBanner: document.getElementById("error-banner"),
     emptyBanner: document.getElementById("empty-banner"),
     status: document.getElementById("status"),
@@ -82,11 +83,21 @@
 
   const view = { x: 0, y: 0, scale: 1 };
 
+  /** Shown before the extension host reports a stage, and again whenever a refresh restarts. */
+  const DEFAULT_LOADING_TEXT = "Loading schema…";
+
+  function setLoadingText(text) {
+    // Writes the text node beside the spinner rather than the container's own textContent, which
+    // would replace the spinner element along with the caption.
+    if (el.loadingText) { el.loadingText.textContent = text; }
+  }
+
   // ── Messaging ──────────────────────────────────────────────────────────────
 
   window.addEventListener("message", event => {
     const msg = event.data;
     if (msg.command === "schemaData") { handleSchemaData(msg.data); return; }
+    if (msg.command === "schemaProgress") { handleSchemaProgress(msg.data); return; }
     if (msg.command === "result") { appendResult(msg.data.text); return; }
     if (msg.command === "init") { pendingInit = msg.data; return; }
     if (msg.command === "copilotSchemaEdit") { handleCopilotSchemaEdit(msg.data); return; }
@@ -97,7 +108,10 @@
 
   function requestRefresh() {
     setStatus("Refreshing…");
-    el.loading.style.display = "block";
+    setLoadingText(DEFAULT_LOADING_TEXT);
+    // "flex", not "block": the placeholder lays the spinner out beside the caption, and an inline
+    // display:block would override that rule and drop the spinner onto its own line.
+    el.loading.style.display = "flex";
     el.errorBanner.style.display = "none";
     vscode.postMessage({ command: "refresh" });
   }
@@ -126,6 +140,18 @@
       .replace(/'/g, '&#39;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * Replaces the loading caption as the extension host reaches each stage of the fetch.
+   *
+   * Deliberately does *not* re-show the placeholder if it has been hidden: a stray progress
+   * message arriving after schemaData — a refresh racing a previous load — would otherwise throw
+   * a "Loading…" overlay back over a diagram that is already on screen.
+   */
+  function handleSchemaProgress(data) {
+    if (el.loading.style.display === "none") { return; }
+    setLoadingText((data && data.text) || DEFAULT_LOADING_TEXT);
   }
 
   function handleSchemaData(data) {
@@ -1257,10 +1283,18 @@
   // simulating raw mouse/SVG events for every interaction.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports.__test__ = {
-      handleSchemaData, buildDDL, addTable, addRelationship, measureAll, render, tableTitle,
+      handleSchemaData, handleSchemaProgress, buildDDL, addTable, addRelationship, measureAll, render, tableTitle,
       schemaColor, schemasInDraft, renderSchemaLegend,
       applyCopilotEdit, serializeSchemaSummary,
       getDraftGraph: () => draftGraph,
+      // The placeholder's two observable properties. `document.getElementById()` hands back a
+      // fresh stub on every call under the test harness, so a test cannot reach the element
+      // app.js captured at load — same reason getDraftGraph() exists.
+      getLoadingState: () => ({
+        visible: el.loading.style.display !== "none",
+        caption: el.loadingText.textContent,
+      }),
+      setLoadingVisible: visible => { el.loading.style.display = visible ? "flex" : "none"; },
     };
   }
 })();

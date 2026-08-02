@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildSchemaGraph, normalizeDefault, SchemaColumnRow, ForeignKeyRow } from '../schema-designer/schema-graph';
+import { buildSchemaGraph, normalizeDefault, describeTableCount, SchemaColumnRow, ForeignKeyRow } from '../schema-designer/schema-graph';
 
 function columnRow(overrides: Partial<SchemaColumnRow> = {}): SchemaColumnRow {
   return {
@@ -293,5 +293,36 @@ suite('buildSchemaGraph() — display name vs identity', function () {
     assert.strictEqual(table.name, 'ORDERS');
     assert.strictEqual(table.displayName, undefined);
     assert.strictEqual(table.schema, undefined);
+  });
+});
+
+suite('describeTableCount() — the Schema Designer\'s layout progress caption', function () {
+  test('counts distinct tables, not rows', function () {
+    // Three column rows, one table — the caption must not read "3 tables".
+    const rows = [columnRow({ FIELD_NAME: 'ID' }), columnRow({ FIELD_NAME: 'NAME' }), columnRow({ FIELD_NAME: 'PRICE' })];
+    assert.strictEqual(describeTableCount(rows), '1 table');
+  });
+
+  test('pluralises', function () {
+    const rows = [columnRow({ TABLE_NAME: 'PRODUCTS' }), columnRow({ TABLE_NAME: 'ORDERS' })];
+    assert.strictEqual(describeTableCount(rows), '2 tables');
+  });
+
+  test('an empty schema reads as "0 tables" rather than "1 table"', function () {
+    // The size===1 branch is the special case; 0 must not fall into it.
+    assert.strictEqual(describeTableCount([]), '0 tables');
+  });
+
+  test('two same-named tables in different schemas count as two (Firebird 6)', function () {
+    // Counting by bare name would under-report exactly the databases where the wait is longest.
+    const rows = [
+      columnRow({ TABLE_NAME: 'ORDERS', SCHEMA_NAME: 'PUBLIC' }),
+      columnRow({ TABLE_NAME: 'ORDERS', SCHEMA_NAME: 'SALES' }),
+    ];
+    assert.strictEqual(describeTableCount(rows), '2 tables');
+  });
+
+  test('a pre-Firebird-6 row with no schema still counts', function () {
+    assert.strictEqual(describeTableCount([columnRow({ TABLE_NAME: 'LEGACY' })]), '1 table');
   });
 });

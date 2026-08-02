@@ -386,3 +386,58 @@ suite('schema-designer app.js – diff engine / DDL generation (via __test__ hoo
     });
   });
 });
+
+/**
+ * The loading placeholder's staged captions.
+ *
+ * This is the half of "detailed loading progress" that lives in the webview: the extension host
+ * names each stage of the fetch (see SchemaDesigner.sendProgress()), and the placeholder has to
+ * show the latest one without ever reappearing over a diagram that has already rendered.
+ */
+suite('schema-designer app.js – loading progress (via __test__ hook)', function () {
+  let hooks: any;
+  let restore: () => void;
+
+  suiteSetup(function () {
+    restore = installWebviewStubs();
+    hooks = loadWebviewModule(APP_JS_PATH).__test__;
+  });
+  suiteTeardown(function () { restore(); });
+
+  setup(function () {
+    hooks.setLoadingVisible(true);
+  });
+
+  test('a progress message replaces the caption while the placeholder is up', function () {
+    hooks.handleSchemaProgress({ text: 'Reading tables, columns and relationships…' });
+    assert.strictEqual(hooks.getLoadingState().caption, 'Reading tables, columns and relationships…');
+  });
+
+  test('the latest stage wins', function () {
+    hooks.handleSchemaProgress({ text: 'Checking the server version…' });
+    hooks.handleSchemaProgress({ text: 'Laying out 12 tables…' });
+    assert.strictEqual(hooks.getLoadingState().caption, 'Laying out 12 tables…');
+  });
+
+  test('a message with no text falls back rather than blanking the caption', function () {
+    hooks.handleSchemaProgress({});
+    assert.strictEqual(hooks.getLoadingState().caption, 'Loading schema…');
+    hooks.handleSchemaProgress(undefined);
+    assert.strictEqual(hooks.getLoadingState().caption, 'Loading schema…');
+  });
+
+  test('progress arriving after the diagram has rendered does not cover it again', function () {
+    // A refresh racing a previous load: the stale stage message must not throw a "Loading…"
+    // overlay back over a diagram that is already on screen.
+    hooks.setLoadingVisible(false);
+    hooks.handleSchemaProgress({ text: 'Laying out 12 tables…' });
+    assert.strictEqual(hooks.getLoadingState().visible, false);
+    assert.notStrictEqual(hooks.getLoadingState().caption, 'Laying out 12 tables…');
+  });
+
+  test('loading schema data hides the placeholder', function () {
+    // Pins the contract the previous test depends on, rather than assuming it.
+    hooks.handleSchemaData({ graph: { tables: [], relationships: [] }, pkConstraintNames: {} });
+    assert.strictEqual(hooks.getLoadingState().visible, false);
+  });
+});
