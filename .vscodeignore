@@ -20,6 +20,7 @@ mocha-reporters.json
 .devcontainer
 docs
 scripts
+vendor
 CLAUDE.md
 CONTRIBUTING.md
 .gitattributes

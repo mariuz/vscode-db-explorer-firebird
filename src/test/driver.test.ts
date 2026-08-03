@@ -459,6 +459,47 @@ suite('NodeClient.createConnection() – embedded connections', function () {
   });
 });
 
+/**
+ * The installed `node-firebird-driver` must be one that understands `ConnectOptions.searchPath`.
+ *
+ * This is a *dependency* contract, not a test of upstream's arithmetic — upstream has its own tests
+ * for that. It exists because of how the option is currently obtained: `searchPath` is merged but
+ * unpublished (asfernandes/node-firebird-drivers#173), so `package.json` points both this
+ * dependency and `node-firebird-driver-native`'s copy of it at a tarball built from that commit,
+ * and npm's newest published 3.6.0 satisfies the same `^3.6.0` range while silently lacking the
+ * option. Reinstalling from the registry would therefore leave `NativeClient.createConnection()`
+ * passing a field nothing reads: no type error (the field is optional), no runtime error, no log —
+ * a per-connection default schema would simply stop being applied on the native driver, and every
+ * unqualified name would resolve through the server default instead. Nothing else in this suite
+ * would notice. See `vendor/README.md`.
+ */
+suite('node-firebird-driver – the vendored build carries ConnectOptions.searchPath', function () {
+  // The deep import is the actual seam: createDpb() is what turns ConnectOptions into the
+  // attachment's parameter block, and it is what NativeClient depends on reaching.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const {createDpb, dpb} = require('node-firebird-driver/dist/lib/impl');
+
+  test('knows the isc_dpb_search_path tag', function () {
+    assert.strictEqual(dpb.search_path, 105);
+  });
+
+  test('encodes a search path into the DPB, tag and length included', function () {
+    const buffer: Buffer = createDpb({username: 'sysdba', searchPath: ['SALES', 'PUBLIC']});
+    assert.ok(
+      buffer.includes(Buffer.from([dpb.search_path, 'SALES,PUBLIC'.length])),
+      'DPB should carry tag 105 followed by the path length'
+    );
+    assert.ok(buffer.includes(Buffer.from('SALES,PUBLIC')), 'DPB should carry the joined path');
+  });
+
+  test('a connection with no default schema sends no search path at all', function () {
+    // connectionSearchPath() returns [] in that case and createConnection() omits the field
+    // entirely, so the DPB of an ordinary connection is byte-identical to what it was before.
+    const withOut: Buffer = createDpb({username: 'sysdba'});
+    assert.ok(!withOut.includes(Buffer.from([dpb.search_path])), 'no tag 105 without a search path');
+  });
+});
+
 // ── Driver.createDatabase() / Driver.dropDatabase() ─────────────────────────
 //
 // Driver.client is whichever client is active; when it's a fake/test double that doesn't

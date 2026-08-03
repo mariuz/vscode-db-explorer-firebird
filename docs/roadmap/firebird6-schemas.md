@@ -331,7 +331,21 @@ SEARCH_PATH            "DRIVER_SP_TEST", "PUBLIC", "SYSTEM"
 
 **No version probe before attaching.** node-firebird sends the parameter only when the negotiated protocol is 20+, so setting it against a Firebird 5 server is inert rather than an error. The *UI* does check, and refuses to offer the picker on a pre-6 server rather than storing a setting that would silently do nothing.
 
-**The native driver has no equivalent attach option** — `node-firebird-driver`'s `ConnectOptions` has no schema field at all, which is [asfernandes/node-firebird-drivers#172](https://github.com/asfernandes/node-firebird-drivers/issues/172) upstream. Rather than let the setting silently do nothing there, `NativeClient` issues `SET SEARCH_PATH` as the session's first statement, which reaches the same end state for one extra round trip. A pre-6 server rejects that statement, and the failure is logged rather than raised: the pure-JS driver ignores the same setting on such a server, and the two drivers should not disagree about whether a connection can be opened at all.
+**The native driver had no equivalent attach option, and now it does.** `node-firebird-driver`'s `ConnectOptions` had no schema field at all, so `NativeClient` issued `SET SEARCH_PATH` as the session's first statement instead — the same end state for one extra round trip, with a pre-6 server's rejection logged rather than raised. That gap was filed upstream as [asfernandes/node-firebird-drivers#172](https://github.com/asfernandes/node-firebird-drivers/issues/172) and **merged as [#173](https://github.com/asfernandes/node-firebird-drivers/pull/173)** on 3 August 2026, adding `ConnectOptions.searchPath` on top of the `isc_dpb_search_path` tag the pure-JS driver already used. `NativeClient` now passes the path to `connect()` and issues no statement, so both drivers reach the server the same way and the path is in place *before* the session's first statement rather than after it — which matters for anything that runs early on a pooled, short-lived attachment.
+
+It is not published yet: npm's newest `node-firebird-driver` is 3.6.0 from May, and npm cannot install a package from a subdirectory of a monorepo. The build from that commit is vendored as a tarball, with an `overrides` entry pointing `node-firebird-driver-native`'s own copy at it — `createDpb()` lives in `node-firebird-driver` and the native package only re-exports it, so one tarball covers both. See [`vendor/README.md`](../../vendor/README.md), which also records what to delete when a release lands.
+
+**What the live server said**, on a database with `SALES.ORDERS` and `PUBLIC.ORDERS` both present and a `PUBLIC`-only third table, driven through `NativeClient.createConnection()` itself rather than the driver directly:
+
+```
+defaultSchema=undefined CURRENT_SCHEMA=PUBLIC  ORDERS=PUBLIC  ONLY_PUBLIC=99
+defaultSchema=SALES     CURRENT_SCHEMA=SALES   ORDERS=SALES   ONLY_PUBLIC=99
+defaultSchema=PUBLIC    CURRENT_SCHEMA=PUBLIC  ORDERS=PUBLIC  ONLY_PUBLIC=99
+```
+
+The middle row is the whole point: the unqualified name resolves to `SALES`, *and* the `PUBLIC`-only table still resolves. Sending `searchPath: 'SALES'` alone instead — which is what a naive reading of "default schema" would send — was tried in the same session and fails that third table with a `Dynamic SQL Error`. That is the reasoning behind `connectionSearchPath()` keeping `PUBLIC` behind the chosen schema, now demonstrated rather than argued.
+
+**One deliberate piece of caution.** The attach parameter is unconditional, unlike node-firebird's, which sends it only when the negotiated protocol is 20+. Whether a pre-6 server ignores an unknown DPB tag or refuses the attach could not be established here — only a Firebird 6 server was reachable, and there is no Docker in this sandbox to raise an older one. So `createConnection()` retries once without the parameter if an attach carrying it fails, rather than assuming an answer: a search path must never be the reason a connection cannot be opened, and a genuine failure (wrong password, bad path) fails identically on the retry and is the error the caller sees.
 
 A workspace can declare it too — `"defaultSchema"` in `.vscode/firebird.json`, with the JSON schema updated so the editor completes it. Which schema a project's unqualified names mean belongs beside the database path in version control rather than in each contributor's own settings.
 

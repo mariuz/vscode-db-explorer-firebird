@@ -1951,13 +1951,16 @@
     "bindings": "^1.5.0",
     "node-addon-api": "^5.0.0",
     "node-firebird": "^2.14.2",
-    "node-firebird-driver": "^3.6.0",
+    "node-firebird-driver": "file:vendor/node-firebird-driver-3.6.0-git.e05c619.tgz",
     "node-firebird-driver-native": "^3.6.0",
     "node-firebird-native-api": "^3.2.0",
     "node-gyp": "^9.3.0",
     "ssh2": "^1.17.0",
     "uuid": "^8.3.2",
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "node-firebird-driver": "file:vendor/node-firebird-driver-3.6.0-git.e05c619.tgz"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

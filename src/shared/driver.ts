@@ -4,14 +4,13 @@ import {Global} from "./global";
 import {ConnectionOptions, Options} from "../interfaces";
 import {logger} from "../logger/logger";
 import type { Attachment, Client, ResultSet} from 'node-firebird-driver-native';
-import { TransactionIsolation, TransactionOptions as NativeTransactionOptions } from 'node-firebird-driver';
+import { TransactionIsolation, TransactionOptions as NativeTransactionOptions, ConnectOptions as NativeConnectOptions } from 'node-firebird-driver';
 import {simpleCallbackToPromise, getConnectionLabel} from './utils';
 import {CredentialStore} from './credential-store';
 import {splitStatementsWithOffsets} from './sql-splitter';
 import {SourcePosition, positionAt, offsetAt, parseServerPosition, shiftPosition} from './statement-position';
 import {extractTableNames as extractTableNamesImpl, buildIndexMetadataQuery, renderIndexMetadataPlan, validateReadOnlyStatement} from './sql-analysis';
 import {PooledClient, ConnectionPoolOptions} from './connection-pool';
-import {setSearchPathQuery} from './queries';
 import {connectionSearchPath} from './schema-support';
 import {SshTunnelClient} from './ssh-tunnel';
 import {getOptions} from '../config';
@@ -856,37 +855,44 @@ export class NativeClient implements ClientI<Attachment> {
       throw new Error("Unable to initialize native driver: " + ((e as any)?.message ?? e));
     }
 
-    const attachment = await client.connect(connectionStr, {
+    // Firebird 6 SQL schemas now ride along with the attach itself, as the `isc_dpb_search_path`
+    // attachment parameter — so the path is in effect *before* the session's first statement rather
+    // than after it, and costs no round trip of its own. This is asfernandes/node-firebird-drivers#172,
+    // which the extension asked for and which landed upstream as #173; it is not on npm yet, so
+    // `node-firebird-driver` is vendored from that commit (see `vendor/README.md`). The option lives
+    // in `node-firebird-driver`, not in the native package, which re-exports its `createDpb()` —
+    // which is why one vendored tarball plus a `package.json` override covers both.
+    //
+    // It sends the *whole* path connectionSearchPath() describes, not just the configured schema:
+    // node-firebird keeps PUBLIC behind it as a fallback, so sending `SALES` alone would leave the
+    // native driver unable to resolve an unqualified PUBLIC table that the pure-JS driver resolves
+    // fine — the same saved connection behaving differently depending on a setting that is meant to
+    // be a performance choice.
+    const searchPath = connectionSearchPath(connectionOptions.defaultSchema);
+    const connectOptions: NativeConnectOptions = {
       username: connectionOptions.user,
       password: connectionOptions.password ?? "",
-      role: connectionOptions.role ?? undefined
-    });
+      role: connectionOptions.role ?? undefined,
+    };
 
-    // The native driver's ConnectOptions has no search-path field, so the schema cannot ride along
-    // with the attach the way it does on the pure-JS driver. Setting it as the session's first
-    // statement reaches the same end state — the search path is attachment-scoped either way — at
-    // the cost of one extra round trip, and only when a schema is actually configured.
-    //
-    // It must send the *whole* path connectionSearchPath() describes, not just the configured
-    // schema: node-firebird keeps PUBLIC behind it as a fallback, so sending `SET SEARCH_PATH TO
-    // SALES` alone would leave the native driver unable to resolve an unqualified PUBLIC table that
-    // the pure-JS driver resolves fine — the same saved connection behaving differently depending
-    // on a setting that is meant to be a performance choice.
-    //
-    // Requested upstream: asfernandes/node-firebird-drivers#172. If ConnectOptions gains a
-    // searchPath option, this block becomes one more field in the connect() call above.
-    const searchPath = connectionSearchPath(connectionOptions.defaultSchema);
-    if (searchPath.length) {
-      try {
-        await this.queryPromise(attachment, setSearchPathQuery(searchPath));
-      } catch (err: any) {
-        // A pre-6 server rejects the statement outright. That is not a reason to fail the
-        // connection: the pure-JS driver silently ignores the same setting on such a server, and
-        // the two drivers should not disagree about whether a connection can be opened at all.
-        logger.debug(`Could not apply search path "${searchPath.join(", ")}": ${err?.message ?? err}`);
-      }
+    if (!searchPath.length) {
+      return await client.connect(connectionStr, connectOptions);
     }
-    return attachment;
+
+    try {
+      return await client.connect(connectionStr, {...connectOptions, searchPath});
+    } catch (err: any) {
+      // A search path must never be the reason a connection cannot be opened. node-firebird sends
+      // the same parameter only once the negotiated protocol is 20+, so on an older server it
+      // silently does nothing there, and the two drivers should not disagree about whether the same
+      // saved connection attaches at all. Whether a pre-6 server ignores an unknown DPB tag or
+      // refuses the attach outright could not be established here — only a Firebird 6 server was
+      // reachable — so this retries once without the parameter rather than assuming an answer. A
+      // genuine failure (wrong password, bad path) fails identically on the retry, and that second
+      // error is the one the caller sees.
+      logger.debug(`Attach with search path "${searchPath.join(", ")}" failed, retrying without it: ${err?.message ?? err}`);
+      return await client.connect(connectionStr, connectOptions);
+    }
   }
 
   public async detach(connection: Attachment) {
