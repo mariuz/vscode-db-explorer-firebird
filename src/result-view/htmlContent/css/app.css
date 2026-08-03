@@ -76,6 +76,70 @@ div.img-wrapper img {
   color: var(--vscode-badge-foreground, #fff);
 }
 
+/* ── Messages pane ────────────────────────────────────────────────────────── */
+.messages-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+.messages-summary {
+  font-weight: 600;
+}
+.messages-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--fb-results-font-size, 12px);
+}
+.messages-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, #333);
+}
+.messages-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.messages-row-failed .messages-outcome {
+  color: var(--vscode-errorForeground, #f44);
+}
+.messages-list td {
+  padding: 3px 8px 3px 0;
+  vertical-align: top;
+}
+/* The four fixed columns stay narrow and non-wrapping so the outcome — the only column whose
+   length is unbounded — is what absorbs the width and wraps. */
+.messages-time,
+.messages-statement,
+.messages-where,
+.messages-duration {
+  white-space: nowrap;
+  width: 1%;
+  color: var(--vscode-descriptionForeground, #999);
+}
+.messages-duration {
+  text-align: right;
+}
+.messages-outcome {
+  white-space: pre-wrap;
+  width: 100%;
+}
+.messages-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.messages-link:hover {
+  filter: brightness(1.25);
+}
+.messages-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}
+
 /* ── Batch panels ─────────────────────────────────────────────────────────── */
 .batch-panel {
   padding: 8px;

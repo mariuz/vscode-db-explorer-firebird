@@ -786,6 +786,16 @@
           "default": false,
           "markdownDescription": "Registers the **Firebird MCP Server**, exposing whichever connections have `firebird.database.toggleMcpExposure` turned on as read-only schema-inspection tools (`list_connections`, `get_schema`) to any MCP-compatible AI client. No connection is exposed by default even when this is on — each one needs its own explicit opt-in from its right-click menu. Requires a VS Code build with MCP server registration support; has no effect on older versions."
         },
+        "firebird.messagesDefaultOpen": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Open the **Messages** tab, rather than the first statement's results, after running a batch. Mirrors vscode-mssql's `mssql.messagesDefaultOpen`. Messages is always available either way; this only decides which tab you land on."
+        },
+        "firebird.messagesIncludeTimestamps": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Include each statement's clock time when using **Copy All** in the Messages pane. The pane always shows the times on screen — this is only about what lands on the clipboard."
+        },
         "firebird.resultsFontSize": {
           "type": "number",
           "default": 0,

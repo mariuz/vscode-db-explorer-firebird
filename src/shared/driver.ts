@@ -140,6 +140,13 @@ export interface BatchResult {
   /** Execution duration in milliseconds. */
   durationMs: number;
   /**
+   * When the statement was sent, as epoch milliseconds. Kept alongside `durationMs` because the
+   * two answer different questions: the duration says which statement was slow, the clock time
+   * says when a 60-statement script reached it — and a messages log without times can answer
+   * neither on its own.
+   */
+  startedAt?: number;
+  /**
    * This statement's `[start, end)` offset range within the SQL text that was executed — see
    * src/shared/statement-position.ts for what "the executed text" means and does not mean. Present
    * on every result, failed or not, so a caller can tie any statement in a 60-statement script
@@ -493,7 +500,7 @@ export class Driver {
                 }
               });
             });
-            results.push({ sql: stmt, rows, durationMs, range, position });
+            results.push({ sql: stmt, rows, durationMs, startedAt: start, range, position });
             this.logHistory(stmt, resolved.connectionOptions, durationMs, rows.length);
           } else {
             const ddl = this.constructResponse(stmt);
@@ -501,6 +508,7 @@ export class Driver {
               sql: stmt,
               message: `${ddl ?? "Statement"} executed successfully.`,
               durationMs,
+              startedAt: start,
               range,
               position,
             });
@@ -516,7 +524,7 @@ export class Driver {
           const within = parseServerPosition(message);
           const errorPosition = within ? shiftPosition(position, within) : position;
           const errorOffset = within ? statement.start + offsetAt(stmt, within) : statement.start;
-          results.push({ sql: stmt, error: message, durationMs, range, position, errorPosition, errorOffset });
+          results.push({ sql: stmt, error: message, durationMs, startedAt: start, range, position, errorPosition, errorOffset });
           logger.error(`Batch statement failed at line ${errorPosition.line}: ${message}`);
           this.logHistory(stmt, resolved.connectionOptions, durationMs, undefined, err?.message ?? String(err));
         }

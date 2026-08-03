@@ -30,6 +30,8 @@ export function getOptions() {
     transactionReadOnly: _transactionReadOnly(),
     transactionWaitMode: _transactionWaitMode(),
     mcpEnabled: _mcpEnabled(),
+    messagesDefaultOpen: _messagesDefaultOpen(),
+    messagesIncludeTimestamps: _messagesIncludeTimestamps(),
     resultsFontSize: _resultsFontSize(),
     resultsFontFamily: _resultsFontFamily(),
     quickQueries: _quickQueries()
@@ -271,6 +273,22 @@ function _mcpEnabled(): boolean {
     return def;
   }
   return conf;
+}
+
+/**
+ * Both Messages-pane settings are plain booleans with no invalid state worth logging about — an
+ * unset or wrongly-typed value simply falls back, the same way `_showSystemObjects()` does. They
+ * are read on every batch run rather than cached, so toggling either one takes effect on the next
+ * query with no reload.
+ */
+function _messagesDefaultOpen(): boolean {
+  const conf: any = getConfig().get("messagesDefaultOpen");
+  return typeof conf === "boolean" ? conf : properties["firebird.messagesDefaultOpen"]["default"];
+}
+
+function _messagesIncludeTimestamps(): boolean {
+  const conf: any = getConfig().get("messagesIncludeTimestamps");
+  return typeof conf === "boolean" ? conf : properties["firebird.messagesIncludeTimestamps"]["default"];
 }
 
 function _resultsFontSize(): number {

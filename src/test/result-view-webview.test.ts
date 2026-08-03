@@ -342,6 +342,94 @@ suite('result-view app.js – pure helpers (via __test__ hook)', function () {
     });
   });
 
+  suite('Messages pane — one log of what a whole batch did', function () {
+    const results = [
+      { rowCount: 2, durationMs: 4, startedAt: Date.UTC(2026, 0, 1, 9, 5, 7, 81), position: { line: 1, column: 1 } },
+      { message: 'Create executed successfully.', durationMs: 12, startedAt: Date.UTC(2026, 0, 1, 9, 5, 7, 90), position: { line: 3, column: 1 } },
+      { error: 'Token unknown - SELCT', durationMs: 1, startedAt: Date.UTC(2026, 0, 1, 9, 5, 7, 95), position: { line: 7, column: 1 }, errorPosition: { line: 7, column: 5 } },
+    ];
+
+    test('formats a start time down to milliseconds', function () {
+      // Built from local-time parts so the assertion holds in any timezone the suite runs in.
+      const at = new Date(2026, 0, 1, 14, 7, 32, 481).getTime();
+      assert.strictEqual(hooks.formatMessageTime(at), '14:07:32.481');
+    });
+
+    test('says nothing rather than "NaN:NaN" when a result carried no start time', function () {
+      assert.strictEqual(hooks.formatMessageTime(undefined), '');
+      assert.strictEqual(hooks.formatMessageTime(Number.NaN), '');
+    });
+
+    test('reports the outcome, not the SQL — the tab strip already shows the statement', function () {
+      assert.strictEqual(hooks.messageOutcome({ rowCount: 2 }), '2 row(s) returned.');
+      assert.strictEqual(hooks.messageOutcome({ message: 'Drop executed successfully.' }), 'Drop executed successfully.');
+      assert.strictEqual(hooks.messageOutcome({ error: 'Table unknown' }), 'Table unknown');
+    });
+
+    test('a result set that matched nothing still says so, rather than reading as "ran fine"', function () {
+      assert.strictEqual(hooks.messageOutcome({ rowCount: 0 }), '0 row(s) returned.');
+    });
+
+    test('an error outranks a message on the same result', function () {
+      assert.strictEqual(hooks.messageOutcome({ error: 'boom', message: 'ok' }), 'boom');
+    });
+
+    test('builds one row per statement, in the order they ran', function () {
+      const rows = hooks.buildMessageRows(results);
+      assert.deepStrictEqual(rows.map((r: any) => r.statement), [1, 2, 3]);
+      assert.deepStrictEqual(rows.map((r: any) => r.index), [0, 1, 2]);
+      assert.deepStrictEqual(rows.map((r: any) => r.failed), [false, false, true]);
+      assert.deepStrictEqual(rows.map((r: any) => r.line), [1, 3, 7]);
+    });
+
+    test('a failed row points at the error\'s line, not just the statement\'s start', function () {
+      const rows = hooks.buildMessageRows([
+        { error: 'boom', durationMs: 1, position: { line: 3, column: 1 }, errorPosition: { line: 5, column: 9 } },
+      ]);
+      assert.deepStrictEqual(rows[0].position, { line: 5, column: 9 });
+    });
+
+    test('summarizes the run, naming failures rather than leaving them to be counted', function () {
+      const summary = hooks.summarizeMessages(hooks.buildMessageRows(results));
+      assert.ok(summary.includes('3 statements'), summary);
+      assert.ok(summary.includes('1 failed'), summary);
+      assert.ok(summary.includes('17 ms'), summary);
+    });
+
+    test('a clean run does not mention failures at all', function () {
+      const summary = hooks.summarizeMessages(hooks.buildMessageRows(results.slice(0, 2)));
+      assert.ok(!/failed/.test(summary), summary);
+      assert.ok(summary.includes('2 statements'), summary);
+    });
+
+    test('one statement is not "1 statements"', function () {
+      assert.ok(hooks.summarizeMessages(hooks.buildMessageRows(results.slice(0, 1))).startsWith('1 statement ·'));
+    });
+
+    test('an empty batch says so instead of summing nothing', function () {
+      assert.strictEqual(hooks.summarizeMessages([]), 'No statements ran.');
+    });
+
+    test('Copy All produces one line per statement, with times, lines and durations', function () {
+      const text = hooks.buildMessagesText(hooks.buildMessageRows(results), true);
+      const lines = text.split('\n');
+      assert.strictEqual(lines.length, 3);
+      assert.ok(/^\[\d{2}:\d{2}:\d{2}\.\d{3}\] #1 \(line 1\) 2 row\(s\) returned\. — 4 ms$/.test(lines[0]), lines[0]);
+      assert.ok(lines[2].includes('ERROR: Token unknown'), lines[2]);
+    });
+
+    test('Copy All can leave the timestamps out (mssql 1.44.0\'s own option)', function () {
+      const text = hooks.buildMessagesText(hooks.buildMessageRows(results), false);
+      assert.ok(!/\[\d{2}:/.test(text), text);
+      assert.ok(text.startsWith('#1 (line 1)'), text);
+    });
+
+    test('a statement with no known line is copied without an empty "(line )"', function () {
+      const text = hooks.buildMessagesText(hooks.buildMessageRows([{ message: 'ok', durationMs: 2 }]), false);
+      assert.strictEqual(text, '#1 ok — 2 ms');
+    });
+  });
+
   suite('truncationNote() — a trimmed result must say so (docs/roadmap/large-result-sets.md)', function () {
     test('says nothing when nothing was dropped', function () {
       assert.strictEqual(hooks.truncationNote(undefined, 10), '');

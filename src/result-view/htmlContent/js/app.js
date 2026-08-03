@@ -36,6 +36,10 @@ $(() => {
   // Whether a failed statement's line is a link back into an open document, or just text. Set per
   // batch by the extension host, which is the only side that knows where the SQL came from.
   let revealable = false;
+  // firebird.messagesDefaultOpen / firebird.messagesIncludeTimestamps, re-read per batch so
+  // toggling either takes effect on the next run rather than on the next window.
+  let messagesDefaultOpen = false;
+  let messagesIncludeTimestamps = true;
   const tableActions = {}; // tableId -> { toggleEdit, addRow, apply, freeze, copyInsert, copyIn }
 
   // ── Grid font customization (firebird.resultsFontSize/resultsFontFamily, mirroring
@@ -78,6 +82,8 @@ $(() => {
       applyResultsFont(msg.data.resultsFontSize, msg.data.resultsFontFamily);
       activeTableId = null;
       revealable = msg.data.revealable === true;
+      messagesDefaultOpen = msg.data.messagesDefaultOpen === true;
+      messagesIncludeTimestamps = msg.data.messagesIncludeTimestamps !== false;
       renderBatch(msg.data.results, msg.data.recordsPerPage);
       $("body").addClass("loaded");
       return;
@@ -122,6 +128,75 @@ $(() => {
 
   // ── Batch rendering ───────────────────────────────────────────────────────
 
+  // ── Messages pane ─────────────────────────────────────────────────────────
+  // One log of what a whole batch did, instead of one outcome buried in each of sixty result tabs.
+  // Everything below the renderer is pure, so the wording, the ordering and the clipboard format
+  // are pinned by tests rather than by reading the screen.
+
+  /** `14:07:32.481` from epoch milliseconds, or "" when the statement carried no start time. */
+  function formatMessageTime(startedAt) {
+    if (typeof startedAt !== "number" || !isFinite(startedAt)) { return ""; }
+    const at = new Date(startedAt);
+    const pad = (n, width) => String(n).padStart(width, "0");
+    return `${pad(at.getHours(), 2)}:${pad(at.getMinutes(), 2)}:${pad(at.getSeconds(), 2)}.${pad(at.getMilliseconds(), 3)}`;
+  }
+
+  /**
+   * What one statement's line in the log says. Deliberately the *outcome*, not the SQL: the tab
+   * strip above already shows the statement text, and a log that repeats it is unreadable at sixty
+   * entries. A result set reports its row count, because "ran fine" and "matched nothing" are
+   * different answers and only the count distinguishes them.
+   */
+  function messageOutcome(result) {
+    if (result.error) { return result.error; }
+    if (result.message) { return result.message; }
+    if (result.rowCount != null) { return `${result.rowCount} row(s) returned.`; }
+    return "Statement executed successfully.";
+  }
+
+  /** One row per statement, in the order they ran — the model behind both the pane and Copy All. */
+  function buildMessageRows(results) {
+    return (results || []).map((r, i) => ({
+      index: i,
+      time: formatMessageTime(r.startedAt),
+      statement: i + 1,
+      line: (r.errorPosition && r.errorPosition.line) || (r.position && r.position.line) || null,
+      outcome: messageOutcome(r),
+      durationMs: r.durationMs,
+      failed: !!r.error,
+      position: r.errorPosition || r.position || null,
+    }));
+  }
+
+  /**
+   * The one-line summary above the log. Names failures explicitly rather than leaving them to be
+   * counted: a batch where 59 statements worked and one did not is a failed batch, and that has to
+   * be legible without reading sixty rows.
+   */
+  function summarizeMessages(rows) {
+    if (!rows.length) { return "No statements ran."; }
+    const failed = rows.filter(r => r.failed).length;
+    const total = rows.reduce((sum, r) => sum + (r.durationMs || 0), 0);
+    const statements = `${rows.length} statement${rows.length === 1 ? "" : "s"}`;
+    return failed
+      ? `${statements} · ${failed} failed · ${total} ms`
+      : `${statements} · ${total} ms`;
+  }
+
+  /**
+   * The plain text Copy All puts on the clipboard. Timestamps are optional (mirroring mssql
+   * 1.44.0's own option) because a log pasted into a bug report reads better without them, while
+   * one kept to work out which statement was slow is useless without.
+   */
+  function buildMessagesText(rows, includeTimestamps) {
+    return rows.map(row => {
+      const time = includeTimestamps && row.time ? `[${row.time}] ` : "";
+      const where = row.line ? ` (line ${row.line})` : "";
+      const failed = row.failed ? "ERROR: " : "";
+      return `${time}#${row.statement}${where} ${failed}${row.outcome} — ${row.durationMs} ms`;
+    }).join("\n");
+  }
+
   /**
    * "Line 12, column 8", or "" when the position is unknown — which is the case for any batch run
    * through a path that carries no source, and for results produced before the driver reported one.
@@ -163,6 +238,69 @@ $(() => {
       .on("click", () => {
         vscode.postMessage({ command: "revealStatement", data: { line: position.line, column: position.column } });
       });
+  }
+
+  /** The Messages panel: a summary line, a Copy All button, and one row per statement. */
+  function buildMessagesPanel(results) {
+    const rows = buildMessageRows(results);
+    const $panel = $("<div>").addClass("batch-panel").attr("id", "panel-messages");
+
+    const $toolbar = $("<div>").addClass("messages-toolbar");
+    const $status = $("<span>").addClass("edit-status");
+    const $copyAll = $("<button>").addClass("btn-grid-action btn-copy-messages").text("Copy All");
+    $copyAll.on("click", () => {
+      copyToClipboard(buildMessagesText(rows, messagesIncludeTimestamps));
+      $status.text(`Copied ${rows.length} message(s) to the clipboard.`);
+    });
+    $toolbar.append($("<span>").addClass("messages-summary").text(summarizeMessages(rows)), $copyAll, $status);
+    $panel.append($toolbar);
+
+    const $list = $("<table>").addClass("messages-list");
+    rows.forEach(row => {
+      const $tr = $("<tr>").addClass(row.failed ? "messages-row messages-row-failed" : "messages-row");
+      $tr.append($("<td>").addClass("messages-time").text(row.time));
+      $tr.append($("<td>").addClass("messages-statement").text(`#${row.statement}`));
+
+      const $where = $("<td>").addClass("messages-where");
+      if (row.line) {
+        // Clicking the line goes to the source; clicking anywhere else on the row goes to that
+        // statement's own result tab. Two destinations, because "show me the SQL that did this"
+        // and "show me what it returned" are both what you want from a log line.
+        const label = `Line ${row.line}`;
+        $where.append(
+          revealable
+            ? $("<button>").addClass("messages-link").attr("type", "button").text(label)
+                .attr("title", "Go to this statement in the editor")
+                .on("click", event => {
+                  event.stopPropagation();
+                  vscode.postMessage({ command: "revealStatement", data: { line: row.position.line, column: row.position.column } });
+                })
+            : $("<span>").text(label)
+        );
+      }
+      $tr.append($where);
+
+      $tr.append($("<td>").addClass("messages-outcome").text(row.outcome));
+      $tr.append($("<td>").addClass("messages-duration").text(`${row.durationMs} ms`));
+      $tr.attr("title", "Show this statement's results");
+      $tr.on("click", () => showBatchTab(row.index));
+      $list.append($tr);
+    });
+
+    $panel.append($list);
+    return $panel;
+  }
+
+  /** Selects a batch tab by its `data-tab` value — an index, or "messages". */
+  function showBatchTab(tab) {
+    $(".fb-tab").removeClass("active");
+    $(`.fb-tab[data-tab="${tab}"]`).addClass("active");
+    $(".batch-panel").hide();
+    $(`#panel-${tab}`).show();
+    // The Messages panel holds no grid, so the grid keyboard shortcuts have nothing to act on
+    // while it is showing — leaving the previous tab's table active would fire them at a grid the
+    // user cannot see.
+    activeTableId = tab === "messages" ? null : `batch-table-${tab}`;
   }
 
   function renderBatch(results, recordsPerPage) {
@@ -224,15 +362,27 @@ $(() => {
       $batchDiv.append($panel);
     });
 
+    // The Messages tab is last, and always present: it is the one tab whose content is about the
+    // run rather than about a statement, so it belongs at the end rather than displacing the
+    // first result from the position the eye lands on.
+    const failures = results.filter(r => r.error).length;
+    $tabBar.append(
+      $("<button>")
+        .addClass("fb-tab fb-tab-messages")
+        .attr("data-tab", "messages")
+        .attr("title", "What every statement in this run did")
+        .html(`<span class="tab-label">Messages</span><span class="tab-badge">${failures ? `⚠ ${failures}` : results.length}</span>`)
+    );
+    $batchDiv.append(buildMessagesPanel(results).hide());
+
     // Tab switching
     $tabBar.off("click", ".fb-tab").on("click", ".fb-tab", function () {
-      const idx = $(this).data("tab");
-      $(".fb-tab").removeClass("active");
-      $(this).addClass("active");
-      $(".batch-panel").hide();
-      $(`#panel-${idx}`).show();
-      activeTableId = `batch-table-${idx}`;
+      showBatchTab($(this).data("tab"));
     });
+
+    if (messagesDefaultOpen) {
+      showBatchTab("messages");
+    }
 
     $tabBar.show();
   }
@@ -1275,6 +1425,7 @@ $(() => {
       detectNumericColumns, buildBarChartSvg, buildLineChartSvg, buildPieChartSvg, buildScatterChartSvg,
       buildTextView, truncationNote, pageRangeLabel, pagingOrderWarning, FILTER_OPERATOR_CHOICES,
       statementLocationLabel, batchTabBadge,
+      formatMessageTime, messageOutcome, buildMessageRows, summarizeMessages, buildMessagesText,
       computeSelectionStats, formatSelectionStats,
       resultsFontProperties,
     };

@@ -28,6 +28,8 @@ export interface PreparedResultSet {
   tableBody: string[][];
   rowCount: number;
   durationMs: number;
+  /** Epoch milliseconds the statement was sent — the Messages pane's clock column. */
+  startedAt?: number;
   message?: string;
   error?: string;
   /**
@@ -257,7 +259,10 @@ export default class ResultView extends QueryResultsView implements Disposable {
    * round trip once.
    */
   private async sendData(): Promise<void> {
-    const { shortcuts, resultsFontSize, resultsFontFamily, maxResultRows } = getOptions();
+    const {
+      shortcuts, resultsFontSize, resultsFontFamily, maxResultRows,
+      messagesDefaultOpen, messagesIncludeTimestamps,
+    } = getOptions();
     const engineMajor = await this.engineMajorVersion();
 
     if (this.batchResults) {
@@ -269,7 +274,7 @@ export default class ResultView extends QueryResultsView implements Disposable {
         command: "batchData",
         data: {
           results, recordsPerPage: this.recordsPerPage, shortcuts, resultsFontSize, resultsFontFamily,
-          revealable: this.revealable,
+          revealable: this.revealable, messagesDefaultOpen, messagesIncludeTimestamps,
         },
       });
       return;
@@ -533,11 +538,14 @@ export default class ResultView extends QueryResultsView implements Disposable {
     if (r.error) {
       return {
         sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs,
-        error: r.error, errorPosition: r.errorPosition,
+        startedAt: r.startedAt, error: r.error, errorPosition: r.errorPosition,
       };
     }
     if (r.message || !r.rows || r.rows.length === 0) {
-      return { sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs, message: r.message };
+      return {
+        sql, fullSql, tableHeader: [], tableBody: [], rowCount: 0, durationMs: r.durationMs,
+        startedAt: r.startedAt, message: r.message,
+      };
     }
 
     const tableHeader = Object.keys(r.rows[0]).map(f => ({ title: f }));
@@ -545,7 +553,10 @@ export default class ResultView extends QueryResultsView implements Disposable {
     const tableBody = capped.rows.map((row: any) => encodeRow(row, decoder));
     // rowCount stays the number of rows actually shown, so the grid's own count never disagrees
     // with what is in it; `truncatedFrom` is what tells the user rows were dropped.
-    return { sql, fullSql, tableHeader, tableBody, rowCount: capped.rows.length, durationMs: r.durationMs, editableTable, truncatedFrom: capped.truncatedFrom };
+    return {
+      sql, fullSql, tableHeader, tableBody, rowCount: capped.rows.length, durationMs: r.durationMs,
+      startedAt: r.startedAt, editableTable, truncatedFrom: capped.truncatedFrom,
+    };
   }
 }
 
