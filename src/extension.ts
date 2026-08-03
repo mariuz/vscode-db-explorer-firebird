@@ -379,6 +379,10 @@ export function activate(context: ExtensionContext) {
       treeDataProvider: firebirdTreeDataProvider,
       dragAndDropController: firebirdTreeDataProvider,
     }),
+    /* The bottom-Panel host for query results (firebird.queryResultsLocation). Registered
+       unconditionally — VS Code needs a provider for a contributed view whether or not the view is
+       currently shown, and the view's own `when` clause is what keeps it out of the way. */
+    window.registerWebviewViewProvider("firebird.queryResultsPanel", firebirdQueryResults),
     window.registerTreeDataProvider("firebird-bookmarks", bookmarkProvider),
     window.registerTreeDataProvider("firebird-query-history", queryHistoryProvider),
     window.registerTreeDataProvider("firebird-tasks", taskTracker),

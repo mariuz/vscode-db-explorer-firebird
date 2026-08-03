@@ -69,7 +69,8 @@ suite('statement-position – parseServerPosition()', function () {
   // The three forms below are the only entries in the message catalogue node-firebird ships
   // (lib/firebird.msg.json) that carry a line and column, and node-firebird joins a status vector's
   // messages with ", " (lib/utils.js#lookupMessages) — so these strings are the shapes that
-  // actually arrive, not paraphrases of them.
+  // actually arrive, not paraphrases of them. The `live` suite at the bottom of this file pins the
+  // same messages as a real Firebird 6.0 server emitted them, verbatim.
 
   test('reads "Token unknown - line N, column M" out of a joined status vector', function () {
     const message = 'Dynamic SQL Error, SQL error code = -104, Token unknown - line 2, column 8, SELCT';
@@ -146,6 +147,49 @@ suite('statement-position – shiftPosition()', function () {
       shiftPosition(statementInDocument, errorInStatement),
       { line: 20, column: 10 }
     );
+  });
+});
+
+/**
+ * The same messages, captured verbatim from a live Firebird 6.0 server rather than reconstructed
+ * from the message catalogue. Worth keeping separate and worth keeping at all: the whole design
+ * rests on two claims about the engine that cannot be checked by reading this extension's code —
+ * that a DSQL position counts inside the *statement* rather than the script, and that a PSQL frame
+ * counts inside a *routine body* and is spelled differently. Both were confirmed by running the
+ * scripts below through `isql` against a real server; the line numbers in the comments are that
+ * server's answers, not expectations written ahead of it.
+ */
+suite('statement-position – parseServerPosition() against messages a live Firebird 6.0 emitted', function () {
+
+  test('a parse error on the script\'s third line reports line 1 — it counts inside the statement', function () {
+    // Script: line 1 `SELECT 1 FROM RDB$DATABASE;`, line 2 blank,
+    //         line 3 `SELECT 1 FROM FROM RDB$DATABASE;`  <- this one failed.
+    const message = 'Dynamic SQL Error\n-SQL error code = -104\n-Token unknown - line 1, column 15\n-FROM';
+    assert.deepStrictEqual(parseServerPosition(message), { line: 1, column: 15 });
+  });
+
+  test('a two-line statement reports its own second line, not the script\'s sixth', function () {
+    // Script lines 5-6: `SELECT 1` / `  FROM FROM RDB$DATABASE;`
+    const message = 'Dynamic SQL Error\n-SQL error code = -104\n-Token unknown - line 2, column 8\n-FROM';
+    assert.deepStrictEqual(parseServerPosition(message), { line: 2, column: 8 });
+  });
+
+  test('"Unexpected end of command" carries a position too', function () {
+    // Note the space before the dash, which the catalogue entry does not have — the rendered
+    // message is what has to parse, not the template.
+    const message = 'Dynamic SQL Error\n-SQL error code = -104\n-Unexpected end of command - line 1, column 28';
+    assert.deepStrictEqual(parseServerPosition(message), { line: 1, column: 28 });
+  });
+
+  test('a PSQL frame is ignored: its line 5 is inside a routine, not inside the one-line statement', function () {
+    // From `SELECT * FROM P_FAIL;` — a single line — where P_FAIL divides by zero on the fifth line
+    // of its own source. Reading the 5 would point five lines into a one-line statement.
+    const message = [
+      'arithmetic exception, numeric overflow, or string truncation',
+      '-Integer divide by zero.  The code attempted to divide an integer value by an integer divisor of zero.',
+      '-At procedure "PUBLIC"."P_FAIL" line: 5, col: 3',
+    ].join('\n');
+    assert.strictEqual(parseServerPosition(message), undefined);
   });
 });
 

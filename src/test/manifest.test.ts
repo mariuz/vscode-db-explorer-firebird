@@ -120,3 +120,46 @@ suite('package.json – schema-level privileges', function () {
     );
   });
 });
+
+/**
+ * The bottom-Panel host for query results (`firebird.queryResultsLocation`).
+ *
+ * These three declarations only work together: the view names a container that must exist, the
+ * `when` clause names the setting whose value must match its own enum, and the provider registered
+ * in extension.ts names the view id. Any one of them mistyped leaves a setting that appears to do
+ * nothing — VS Code drops a view whose container is unknown without complaining. The Extension
+ * Development Host suite proves the pair is accepted at runtime; this proves they still agree
+ * without launching one, which is what CI actually runs.
+ */
+suite("package.json – query results in the bottom Panel", function () {
+  const container = "firebird-results-panel";
+  const viewId = "firebird.queryResultsPanel";
+
+  test("contributes a Panel container for the results view", function () {
+    const panels = packageJson?.contributes?.viewsContainers?.panel ?? [];
+    assert.ok(
+      panels.some((c: any) => c.id === container),
+      `expected a panel viewsContainer with id "${container}"`
+    );
+  });
+
+  test("the view is a webview, and lives in that container", function () {
+    const views = packageJson?.contributes?.views?.[container] ?? [];
+    const view = views.find((v: any) => v.id === viewId);
+    assert.ok(view, `expected a view "${viewId}" under "${container}"`);
+    assert.strictEqual(view.type, "webview", "a TreeView here would silently never render results");
+  });
+
+  test("the view is gated on the setting, so the default install grows no extra Panel tab", function () {
+    const views = packageJson?.contributes?.views?.[container] ?? [];
+    const view = views.find((v: any) => v.id === viewId);
+    assert.strictEqual(view?.when, "config.firebird.queryResultsLocation == panel");
+  });
+
+  test("the value the `when` clause tests is one the setting can actually take", function () {
+    const setting = packageJson?.contributes?.configuration?.properties?.["firebird.queryResultsLocation"];
+    assert.ok(setting, "the setting the view is gated on must exist");
+    assert.deepStrictEqual(setting.enum, ["editor", "panel"]);
+    assert.strictEqual(setting.default, "editor", "changing this would move every existing user's results");
+  });
+});

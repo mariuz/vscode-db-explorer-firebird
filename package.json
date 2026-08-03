@@ -786,6 +786,19 @@
           "default": false,
           "markdownDescription": "Registers the **Firebird MCP Server**, exposing whichever connections have `firebird.database.toggleMcpExposure` turned on as read-only schema-inspection tools (`list_connections`, `get_schema`) to any MCP-compatible AI client. No connection is exposed by default even when this is on — each one needs its own explicit opt-in from its right-click menu. Requires a VS Code build with MCP server registration support; has no effect on older versions."
         },
+        "firebird.queryResultsLocation": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "default": "editor",
+          "enumDescriptions": [
+            "Open query results in an editor group, beside the SQL file.",
+            "Dock query results in VS Code's bottom Panel, alongside Terminal and Problems, leaving the editor full width."
+          ],
+          "markdownDescription": "Where **Query Results** open, mirroring vscode-mssql's `mssql.openQueryResultsInTabByDefault`. Changing this affects the next query you run; a results view already open stays where it is."
+        },
         "firebird.messagesDefaultOpen": {
           "type": "boolean",
           "default": false,
@@ -1652,6 +1665,14 @@
           "id": "firebird-tasks",
           "name": "Background Tasks"
         }
+      ],
+      "firebird-results-panel": [
+        {
+          "type": "webview",
+          "id": "firebird.queryResultsPanel",
+          "name": "Results",
+          "when": "config.firebird.queryResultsLocation == panel"
+        }
       ]
     },
     "viewsContainers": {
@@ -1659,6 +1680,13 @@
         {
           "id": "firebird-tree",
           "title": "Firebird",
+          "icon": "resources/firebird-explorer-icon2.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "firebird-results-panel",
+          "title": "Firebird Query Results",
           "icon": "resources/firebird-explorer-icon2.svg"
         }
       ]

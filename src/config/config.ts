@@ -30,6 +30,7 @@ export function getOptions() {
     transactionReadOnly: _transactionReadOnly(),
     transactionWaitMode: _transactionWaitMode(),
     mcpEnabled: _mcpEnabled(),
+    queryResultsLocation: _queryResultsLocation(),
     messagesDefaultOpen: _messagesDefaultOpen(),
     messagesIncludeTimestamps: _messagesIncludeTimestamps(),
     resultsFontSize: _resultsFontSize(),
@@ -270,6 +271,22 @@ function _mcpEnabled(): boolean {
   const conf: any = getConfig().get("mcp.enabled");
   const def: boolean = properties["firebird.mcp.enabled"]["default"];
   if (typeof conf !== "boolean") {
+    return def;
+  }
+  return conf;
+}
+
+/**
+ * An unrecognised value falls back rather than being passed through: it reaches
+ * `QueryResultsView.preferredLocation()`, where anything that is not "panel" is treated as
+ * "editor" anyway — but logging it is the difference between a typo that silently does nothing and
+ * one the user can find.
+ */
+function _queryResultsLocation(): Options["queryResultsLocation"] {
+  const conf: any = getConfig().get("queryResultsLocation");
+  const def: Options["queryResultsLocation"] = properties["firebird.queryResultsLocation"]["default"];
+  if (conf !== "editor" && conf !== "panel") {
+    logger.error("Invalid value detected in Query Results Location settings. Fallback to default value.");
     return def;
   }
   return conf;

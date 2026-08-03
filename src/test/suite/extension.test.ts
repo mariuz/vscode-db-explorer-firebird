@@ -101,6 +101,46 @@ suite('Extension Host – roadmap feature commands', function () {
   });
 });
 
+/**
+ * The bottom-Panel host for query results (`firebird.queryResultsLocation`).
+ *
+ * This tier is where it can be checked at all: a `WebviewView` cannot be constructed by an
+ * extension — VS Code builds it from the package.json contribution and calls the registered
+ * provider — so nothing outside a real Extension Development Host can tell a working contribution
+ * from a typo in a view id. The `.focus` command below is VS Code's own, auto-registered per
+ * contributed view, and its existence is what proves the container and the view were accepted.
+ */
+suite('Extension Host – query results in the bottom Panel', function () {
+  this.timeout(20000);
+
+  test('the contributed Panel view exists, so VS Code accepted the container', async function () {
+    const registered = new Set(await vscode.commands.getCommands(true));
+    assert.ok(
+      registered.has('firebird.queryResultsPanel.focus'),
+      'VS Code auto-registers <viewId>.focus for a contributed view — its absence means the view or its container was rejected'
+    );
+  });
+
+  test('revealing the view resolves the provider without throwing', async function () {
+    // The view is `when`-gated on the setting, so it has to be turned on for the reveal to reach
+    // anything. Restored afterwards so the rest of the suite sees the shipped default.
+    const config = vscode.workspace.getConfiguration('firebird');
+    const previous = config.get('queryResultsLocation');
+    await config.update('queryResultsLocation', 'panel', vscode.ConfigurationTarget.Global);
+    try {
+      await vscode.commands.executeCommand('firebird.queryResultsPanel.focus');
+    } finally {
+      await config.update('queryResultsLocation', previous, vscode.ConfigurationTarget.Global);
+    }
+  });
+
+  test('the setting still defaults to an editor group, so nobody is moved without asking', function () {
+    const declared = vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON
+      ?.contributes?.configuration?.properties?.['firebird.queryResultsLocation'];
+    assert.strictEqual(declared?.default, 'editor');
+  });
+});
+
 suite('Extension Host – What\'s New notification', function () {
   test('extension still activates cleanly with the What\'s New check wired into activate()', function () {
     const ext = vscode.extensions.getExtension(EXTENSION_ID);

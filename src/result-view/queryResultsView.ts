@@ -1,4 +1,7 @@
-import { WebviewPanel, window, ViewColumn, Disposable, WebviewPanelOptions, WebviewOptions, Uri, ThemeIcon} from "vscode";
+import {
+  WebviewPanel, WebviewView, WebviewViewProvider, Webview, window, commands, ViewColumn, Disposable,
+  WebviewPanelOptions, WebviewOptions, Uri, ThemeIcon,
+} from "vscode";
 import { EventEmitter } from "events";
 import { dirname } from "path";
 import { readFile } from "fs";
@@ -10,12 +13,37 @@ export interface Message {
   id?: string;
 }
 
-export class QueryResultsView extends EventEmitter implements Disposable {
+/**
+ * Where a webview is rendered.
+ *
+ * These are two different APIs, not two arguments to one. **"editor"** is a `WebviewPanel` in an
+ * editor group — the only thing `window.createWebviewPanel()` can produce, and the reason results
+ * have always taken an editor group however the `ViewColumn` was set. **"panel"** is a
+ * `WebviewView` docked in VS Code's bottom Panel: the container and the view are declared in
+ * package.json, VS Code constructs the view itself, and it calls a registered provider's
+ * `resolveWebviewView()` the first time the view becomes visible.
+ *
+ * A live webview cannot be moved between the two, so the choice is made per run rather than
+ * migrated. That is also why this class hosts *either* — everything below the `webview` accessor is
+ * written against the `Webview` both hosts expose, and only the plumbing above it differs.
+ */
+export type WebviewLocation = "editor" | "panel";
+
+export class QueryResultsView extends EventEmitter implements Disposable, WebviewViewProvider {
   // private resourceScheme = "vscode-resource";
   private disposable?: Disposable;
 
   // private resourcesPath: string;
   private panel: WebviewPanel | undefined;
+  /** Set only while this webview is docked in the bottom Panel — see {@link WebviewLocation}. */
+  private view: WebviewView | undefined;
+  private viewSubscriptions?: Disposable;
+  /**
+   * The HTML a `show()` asked for while the Panel-hosted view did not exist yet. VS Code builds
+   * that view lazily, so the first run after a window opens reaches `show()` before there is any
+   * webview to render into; the content is applied by `resolveWebviewView()` when it arrives.
+   */
+  private pendingHtmlPath?: string;
   private htmlCache: { [path: string]: string };
   /**
    * @param icon Codicon id for the editor tab. Several of these panels can be open at once
@@ -29,18 +57,94 @@ export class QueryResultsView extends EventEmitter implements Disposable {
     this.htmlCache = {};
   }
 
+  /**
+   * Where this webview wants to render. The base answers "editor" — the behaviour every one of
+   * these panels has always had, and the only one the Schema Designer, plan view and profiler
+   * support. A subclass that also has a contributed Panel view overrides this *and* sets
+   * {@link panelViewId}; both are required, so a half-configured subclass falls back rather than
+   * silently rendering nowhere.
+   */
+  protected preferredLocation(): WebviewLocation {
+    return "editor";
+  }
+
+  /** The `contributes.views` id this webview docks to when {@link preferredLocation} is "panel". */
+  protected panelViewId?: string;
+
+  /** The host currently rendering, whichever kind it is. Undefined before the first show(). */
+  protected get webview(): Webview | undefined {
+    return this.panel?.webview ?? this.view?.webview;
+  }
+
   show(htmlPath: string) {
     // this.resourcesPath = dirname(htmlPath);
+    if (this.preferredLocation() === "panel" && this.panelViewId) {
+      this.showInBottomPanel(htmlPath);
+      return;
+    }
+
     if (!this.panel) {
       this.init();
     }
+    this.render(htmlPath);
+  }
 
+  /**
+   * Reveals the contributed Panel view and renders into it.
+   *
+   * The `.focus` command is VS Code's own, auto-registered for every contributed view id — there
+   * is no API to construct a `WebviewView` directly, so revealing the view *is* how one gets
+   * created, and `resolveWebviewView()` picks the render back up from `pendingHtmlPath`.
+   */
+  private showInBottomPanel(htmlPath: string) {
+    this.pendingHtmlPath = htmlPath;
+    if (this.view) {
+      this.view.show?.(true);
+      this.render(htmlPath);
+      return;
+    }
+    Promise.resolve(commands.executeCommand(`${this.panelViewId}.focus`))
+      .then(undefined, (err: any) => logger.error(err?.message ?? err));
+  }
+
+  /**
+   * VS Code calls this when the contributed Panel view first becomes visible. Registered from
+   * extension.ts with `window.registerWebviewViewProvider()`.
+   */
+  resolveWebviewView(view: WebviewView): void {
+    this.view = view;
+    view.webview.options = { enableScripts: true };
+
+    const subscriptions: Disposable[] = [
+      view.webview.onDidReceiveMessage((message: Message) => {
+        logger.debug(`Received command from webview | Command: ${message.command}`);
+        this.handleMessage(message);
+      }),
+      view.onDidDispose(() => {
+        // Only this host goes away — the object itself is a long-lived singleton owned by
+        // context.subscriptions, and a closed Panel must not take its event wiring with it.
+        if (this.view === view) {
+          this.view = undefined;
+        }
+        this.viewSubscriptions?.dispose();
+        this.viewSubscriptions = undefined;
+      }),
+    ];
+    this.viewSubscriptions = Disposable.from(...subscriptions);
+
+    if (this.pendingHtmlPath) {
+      this.render(this.pendingHtmlPath);
+    }
+  }
+
+  private render(htmlPath: string) {
     this.readWithCache(htmlPath, (html: string) => {
-      if (this.panel) {
-        // little hack to make the html unique so that the webview is reloaded
-        html = html.replace(/<\/body>/, `<div id="${this.randomString(8)}"></div></body>`);
-        this.panel.webview.html = html;
+      const webview = this.webview;
+      if (!webview) {
+        return;
       }
+      // little hack to make the html unique so that the webview is reloaded
+      webview.html = html.replace(/<\/body>/, `<div id="${this.randomString(8)}"></div></body>`);
     });
   }
 
@@ -90,13 +194,14 @@ export class QueryResultsView extends EventEmitter implements Disposable {
 
     const path = dirname(htmlPath);
     const x = (str: string): string => {
-      // The panel exists whenever show() *calls* readWithCache() (init() always runs first), but
-      // readFile() below is async -- dispose() can run in between (e.g. the panel is closed again
-      // before its HTML even finished loading) and clear this.panel before this callback fires.
-      // There's nothing to build a webview URI *for* at that point, and show()'s own `if
-      // (this.panel)` check already discards this result rather than assigning it anywhere, so
-      // just return the original string unchanged instead of crashing on a stale non-null assertion.
-      return this.panel ? this.panel.webview.asWebviewUri(Uri.file(path + str)).toString() : str;
+      // A host exists whenever show() *calls* readWithCache() (init() or resolveWebviewView() always
+      // runs first), but readFile() below is async -- the panel can be closed, or the view
+      // disposed, in between and clear it before this callback fires. There's nothing to build a
+      // webview URI *for* at that point, and render()'s own `if (!webview)` check already discards
+      // this result rather than assigning it anywhere, so just return the original string unchanged
+      // instead of crashing on a stale non-null assertion.
+      const webview = this.webview;
+      return webview ? webview.asWebviewUri(Uri.file(path + str)).toString() : str;
     };
     const regex = /(?<=(href|src)=")(.+?)(?=")/g;
     html = html.replace(regex, x);
@@ -104,8 +209,9 @@ export class QueryResultsView extends EventEmitter implements Disposable {
   }
 
   send(message: Message) {
-    if (this.panel) {
-      this.panel.webview.postMessage(message);
+    const webview = this.webview;
+    if (webview) {
+      webview.postMessage(message);
       logger.info("Results displayed.");
     }
   }

@@ -2,7 +2,7 @@ import { Disposable, window } from "vscode";
 import { TextDecoder } from "util";
 import { join } from "path";
 
-import { QueryResultsView, Message } from "./queryResultsView";
+import { QueryResultsView, Message, WebviewLocation } from "./queryResultsView";
 import { BatchResult, Driver, extractTableNames } from "../shared/driver";
 import { analyzePaging, buildPagedQuery, wholeTableSelect } from "../shared/sql-analysis";
 import { getEngineMajorVersion } from "../shared/engine-version";
@@ -141,6 +141,19 @@ export default class ResultView extends QueryResultsView implements Disposable {
 
   constructor(private extensionPath: string) {
     super("resultview", "Firebird Query Results", "table");
+    // Matches the view id contributed under `firebird-results-panel` in package.json. The view
+    // itself is `when`-gated on the same setting read below, so a user on the default never sees an
+    // extra Panel tab; this only says which id to reveal if they do turn it on.
+    this.panelViewId = "firebird.queryResultsPanel";
+  }
+
+  /**
+   * Read per `show()` rather than cached, so changing the setting takes effect on the next query
+   * instead of the next window. A results view already open stays where it is — the two hosts are
+   * different objects and a live webview cannot be moved between them.
+   */
+  protected preferredLocation(): WebviewLocation {
+    return getOptions().queryResultsLocation;
   }
 
   /**

@@ -239,6 +239,7 @@ Run **Create Local Firebird Container...** from the Command Palette — Docker's
 | `firebird.shortcuts` | object | `{}` | Keyboard shortcuts for actions inside the **Query Results** webview (edit mode, freeze column, copy as INSERT/IN); see the setting's description for event names and combo syntax |
 | `firebird.resultsFontFamily` | string | *(blank)* | Font family for the **Query Results** grid; blank uses the webview's own default font |
 | `firebird.resultsFontSize` | number | `0` | Font size (px) for the **Query Results** grid; `0` uses the webview's own default size |
+| `firebird.queryResultsLocation` | string | `editor` | Where **Query Results** open — `editor` (an editor group) or `panel` (docked in VS Code's bottom Panel, leaving the editor full width) |
 | `firebird.messagesDefaultOpen` | boolean | `false` | Land on the **Messages** tab, rather than the first statement's results, after running a batch |
 | `firebird.messagesIncludeTimestamps` | boolean | `true` | Include each statement's clock time when using **Copy All** in the Messages pane |
 | `firebird.linting.enabled` | boolean | `true` | Enable SQL linting for Firebird SQL documents |
