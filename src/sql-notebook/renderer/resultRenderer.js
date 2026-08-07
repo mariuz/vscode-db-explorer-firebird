@@ -70,6 +70,9 @@ function renderTable(table, messaging) {
   const status = document.createElement('span');
   status.className = 'fb-nb-status';
 
+  const aggregates = document.createElement('span');
+  aggregates.className = 'fb-nb-aggregates';
+
   const copyCsvBtn = button('Copy as CSV', () => copyToClipboard(toCsv(filteredSortedRows(), table.headers), status, 'CSV'));
   const copyJsonBtn = button('Copy as JSON', () => copyToClipboard(toJson(filteredSortedRows(), table.headers), status, 'JSON'));
 
@@ -98,7 +101,7 @@ function renderTable(table, messaging) {
   toolbar.className = 'fb-nb-toolbar';
   toolbar.append(filterInput, pageSizeSelect, copyCsvBtn, copyJsonBtn);
   if (exportBtn) { toolbar.append(exportBtn); }
-  toolbar.append(prevBtn, pageLabel, nextBtn, status);
+  toolbar.append(prevBtn, pageLabel, nextBtn, status, aggregates);
 
   const tableEl = document.createElement('table');
   tableEl.className = 'fb-nb-table';
@@ -115,6 +118,62 @@ function renderTable(table, messaging) {
   }
 
   root.append(toolbar, tableEl, truncationNote);
+
+  // Cell selection state
+  let pageRows = [];
+  let isSelecting = false;
+  let selectionAnchor = null; // { row, col }
+  let selectionEnd = null; // { row, col }
+
+  document.addEventListener('mouseup', () => {
+    isSelecting = false;
+  });
+
+  function clearSelection() {
+    selectionAnchor = null;
+    selectionEnd = null;
+    isSelecting = false;
+    updateSelectionVisuals();
+  }
+
+  function updateSelectionVisuals() {
+    const cells = tableEl.querySelectorAll('tbody td');
+    cells.forEach(td => {
+      td.classList.remove('fb-nb-cell-selected');
+    });
+
+    if (!selectionAnchor || !selectionEnd) {
+      aggregates.textContent = '';
+      return;
+    }
+
+    const rStart = Math.min(selectionAnchor.row, selectionEnd.row);
+    const rEnd = Math.max(selectionAnchor.row, selectionEnd.row);
+    const cStart = Math.min(selectionAnchor.col, selectionEnd.col);
+    const cEnd = Math.max(selectionAnchor.col, selectionEnd.col);
+
+    const selectedRows = [];
+    for (let r = rStart; r <= rEnd; r++) {
+      const selectedRow = [];
+      for (let c = cStart; c <= cEnd; c++) {
+        if (pageRows[r]) {
+          selectedRow.push(pageRows[r][c]);
+        }
+      }
+      selectedRows.push(selectedRow);
+    }
+
+    const stats = computeSelectionStats(selectedRows);
+    aggregates.textContent = formatSelectionStats(stats);
+
+    cells.forEach(td => {
+      const r = parseInt(td.dataset.row, 10);
+      const c = parseInt(td.dataset.col, 10);
+      if (r >= rStart && r <= rEnd && c >= cStart && c <= cEnd) {
+        td.classList.add('fb-nb-cell-selected');
+      }
+    });
+  }
 
   function filteredSortedRows() {
     let rows = table.rows;
@@ -161,7 +220,10 @@ function renderTable(table, messaging) {
   }
 
   function renderBody(rows) {
+    pageRows = rows;
     tbody.replaceChildren();
+    clearSelection();
+
     if (rows.length === 0) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
@@ -172,16 +234,35 @@ function renderTable(table, messaging) {
       tbody.appendChild(tr);
       return;
     }
-    rows.forEach(row => {
+    rows.forEach((row, rowIndex) => {
       const tr = document.createElement('tr');
-      row.forEach(cell => {
+      row.forEach((cell, colIndex) => {
         const td = document.createElement('td');
+        td.dataset.row = String(rowIndex);
+        td.dataset.col = String(colIndex);
         if (cell === null) {
           td.textContent = 'NULL';
           td.className = 'fb-nb-null';
         } else {
           td.textContent = cell;
         }
+
+        td.addEventListener('mousedown', (e) => {
+          if (e.button !== 0) { return; } // Only left click
+          isSelecting = true;
+          selectionAnchor = { row: rowIndex, col: colIndex };
+          selectionEnd = { row: rowIndex, col: colIndex };
+          updateSelectionVisuals();
+          e.preventDefault();
+        });
+
+        td.addEventListener('mouseenter', () => {
+          if (isSelecting) {
+            selectionEnd = { row: rowIndex, col: colIndex };
+            updateSelectionVisuals();
+          }
+        });
+
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -234,11 +315,46 @@ function toJson(rows, headers) {
   }), null, 2);
 }
 
+function computeSelectionStats(rows) {
+  const numericRe = /^-?\d+(\.\d+)?$/;
+  let count = 0;
+  const numericValues = [];
+  rows.forEach(row => row.forEach(cell => {
+    count++;
+    const trimmed = String(cell).trim();
+    if (numericRe.test(trimmed)) { numericValues.push(Number(trimmed)); }
+  }));
+  const stats = { count, numericCount: numericValues.length };
+  if (numericValues.length > 0) {
+    stats.sum = numericValues.reduce((a, b) => a + b, 0);
+    stats.avg = stats.sum / numericValues.length;
+    stats.min = Math.min(...numericValues);
+    stats.max = Math.max(...numericValues);
+  }
+  return stats;
+}
+
+function formatSelectionNumber(n) {
+  return String(Math.round(n * 100) / 100);
+}
+
+function formatSelectionStats(stats) {
+  if (!stats || stats.count === 0) { return ''; }
+  let text = `Count: ${stats.count}`;
+  if (stats.numericCount > 0) {
+    text += `  Sum: ${formatSelectionNumber(stats.sum)}` +
+      `  Avg: ${formatSelectionNumber(stats.avg)}` +
+      `  Min: ${formatSelectionNumber(stats.min)}` +
+      `  Max: ${formatSelectionNumber(stats.max)}`;
+  }
+  return text;
+}
+
 // Test-only export: harmless in the real renderer context (VS Code's Notebook Renderer API only
 // ever imports `activate`) — lets a Node-based test load this module's pure helpers directly via
 // dynamic import(), the ESM equivalent of the CommonJS `module.exports.__test__` hook the other
 // three webview app.js files use (see src/test/webview-harness.ts's doc comment for why).
-export const __test__ = { compareCells, csvCell, toCsv, toJson };
+export const __test__ = { compareCells, csvCell, toCsv, toJson, computeSelectionStats, formatSelectionStats };
 
 function copyToClipboard(text, statusEl, label) {
   const ok = () => { statusEl.textContent = `Copied as ${label}.`; setTimeout(() => { statusEl.textContent = ''; }, 2000); };
@@ -262,14 +378,17 @@ function injectStylesOnce() {
     .fb-nb-btn:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground)); }
     .fb-nb-btn:disabled { opacity: 0.5; cursor: default; }
     .fb-nb-status { color: var(--vscode-descriptionForeground); font-size: 0.9em; min-width: 5em; }
+    .fb-nb-aggregates { color: var(--vscode-descriptionForeground); font-size: 0.9em; white-space: nowrap; margin-left: auto; }
     .fb-nb-page-label { color: var(--vscode-descriptionForeground); font-size: 0.9em; white-space: nowrap; }
     .fb-nb-table { border-collapse: collapse; width: 100%; }
     .fb-nb-table th, .fb-nb-table td { border: 1px solid var(--vscode-panel-border, #80808040); padding: 2px 6px; text-align: left; white-space: nowrap; }
     .fb-nb-table th { cursor: pointer; background: var(--vscode-editorWidget-background); user-select: none; }
     .fb-nb-table th.fb-nb-sorted { font-weight: bold; }
+    .fb-nb-table td.fb-nb-cell-selected { background-color: var(--vscode-editor-selectionBackground, #007acc40) !important; }
     .fb-nb-null { font-style: italic; color: var(--vscode-descriptionForeground); }
     .fb-nb-empty { text-align: center; color: var(--vscode-descriptionForeground); padding: 8px; }
     .fb-nb-truncation { color: var(--vscode-descriptionForeground); font-size: 0.9em; margin-top: 4px; }
   `;
   document.head.appendChild(style);
 }
+

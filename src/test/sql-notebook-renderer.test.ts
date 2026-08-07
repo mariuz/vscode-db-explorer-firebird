@@ -102,6 +102,44 @@ suite('sql-notebook renderer – pure data helpers (via __test__ hook)', functio
       assert.deepStrictEqual(JSON.parse(hooks.toJson([], ['ID'])), []);
     });
   });
+
+  suite('computeSelectionStats()', function () {
+    test('counts non-numeric cells correctly and skips them in numeric stats', function () {
+      const stats = hooks.computeSelectionStats([['1', 'apple', '3']]);
+      assert.strictEqual(stats.count, 3);
+      assert.strictEqual(stats.numericCount, 2);
+      assert.strictEqual(stats.sum, 4);
+      assert.strictEqual(stats.avg, 2);
+      assert.strictEqual(stats.min, 1);
+      assert.strictEqual(stats.max, 3);
+    });
+
+    test('returns correct count when there are zero numeric cells', function () {
+      const stats = hooks.computeSelectionStats([['apple', 'banana']]);
+      assert.strictEqual(stats.count, 2);
+      assert.strictEqual(stats.numericCount, 0);
+      assert.strictEqual(stats.sum, undefined);
+    });
+  });
+
+  suite('formatSelectionStats()', function () {
+    test('formats selection stats containing numeric values correctly', function () {
+      const stats = hooks.computeSelectionStats([['2', '4']]);
+      const formatted = hooks.formatSelectionStats(stats);
+      assert.strictEqual(formatted, 'Count: 2  Sum: 6  Avg: 3  Min: 2  Max: 4');
+    });
+
+    test('formats stats without numeric values showing only Count', function () {
+      const stats = hooks.computeSelectionStats([['a', 'b']]);
+      const formatted = hooks.formatSelectionStats(stats);
+      assert.strictEqual(formatted, 'Count: 2');
+    });
+
+    test('returns empty string for empty stats', function () {
+      assert.strictEqual(hooks.formatSelectionStats(undefined), '');
+      assert.strictEqual(hooks.formatSelectionStats({ count: 0, numericCount: 0 }), '');
+    });
+  });
 });
 
 // ── Full interactive render pipeline, against a faithful (stateful) fake DOM ────────────────────
@@ -125,6 +163,7 @@ class FakeElement {
   _listeners: Record<string, Array<(e: any) => void>> = {};
   disabled = false;
   value = '';
+  dataset: Record<string, string> = {};
 
   constructor(tag: string) { this.tagName = tag; }
   set className(c: string) { this.classList.set = new Set(c.split(' ').filter(Boolean)); }
@@ -138,8 +177,20 @@ class FakeElement {
   append(...nodes: FakeElement[]) { nodes.forEach(n => this.appendChild(n)); }
   replaceChildren(...nodes: FakeElement[]) { this.children = []; nodes.forEach(n => this.appendChild(n)); }
   addEventListener(type: string, fn: (e: any) => void) { (this._listeners[type] ??= []).push(fn); }
-  dispatch(type: string) { (this._listeners[type] ?? []).forEach(fn => fn({ target: this })); }
-  querySelectorAll() { return []; }
+  dispatch(type: string, eventProps: any = {}) { (this._listeners[type] ?? []).forEach(fn => fn({ target: this, preventDefault() {}, ...eventProps })); }
+  querySelectorAll(selector: string): FakeElement[] {
+    const results: FakeElement[] = [];
+    const visit = (el: FakeElement) => {
+      if (selector === 'tbody td' && el.tagName.toLowerCase() === 'td') {
+        results.push(el);
+      } else if (el.tagName.toLowerCase() === selector.toLowerCase()) {
+        results.push(el);
+      }
+      el.children.forEach(visit);
+    };
+    visit(this);
+    return results;
+  }
 }
 
 suite('sql-notebook renderer – renderOutputItem() (faithful fake DOM)', function () {
@@ -152,7 +203,12 @@ suite('sql-notebook renderer – renderOutputItem() (faithful fake DOM)', functi
     previousDocument = (global as any).document;
     previousNavigator = (global as any).navigator;
     Object.defineProperty(global, 'document', {
-      value: { createElement: (tag: string) => new FakeElement(tag), head: new FakeElement('head') },
+      value: {
+        createElement: (tag: string) => new FakeElement(tag),
+        head: new FakeElement('head'),
+        addEventListener: (type: string, fn: any) => {},
+        removeEventListener: (type: string, fn: any) => {},
+      },
       configurable: true, writable: true,
     });
     clipboardText = null;
@@ -253,6 +309,38 @@ suite('sql-notebook renderer – renderOutputItem() (faithful fake DOM)', functi
     const tbody = tbodyOf(root);
     assert.strictEqual(tbody.children.length, 1);
     assert.strictEqual(tbody.children[0].children[0].textContent, '0 rows returned.');
+  });
+
+  test('cell range selection displays aggregates and highlights cells correctly', function () {
+    const root = render({ headers: ['N'], rows: [['10'], ['20'], ['30']], truncated: false, totalRowCount: 3 });
+    const tbody = tbodyOf(root);
+
+    const findElementByClassName = (node: FakeElement, className: string): FakeElement | undefined => {
+      if (node.className.includes(className)) { return node; }
+      for (const child of node.children) {
+        const found = findElementByClassName(child, className);
+        if (found) { return found; }
+      }
+      return undefined;
+    };
+
+    const aggregatesEl = findElementByClassName(root, 'fb-nb-aggregates');
+    assert.ok(aggregatesEl, 'Expected aggregates element');
+
+    // Simulate clicking the first cell (10)
+    const td0 = tbody.children[0].children[0];
+    td0.dispatch('mousedown', { button: 0 });
+
+    assert.strictEqual(aggregatesEl.textContent, 'Count: 1  Sum: 10  Avg: 10  Min: 10  Max: 10');
+    assert.ok(td0.classList.contains('fb-nb-cell-selected'));
+
+    // Drag to the second cell (20)
+    const td1 = tbody.children[1].children[0];
+    td1.dispatch('mouseenter');
+
+    assert.strictEqual(aggregatesEl.textContent, 'Count: 2  Sum: 30  Avg: 15  Min: 10  Max: 20');
+    assert.ok(td0.classList.contains('fb-nb-cell-selected'));
+    assert.ok(td1.classList.contains('fb-nb-cell-selected'));
   });
 });
 
