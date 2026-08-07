@@ -112,7 +112,7 @@ The following features are adapted from Microsoft's [vscode-mssql](https://githu
 - [x] Getting Started walkthrough — an interactive, checklist-style onboarding flow using VS Code's native `contributes.walkthroughs` API, complementing the existing static `docs/getting-started.md`
 - [x] In-product "What's New" notification/webview shown once after an extension update, summarizing the new version's `CHANGELOG.md` entry
 - [x] Firebird Dev Container template — a ready-made `.devcontainer` config (Firebird server + this extension preinstalled) for VS Code's Dev Containers extension, for quick-start/demo/CI-reproduction scenarios
-- [ ] Voice dictation & `@firebird` chat participant — Integrate with VS Code's dictation features for speech-to-text querying and register `@firebird` as a workspace chat participant providing schema contexts directly to Copilot Chat, matching `@pgsql` and Copilot improvements.
+- [x] Voice dictation & `@firebird` chat participant — Integrate with VS Code's dictation features for speech-to-text querying and register `@firebird` as a workspace chat participant providing schema contexts directly to Copilot Chat, matching `@pgsql` and Copilot improvements.
 
 ## Inspired by vscode-pgsql
 
