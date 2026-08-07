@@ -415,25 +415,25 @@ suite('buildProjectFiles() — Firebird 6 schema names', function () {
 
   test('a default-schema table keeps its short file name, so existing projects do not churn', function () {
     const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS')]));
-    const tableFile = files.find(f => f.path.startsWith('tables/'))!;
+    const tableFile = files.find(f => f.path.includes('tables/'))!;
     assert.strictEqual(tableFile.path, 'tables/ORDERS.sql');
   });
 
   test('but its DDL is qualified, because that is what has to be unambiguous', function () {
     const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS')]));
-    const tableFile = files.find(f => f.path.startsWith('tables/'))!;
+    const tableFile = files.find(f => f.path.includes('tables/'))!;
     assert.ok(tableFile.content.includes('CREATE TABLE PUBLIC.ORDERS'), tableFile.content);
   });
 
   test('a second schema gets its own file rather than overwriting the first', function () {
     const files = buildProjectFiles(input([table('PUBLIC.ORDERS', 'ORDERS'), table('SALES.ORDERS')]));
-    const paths = files.filter(f => f.path.startsWith('tables/')).map(f => f.path).sort();
-    assert.deepStrictEqual(paths, ['tables/ORDERS.sql', 'tables/SALES.ORDERS.sql']);
+    const paths = files.filter(f => f.path.includes('tables/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['schemas/SALES/tables/ORDERS.sql', 'tables/ORDERS.sql']);
   });
 
   test('a pre-Firebird-6 graph is unaffected', function () {
     const files = buildProjectFiles(input([table('ORDERS')]));
-    assert.strictEqual(files.find(f => f.path.startsWith('tables/'))!.path, 'tables/ORDERS.sql');
+    assert.strictEqual(files.find(f => f.path.includes('tables/'))!.path, 'tables/ORDERS.sql');
   });
 });
 
@@ -454,8 +454,8 @@ suite('buildProjectFiles() — source objects across schemas', function () {
         { name: 'SALES.ACTIVE', displayName: 'SALES.ACTIVE', source: 'SELECT 2 FROM RDB$DATABASE' },
       ],
     } as any);
-    const paths = files.filter(f => f.path.startsWith('views/')).map(f => f.path).sort();
-    assert.deepStrictEqual(paths, ['views/ACTIVE.sql', 'views/SALES.ACTIVE.sql']);
+    const paths = files.filter(f => f.path.includes('views/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['schemas/SALES/views/ACTIVE.sql', 'views/ACTIVE.sql']);
   });
 
   test('same-named procedures too, each keeping its own file name', function () {
@@ -466,8 +466,8 @@ suite('buildProjectFiles() — source objects across schemas', function () {
         { name: 'SALES.TOTALS', displayName: 'SALES.TOTALS', source: 'BEGIN END', parameters: [] },
       ],
     } as any);
-    const paths = files.filter(f => f.path.startsWith('procedures/')).map(f => f.path).sort();
-    assert.deepStrictEqual(paths, ['procedures/SALES.TOTALS.sql', 'procedures/TOTALS.sql']);
+    const paths = files.filter(f => f.path.includes('procedures/')).map(f => f.path).sort();
+    assert.deepStrictEqual(paths, ['procedures/TOTALS.sql', 'schemas/SALES/procedures/TOTALS.sql']);
   });
 
   test('without a display name — every pre-Firebird-6 database — nothing changes', function () {
@@ -475,6 +475,37 @@ suite('buildProjectFiles() — source objects across schemas', function () {
       ...base,
       views: [{ name: 'ACTIVE', source: 'SELECT 1 FROM RDB$DATABASE' }],
     } as any);
-    assert.strictEqual(files.find(f => f.path.startsWith('views/'))!.path, 'views/ACTIVE.sql');
+    assert.strictEqual(files.find(f => f.path.includes('views/'))!.path, 'views/ACTIVE.sql');
+  });
+
+  test('generators, domains, exceptions, and triggers are also placed in schema folders when schema-qualified', function () {
+    const files = buildProjectFiles({
+      ...base,
+      generators: ['SEQ', 'SALES.SEQ'],
+      domains: [
+        { name: 'DM', type: 'INTEGER', length: 4, notNull: false },
+        { name: 'SALES.DM', type: 'INTEGER', length: 4, notNull: false },
+      ],
+      exceptions: [
+        { name: 'EX', message: 'err' },
+        { name: 'SALES.EX', message: 'err' },
+      ],
+      triggers: [
+        { name: 'TRG', table: 'ORDERS', inactive: false, type: 1, source: 'BEGIN END' },
+        { name: 'SALES.TRG', table: 'SALES.ORDERS', inactive: false, type: 1, source: 'BEGIN END' },
+      ],
+    } as any);
+
+    assert.ok(files.some(f => f.path === 'generators/SEQ.sql'), 'expected generators/SEQ.sql');
+    assert.ok(files.some(f => f.path === 'schemas/SALES/generators/SEQ.sql'), 'expected schemas/SALES/generators/SEQ.sql');
+
+    assert.ok(files.some(f => f.path === 'domains/DM.sql'), 'expected domains/DM.sql');
+    assert.ok(files.some(f => f.path === 'schemas/SALES/domains/DM.sql'), 'expected schemas/SALES/domains/DM.sql');
+
+    assert.ok(files.some(f => f.path === 'exceptions/EX.sql'), 'expected exceptions/EX.sql');
+    assert.ok(files.some(f => f.path === 'schemas/SALES/exceptions/EX.sql'), 'expected schemas/SALES/exceptions/EX.sql');
+
+    assert.ok(files.some(f => f.path === 'triggers/TRG.sql'), 'expected triggers/TRG.sql');
+    assert.ok(files.some(f => f.path === 'schemas/SALES/triggers/TRG.sql'), 'expected schemas/SALES/triggers/TRG.sql');
   });
 });

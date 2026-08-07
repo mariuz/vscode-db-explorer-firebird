@@ -6,6 +6,7 @@
 
 import { SchemaGraph, SchemaTable, SchemaColumn, SchemaRelationship } from "../schema-designer/schema-graph";
 import { escapeSqlLiteral } from "../shared/queries";
+import { splitQualifiedName } from "../shared/schema-support";
 
 /**
  * One input or output parameter of a procedure, from getAllProcedureParametersQuery(). Shares
@@ -341,6 +342,16 @@ export function sanitizeFileName(name: string): string {
   return name.replace(/[^A-Za-z0-9_.-]/g, "_");
 }
 
+/** Resolves the folder path of a schema-scoped object, e.g. "schemas/SALES/tables/ORDERS.sql" or "tables/ORDERS.sql". */
+export function getObjectPath(category: string, name: string): string {
+  const { schema, name: bareName } = splitQualifiedName(name);
+  const sanitized = sanitizeFileName(bareName);
+  if (schema) {
+    return `schemas/${sanitizeFileName(schema)}/${category}/${sanitized}.sql`;
+  }
+  return `${category}/${sanitized}.sql`;
+}
+
 /**
  * Builds every project file (including the manifest itself, always first) in a dependency-safe
  * order: generators, then domains, then tables, then foreign keys (added only once every table
@@ -372,21 +383,21 @@ export function buildProjectFiles(input: ProjectInput): ProjectFile[] {
   const files: ProjectFile[] = [];
 
   input.generators.forEach(name => {
-    files.push({ path: `generators/${sanitizeFileName(name)}.sql`, content: buildGeneratorCreateDDL(name) });
+    files.push({ path: getObjectPath("generators", name), content: buildGeneratorCreateDDL(name) });
   });
 
   input.domains.forEach(domain => {
-    files.push({ path: `domains/${sanitizeFileName(domain.name)}.sql`, content: buildDomainCreateDDL(domain) });
+    files.push({ path: getObjectPath("domains", domain.name), content: buildDomainCreateDDL(domain) });
   });
 
   input.graph.tables.forEach(table => {
     // File named after the *display* name, DDL written with the qualified one. On a single-schema
     // Firebird 6 database that keeps `tables/ORDERS.sql` rather than renaming every file in an
     // existing project to `PUBLIC.ORDERS.sql`, while a second schema still gets its own file
-    // (`SALES.ORDERS.sql`). The content is what has to be unambiguous, and `buildTableCreateDDL()`
+    // (`schemas/SALES/tables/ORDERS.sql`). The content is what has to be unambiguous, and `buildTableCreateDDL()`
     // already writes `CREATE TABLE PUBLIC.ORDERS` from the qualified identity.
-    const fileName = sanitizeFileName(table.displayName ?? table.name);
-    files.push({ path: `tables/${fileName}.sql`, content: buildTableCreateDDL(table) });
+    const displayName = table.displayName ?? table.name;
+    files.push({ path: getObjectPath("tables", displayName), content: buildTableCreateDDL(table) });
   });
 
   if (input.graph.relationships.length > 0) {
@@ -395,19 +406,22 @@ export function buildProjectFiles(input: ProjectInput): ProjectFile[] {
   }
 
   input.exceptions.forEach(exception => {
-    files.push({ path: `exceptions/${sanitizeFileName(exception.name)}.sql`, content: buildExceptionCreateDDL(exception) });
+    files.push({ path: getObjectPath("exceptions", exception.name), content: buildExceptionCreateDDL(exception) });
   });
 
   input.views.forEach(view => {
-    files.push({ path: `views/${sanitizeFileName(view.displayName ?? view.name)}.sql`, content: buildViewCreateDDL(view) });
+    const displayName = view.displayName ?? view.name;
+    files.push({ path: getObjectPath("views", displayName), content: buildViewCreateDDL(view) });
   });
 
   input.procedures.forEach(proc => {
-    files.push({ path: `procedures/${sanitizeFileName(proc.displayName ?? proc.name)}.sql`, content: buildProcedureCreateDDL(proc) });
+    const displayName = proc.displayName ?? proc.name;
+    files.push({ path: getObjectPath("procedures", displayName), content: buildProcedureCreateDDL(proc) });
   });
 
   input.triggers.forEach(trigger => {
-    files.push({ path: `triggers/${sanitizeFileName(trigger.displayName ?? trigger.name)}.sql`, content: buildTriggerCreateDDL(trigger) });
+    const displayName = trigger.displayName ?? trigger.name;
+    files.push({ path: getObjectPath("triggers", displayName), content: buildTriggerCreateDDL(trigger) });
   });
 
   input.roles.forEach(role => {

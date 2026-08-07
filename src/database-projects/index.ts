@@ -65,11 +65,11 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
     getAllProcedureSourcesQuery(withSchemas),
     getAllProcedureParametersQuery(withSchemas),
     getAllTriggerSourcesQuery(withSchemas),
-    getGeneratorsQuery(),
+    getGeneratorsQuery(withSchemas),
     getAllPrimaryKeyConstraintNamesQuery(),
-    getDomainsQuery(),
+    getDomainsQuery(withSchemas),
     getRolesQuery(),
-    getExceptionsQuery(),
+    getExceptionsQuery(withSchemas),
     getUsersQuery(),
   ].join("\n");
 
@@ -139,7 +139,7 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
   return {
     graph,
     domains: ((domainsResult?.rows ?? []) as any[]).map(r => ({
-      name: r.DOMAIN_NAME.trim(),
+      name: display(r.SCHEMA_NAME, r.DOMAIN_NAME),
       type: r.DOMAIN_TYPE.trim(),
       length: r.FIELD_LENGTH ?? 0,
       subType: r.FIELD_SUB_TYPE ?? undefined,
@@ -168,8 +168,8 @@ export async function fetchProjectSnapshot(connectionOptions: ConnectionOptions)
       type: r.TRIGGER_TYPE ?? 0,
       source: r.TRIGGER_SOURCE ?? "",
     })),
-    generators: ((generatorsResult?.rows ?? []) as any[]).map(r => r.GENERATOR_NAME.trim()),
-    exceptions: ((exceptionsResult?.rows ?? []) as any[]).map(r => ({ name: r.EXCEPTION_NAME.trim(), message: r.MESSAGE ?? "" })),
+    generators: ((generatorsResult?.rows ?? []) as any[]).map(r => display(r.SCHEMA_NAME, r.GENERATOR_NAME)),
+    exceptions: ((exceptionsResult?.rows ?? []) as any[]).map(r => ({ name: display(r.SCHEMA_NAME, r.EXCEPTION_NAME), message: r.MESSAGE ?? "" })),
     roles: ((rolesResult?.rows ?? []) as any[]).map(r => ({ name: r.ROLE_NAME.trim() })),
     users: ((usersResult?.rows ?? []) as any[]).map(r => ({ name: r.USER_NAME.trim() })),
     pkConstraintNames,

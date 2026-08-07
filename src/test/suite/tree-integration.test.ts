@@ -25,8 +25,14 @@ suite('Tree nodes – real Firebird integration (extension host)', function () {
   this.timeout(20000);
 
   let fakeContext: vscode.ExtensionContext;
+  let major = 0;
+  let originalMaxTables: any;
 
-  suiteSetup(function () {
+  suiteSetup(async function () {
+    const config = vscode.workspace.getConfiguration('firebird');
+    originalMaxTables = config.inspect('maxTablesCount')?.globalValue;
+    await config.update('maxTablesCount', 0, true);
+
     Driver.client = new NodeClient();
     const extension = vscode.extensions.getExtension(EXTENSION_ID);
     assert.ok(extension, `Extension "${EXTENSION_ID}" should be installed in the test host`);
@@ -34,6 +40,26 @@ suite('Tree nodes – real Firebird integration (extension host)', function () {
     // (to build icon paths), so a minimal stand-in is enough here — we don't
     // need a full ExtensionContext (globalState/secrets) for these tests.
     fakeContext = { extensionPath: extension!.extensionPath } as unknown as vscode.ExtensionContext;
+
+    // Drop the SALES schema so the database has exactly one user schema (PUBLIC).
+    // This forces the explorer tree to render the flat category folders layout for testing.
+    major = await getEngineMajorVersion('suite-tree-setup', sql => Driver.runQuery(sql, getTestConnectionOptions()));
+    if (supportsSchemas(major)) {
+      await Driver.runQuery('DROP TABLE SALES.ORDERS', getTestConnectionOptions()).catch(() => undefined);
+      await Driver.runQuery('DROP SCHEMA SALES', getTestConnectionOptions()).catch(() => undefined);
+    }
+  });
+
+  suiteTeardown(async function () {
+    const config = vscode.workspace.getConfiguration('firebird');
+    await config.update('maxTablesCount', originalMaxTables, true);
+
+    if (supportsSchemas(major)) {
+      // Recreate SALES schema/tables for downstream Playwright tests
+      await Driver.runQuery('CREATE SCHEMA SALES', getTestConnectionOptions()).catch(() => undefined);
+      await Driver.runQuery('CREATE TABLE SALES.ORDERS (ID INTEGER NOT NULL PRIMARY KEY, TOTAL NUMERIC(10,2))', getTestConnectionOptions()).catch(() => undefined);
+      await Driver.runQuery('INSERT INTO SALES.ORDERS (ID, TOTAL) VALUES (1, 999.00)', getTestConnectionOptions()).catch(() => undefined);
+    }
   });
 
   test('NodeHost.getChildren wraps each saved connection in a NodeDatabase', async function () {
