@@ -572,6 +572,12 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.schemaDiff.markdownPreview",
+        "title": "Schema Diff — Markdown Preview",
+        "icon": "$(markdown)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.schemaVisualizer.open",
         "title": "Visualize Schema",
         "category": "Firebird"
@@ -1160,6 +1166,11 @@
           "command": "firebird.schemaDiff.generateMigrationScript",
           "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@5"
+        },
+        {
+          "command": "firebird.schemaDiff.markdownPreview",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
+          "group": "second@6"
         },
         {
           "command": "firebird.mockData",

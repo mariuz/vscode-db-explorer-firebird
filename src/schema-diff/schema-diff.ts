@@ -286,3 +286,142 @@ export function renderDiffReport(
 function columnsEqual(a: ColumnSnapshot, b: ColumnSnapshot): boolean {
   return a.type === b.type && a.length === b.length && a.notNull === b.notNull;
 }
+
+/**
+ * Renders a SchemaDiffResult as a rich GitHub-Flavoured Markdown document suitable for displaying
+ * in VS Code's built-in Markdown preview.  The output is structured for scannability:
+ *
+ *  - A top-level summary table (counts per category)
+ *  - Per-section details using emoji sigils (🆕 added · 🗑️ removed · ✏️ modified)
+ *  - Column-level changes laid out as proper Markdown tables
+ *  - GFM `<details>` blocks to keep long diffs compact
+ */
+export function renderDiffMarkdown(
+  diff: SchemaDiffResult,
+  sourceLabel: string,
+  targetLabel: string,
+  generatedAt: Date = new Date()
+): string {
+  const ts = generatedAt.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+  const totalChanges =
+    diff.tablesOnlyInSource.length + diff.tablesOnlyInTarget.length + diff.modifiedTables.length +
+    diff.viewsOnlyInSource.length + diff.viewsOnlyInTarget.length +
+    diff.proceduresOnlyInSource.length + diff.proceduresOnlyInTarget.length +
+    diff.triggersOnlyInSource.length + diff.triggersOnlyInTarget.length;
+
+  const lines: string[] = [];
+
+  lines.push(`# 🔍 Firebird Schema Diff`);
+  lines.push('');
+  lines.push(`**Source:** \`${sourceLabel}\``);
+  lines.push(`**Target:** \`${targetLabel}\``);
+  lines.push(`**Generated:** ${ts}`);
+  lines.push('');
+
+  if (totalChanges === 0) {
+    lines.push('> ✅ **Schemas are identical** — no differences found.');
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  // --- Summary table ---
+  lines.push('## Summary');
+  lines.push('');
+  lines.push('| Category | 🆕 Added (source only) | 🗑️ Removed (target only) | ✏️ Modified |');
+  lines.push('|---|---|---|---|');
+  lines.push(`| Tables | ${diff.tablesOnlyInSource.length} | ${diff.tablesOnlyInTarget.length} | ${diff.modifiedTables.length} |`);
+  lines.push(`| Views | ${diff.viewsOnlyInSource.length} | ${diff.viewsOnlyInTarget.length} | — |`);
+  lines.push(`| Procedures | ${diff.proceduresOnlyInSource.length} | ${diff.proceduresOnlyInTarget.length} | — |`);
+  lines.push(`| Triggers | ${diff.triggersOnlyInSource.length} | ${diff.triggersOnlyInTarget.length} | — |`);
+  lines.push('');
+
+  // --- Tables ---
+  const hasTableChanges = diff.tablesOnlyInSource.length > 0 || diff.tablesOnlyInTarget.length > 0 || diff.modifiedTables.length > 0;
+  if (hasTableChanges) {
+    lines.push('## Tables');
+    lines.push('');
+
+    for (const t of diff.tablesOnlyInSource) {
+      lines.push(`### 🆕 \`${t}\` *(only in source)*`);
+      lines.push('');
+    }
+    for (const t of diff.tablesOnlyInTarget) {
+      lines.push(`### 🗑️ \`${t}\` *(only in target)*`);
+      lines.push('');
+    }
+    for (const t of diff.modifiedTables) {
+      const colChangeCount = t.columnsOnlyInSource.length + t.columnsOnlyInTarget.length + t.modifiedColumns.length;
+      lines.push(`### ✏️ \`${t.name}\` — ${colChangeCount} column change${colChangeCount === 1 ? '' : 's'}`);
+      lines.push('');
+
+      if (t.columnsOnlyInSource.length > 0 || t.columnsOnlyInTarget.length > 0 || t.modifiedColumns.length > 0) {
+        lines.push('<details open>');
+        lines.push('<summary>Column changes</summary>');
+        lines.push('');
+        lines.push('| Change | Column | Type | Length | Not Null |');
+        lines.push('|---|---|---|---|---|');
+        for (const c of t.columnsOnlyInSource) {
+          lines.push(`| 🆕 Added | \`${c.name}\` | ${c.type} | ${c.length > 0 ? c.length : '—'} | ${c.notNull ? 'YES' : 'no'} |`);
+        }
+        for (const c of t.columnsOnlyInTarget) {
+          lines.push(`| 🗑️ Removed | \`${c.name}\` | ${c.type} | ${c.length > 0 ? c.length : '—'} | ${c.notNull ? 'YES' : 'no'} |`);
+        }
+        for (const m of t.modifiedColumns) {
+          lines.push(`| ✏️ Modified | \`${m.source.name}\` | ${m.source.type} → ${m.target.type} | ${m.source.length} → ${m.target.length} | ${m.source.notNull ? 'YES' : 'no'} → ${m.target.notNull ? 'YES' : 'no'} |`);
+        }
+        lines.push('');
+        lines.push('</details>');
+        lines.push('');
+      }
+    }
+  }
+
+  // --- Views ---
+  const hasViewChanges = diff.viewsOnlyInSource.length > 0 || diff.viewsOnlyInTarget.length > 0;
+  if (hasViewChanges) {
+    lines.push('## Views');
+    lines.push('');
+    for (const v of diff.viewsOnlyInSource) {
+      lines.push(`- 🆕 \`${v}\` *(only in source)*`);
+    }
+    for (const v of diff.viewsOnlyInTarget) {
+      lines.push(`- 🗑️ \`${v}\` *(only in target)*`);
+    }
+    lines.push('');
+  }
+
+  // --- Procedures ---
+  const hasProcChanges = diff.proceduresOnlyInSource.length > 0 || diff.proceduresOnlyInTarget.length > 0;
+  if (hasProcChanges) {
+    lines.push('## Stored Procedures');
+    lines.push('');
+    for (const p of diff.proceduresOnlyInSource) {
+      lines.push(`- 🆕 \`${p}\` *(only in source)*`);
+    }
+    for (const p of diff.proceduresOnlyInTarget) {
+      lines.push(`- 🗑️ \`${p}\` *(only in target)*`);
+    }
+    lines.push('');
+  }
+
+  // --- Triggers ---
+  const hasTriggerChanges = diff.triggersOnlyInSource.length > 0 || diff.triggersOnlyInTarget.length > 0;
+  if (hasTriggerChanges) {
+    lines.push('## Triggers');
+    lines.push('');
+    for (const t of diff.triggersOnlyInSource) {
+      lines.push(`- 🆕 \`${t.name}\` on \`${t.table}\` *(only in source)*`);
+    }
+    for (const t of diff.triggersOnlyInTarget) {
+      lines.push(`- 🗑️ \`${t.name}\` on \`${t.table}\` *(only in target)*`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+  lines.push(`*Generated by [Firebird Studio](https://marketplace.visualstudio.com/items?itemName=AdrianMariusPopa.vscode-firebird-studio) — ${ts}*`);
+  lines.push('');
+
+  return lines.join('\n');
+}

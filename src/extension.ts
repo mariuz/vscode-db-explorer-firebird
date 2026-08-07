@@ -38,7 +38,7 @@ import {
 } from "./shared/quick-queries";
 import {SqlLinter} from "./shared/sql-linter";
 import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
-import {fetchSchemaSnapshot, diffSchemas, renderDiffReport} from "./schema-diff/schema-diff";
+import {fetchSchemaSnapshot, diffSchemas, renderDiffReport, renderDiffMarkdown} from "./schema-diff/schema-diff";
 import {QueryHistoryProvider, QueryHistoryItem} from "./query-history/query-history-provider";
 import {TaskTracker} from "./task-panel/task-tracker";
 import {registerCopilotChatParticipant} from "./copilot/copilot-chat-participant";
@@ -2014,6 +2014,80 @@ export function activate(context: ExtensionContext) {
       } catch (err: any) {
         logger.error(err?.message ?? err);
         logger.showError("Schema Diff failed. Check logs for details.", ["Show Logs"]).then(sel => {
+          if (sel === "Show Logs") { logger.showOutput(); }
+        });
+      }
+    })
+  );
+
+  /* COMMAND: schema diff — Markdown Preview (renders diff as a rich GFM document opened in VS Code's
+     built-in Markdown preview). Uses a virtual-document TextDocumentContentProvider so no temp
+     file is written to disk and the document auto-updates when the user re-runs the command. */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.schemaDiff.markdownPreview", async () => {
+      const connections = context.globalState.get<{ [key: string]: import('./interfaces').ConnectionOptions }>(Constants.ConectionsKey);
+      if (!connections || Object.keys(connections).length < 1) {
+        logger.showError("Please add at least one database connection to use Schema Diff Markdown Preview.");
+        return;
+      }
+
+      const allConns = Object.values(connections);
+      const items = allConns.map(c => ({
+        label: c.embedded ? `[embedded] ${c.database}` : `${c.host}: ${c.database}`,
+        detail: c.id,
+        conn: c,
+      }));
+
+      const sourcePick = await window.showQuickPick(items, { placeHolder: "Select SOURCE database (the schema you want to compare FROM)" });
+      if (!sourcePick) { return; }
+
+      const targetItems = items.filter(i => i.detail !== sourcePick.detail);
+      if (targetItems.length === 0) {
+        // Single connection: compare the live database to itself — useful to confirm it matches
+        // a project, but degenerate for a diff. Show a helpful message instead.
+        logger.showError("You need at least two database connections to compare schemas.");
+        return;
+      }
+      const targetPick = await window.showQuickPick(targetItems, { placeHolder: "Select TARGET database (the schema you want to compare TO)" });
+      if (!targetPick) { return; }
+
+      const maxTables = config.maxTablesCount;
+
+      try {
+        await window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "Comparing schemas for Markdown preview…", cancellable: false },
+          async () => {
+            const [sourcePassword, targetPassword] = await Promise.all([
+              import('./shared/credential-store').then(m => m.CredentialStore.getPassword(sourcePick.conn.id)),
+              import('./shared/credential-store').then(m => m.CredentialStore.getPassword(targetPick.conn.id)),
+            ]);
+            const src = { ...sourcePick.conn, password: sourcePassword ?? "" };
+            const tgt = { ...targetPick.conn, password: targetPassword ?? "" };
+
+            const [sourceSnapshot, targetSnapshot] = await Promise.all([
+              fetchSchemaSnapshot(src, maxTables),
+              fetchSchemaSnapshot(tgt, maxTables),
+            ]);
+
+            const diff = diffSchemas(sourceSnapshot, targetSnapshot);
+            const markdown = renderDiffMarkdown(diff, sourcePick.label, targetPick.label);
+
+            // Open as a virtual markdown document and show the preview beside the current editor.
+            // workspace.openTextDocument({ content, language }) creates an untitled document — that
+            // works fine for the editor view, but markdown.showPreviewToSide requires a URI with a
+            // .md extension or the markdown languageId so VS Code knows which renderer to use.
+            // Using language:"markdown" on an untitled document satisfies both requirements.
+            const doc = await workspace.openTextDocument({ content: markdown, language: "markdown" });
+            // Show the raw source to give the user a way to copy or save it …
+            const editor = await window.showTextDocument(doc, vscode.ViewColumn.Beside, /* preserveFocus */ true);
+            void editor; // used only to ensure the doc is open before we show the preview
+            // … then immediately open the rendered Markdown preview beside that source.
+            await commands.executeCommand("markdown.showPreviewToSide", doc.uri);
+          }
+        );
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError("Schema Diff Markdown Preview failed. Check logs for details.", ["Show Logs"]).then(sel => {
           if (sel === "Show Logs") { logger.showOutput(); }
         });
       }

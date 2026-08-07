@@ -286,3 +286,226 @@ suite('Schema Diff – renderDiffReport', function () {
     assert.ok(trimmed.endsWith('='.repeat(70)), 'Report should end with === separator');
   });
 });
+
+// ── renderDiffMarkdown ────────────────────────────────────────────────────────
+
+import { renderDiffMarkdown, SchemaDiffResult } from '../schema-diff/schema-diff';
+
+/** Fixed timestamp for deterministic snapshot tests. */
+const FIXED_DATE = new Date('2025-01-15T10:30:00.000Z');
+
+function emptyDiff(): SchemaDiffResult {
+  return {
+    tablesOnlyInSource: [],
+    tablesOnlyInTarget: [],
+    modifiedTables: [],
+    viewsOnlyInSource: [],
+    viewsOnlyInTarget: [],
+    proceduresOnlyInSource: [],
+    proceduresOnlyInTarget: [],
+    triggersOnlyInSource: [],
+    triggersOnlyInTarget: [],
+  };
+}
+
+suite('Schema Diff – renderDiffMarkdown', function () {
+
+  test('identical schemas produce a short "no differences" document', function () {
+    const md = renderDiffMarkdown(emptyDiff(), 'DB_A', 'DB_B', FIXED_DATE);
+    assert.ok(md.includes('✅'), 'Should contain the ✅ emoji for identical schemas');
+    assert.ok(md.includes('no differences'), 'Should say no differences');
+    assert.ok(!md.includes('## Summary'), 'Should not emit a Summary table when schemas are identical');
+  });
+
+  test('document always begins with the h1 heading', function () {
+    const md = renderDiffMarkdown(emptyDiff(), 'SRC', 'TGT', FIXED_DATE);
+    assert.ok(md.startsWith('# 🔍 Firebird Schema Diff'), 'Should start with the h1 heading');
+  });
+
+  test('source and target labels appear in the document', function () {
+    const md = renderDiffMarkdown(emptyDiff(), 'production-db', 'staging-db', FIXED_DATE);
+    assert.ok(md.includes('production-db'), 'Source label should appear');
+    assert.ok(md.includes('staging-db'), 'Target label should appear');
+  });
+
+  test('generated timestamp is rendered in the document', function () {
+    const md = renderDiffMarkdown(emptyDiff(), 'A', 'B', FIXED_DATE);
+    // The fixed date is 2025-01-15T10:30:00.000Z; rendered as "2025-01-15 10:30:00 UTC"
+    assert.ok(md.includes('2025-01-15'), 'Timestamp date should appear');
+    assert.ok(md.includes('10:30:00 UTC'), 'Timestamp time+tz should appear');
+  });
+
+  test('summary table includes counts for every category', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      tablesOnlyInSource: ['T1', 'T2'],
+      tablesOnlyInTarget: ['T3'],
+      modifiedTables: [{ name: 'T4', columnsOnlyInSource: [], columnsOnlyInTarget: [], modifiedColumns: [] }],
+      viewsOnlyInSource: ['V1'],
+      proceduresOnlyInTarget: ['P1', 'P2'],
+      triggersOnlyInSource: [{ name: 'TR1', table: 'T1', type: 1, inactive: false }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('## Summary'), 'Should have a Summary section');
+    // Table row: 2 added, 1 removed, 1 modified
+    assert.ok(md.includes('| Tables | 2 | 1 | 1 |'), 'Tables row should show correct counts');
+    // Views: 1 added
+    assert.ok(md.includes('| Views | 1 | 0'), 'Views row should show 1 added');
+    // Procedures: 2 removed
+    assert.ok(md.includes('| Procedures | 0 | 2'), 'Procedures row should show 2 removed');
+    // Triggers: 1 added
+    assert.ok(md.includes('| Triggers | 1 | 0'), 'Triggers row should show 1 added');
+  });
+
+  test('added table has 🆕 sigil', function () {
+    const diff: SchemaDiffResult = { ...emptyDiff(), tablesOnlyInSource: ['NEW_TABLE'] };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('🆕'), 'Should contain 🆕 emoji for added table');
+    assert.ok(md.includes('NEW_TABLE'), 'Table name should appear');
+    assert.ok(md.includes('only in source'), 'Should note it is only in source');
+  });
+
+  test('removed table has 🗑️ sigil', function () {
+    const diff: SchemaDiffResult = { ...emptyDiff(), tablesOnlyInTarget: ['OLD_TABLE'] };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('🗑️'), 'Should contain 🗑️ emoji for removed table');
+    assert.ok(md.includes('OLD_TABLE'), 'Table name should appear');
+    assert.ok(md.includes('only in target'), 'Should note it is only in target');
+  });
+
+  test('modified table shows ✏️ sigil and column change count', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'CUSTOMERS',
+        columnsOnlyInSource: [col('EMAIL')],
+        columnsOnlyInTarget: [col('PHONE')],
+        modifiedColumns: [{ source: col('NAME', 'VARCHAR', 100), target: col('NAME', 'VARCHAR', 200) }],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('✏️'), 'Should contain ✏️ emoji for modified table');
+    assert.ok(md.includes('CUSTOMERS'), 'Modified table name should appear');
+    // 3 column changes total
+    assert.ok(md.includes('3 column changes'), 'Should report 3 column changes');
+  });
+
+  test('column change table is wrapped in a GFM details block', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'T',
+        columnsOnlyInSource: [col('C1')],
+        columnsOnlyInTarget: [],
+        modifiedColumns: [],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('<details'), 'Should use a GFM details block');
+    assert.ok(md.includes('</details>'), 'Details block should be closed');
+    assert.ok(md.includes('<summary>Column changes</summary>'), 'Details should have a summary');
+  });
+
+  test('column added row uses 🆕 sigil and correct data', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'T',
+        columnsOnlyInSource: [col('NEW_COL', 'INTEGER', 0, true)],
+        columnsOnlyInTarget: [],
+        modifiedColumns: [],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('🆕 Added'), 'Column added row should have 🆕 Added');
+    assert.ok(md.includes('NEW_COL'), 'Column name should appear');
+    assert.ok(md.includes('YES'), 'NOT NULL should be shown as YES');
+  });
+
+  test('column removed row uses 🗑️ sigil', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'T',
+        columnsOnlyInSource: [],
+        columnsOnlyInTarget: [col('GONE_COL')],
+        modifiedColumns: [],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('🗑️ Removed'), 'Column removed row should have 🗑️ Removed');
+    assert.ok(md.includes('GONE_COL'), 'Column name should appear');
+  });
+
+  test('modified column shows source → target for type, length and nullability', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'T',
+        columnsOnlyInSource: [],
+        columnsOnlyInTarget: [],
+        modifiedColumns: [{
+          source: col('AMOUNT', 'NUMERIC', 10, false),
+          target: col('AMOUNT', 'DECIMAL', 15, true),
+        }],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('✏️ Modified'), 'Modified column row should have ✏️ Modified');
+    assert.ok(md.includes('AMOUNT'), 'Column name should appear');
+    assert.ok(md.includes('NUMERIC → DECIMAL'), 'Type change should be shown as arrow');
+    assert.ok(md.includes('10 → 15'), 'Length change should be shown');
+    assert.ok(md.includes('no → YES'), 'Nullability change should be shown');
+  });
+
+  test('views section is omitted when there are no view differences', function () {
+    const md = renderDiffMarkdown(emptyDiff(), 'A', 'B', FIXED_DATE);
+    assert.ok(!md.includes('## Views'), 'Views section should be absent when no view changes');
+  });
+
+  test('views section lists added and removed views with correct sigils', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      viewsOnlyInSource: ['V_NEW'],
+      viewsOnlyInTarget: ['V_OLD'],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('## Views'), 'Views section should be present');
+    assert.ok(md.includes('V_NEW'), 'Added view should be listed');
+    assert.ok(md.includes('V_OLD'), 'Removed view should be listed');
+  });
+
+  test('triggers section lists name and table', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      triggersOnlyInSource: [{ name: 'TR_INSERT', table: 'ORDERS', type: 1, inactive: false }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('## Triggers'), 'Triggers section should be present');
+    assert.ok(md.includes('TR_INSERT'), 'Trigger name should appear');
+    assert.ok(md.includes('ORDERS'), 'Trigger table should appear');
+  });
+
+  test('footer contains a Firebird Studio attribution link', function () {
+    const diff: SchemaDiffResult = { ...emptyDiff(), viewsOnlyInSource: ['V'] };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('Firebird Studio'), 'Footer should attribute to Firebird Studio');
+    assert.ok(md.includes('marketplace.visualstudio.com'), 'Footer should link to the marketplace');
+  });
+
+  test('singular "column change" (not plural) when exactly one change exists', function () {
+    const diff: SchemaDiffResult = {
+      ...emptyDiff(),
+      modifiedTables: [{
+        name: 'T',
+        columnsOnlyInSource: [col('C')],
+        columnsOnlyInTarget: [],
+        modifiedColumns: [],
+      }],
+    };
+    const md = renderDiffMarkdown(diff, 'A', 'B', FIXED_DATE);
+    assert.ok(md.includes('1 column change'), 'Should use singular form');
+    assert.ok(!md.includes('1 column changes'), 'Should NOT use plural form for singular');
+  });
+});
+

@@ -81,7 +81,7 @@ suite('Extension Host – roadmap feature commands', function () {
     // First and last slot plus the bookmark binding — the loop that registers them is numeric, so
     // checking both ends catches an off-by-one in QUICK_QUERY_SLOT_COUNT as well as a broken loop.
     'quick-queries.md': ['firebird.quickQuery.1', 'firebird.quickQuery.9', 'firebird.bookmarks.assignSlot'],
-    'schema-diff-migration-script.md': ['firebird.schemaDiff.generateMigrationScript'],
+    'schema-diff-migration-script.md': ['firebird.schemaDiff.generateMigrationScript', 'firebird.schemaDiff.markdownPreview'],
     'sql-notebooks.md': ['firebird.notebook.new'],
     'ssh-tunneling.md': ['firebird.database.setSshTunnelPassword'],
     'visual-schema-designer.md': ['firebird.schemaVisualizer.open', 'firebird.table.createTable', 'firebird.table.alterTable'],
