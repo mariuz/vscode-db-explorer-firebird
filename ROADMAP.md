@@ -103,7 +103,7 @@ The following features are adapted from Microsoft's [vscode-mssql](https://githu
 - [x] Object Search — fuzzy search for any object (table/view/procedure/trigger/etc.) by name across a connection
 - [x] Local Firebird container **creation** — provision a new Dockerized Firebird server from the extension, extending today's detect-existing-containers support
 - [x] Connection dialog: color-coded connection groups, and paste a full connection string to prefill fields
-- [ ] A default connection, and a recent-connections list — mssql has `mssql.defaultConnectionId` and `mssql.maxRecentConnections`; this extension has neither. Nothing connects on startup, so every session begins by picking a connection from a list ordered by neither recency nor preference. The workspace half is already half-built and is the argument the rest of it works: `.vscode/firebird.json` entries already honour `"default": true` (`isDefault` in `ConnectionOptions`), so the concept exists for folder-scoped connections and simply has no equivalent for the saved ones in `globalState`
+- [x] A default connection, and a recent-connections list — mssql has `mssql.defaultConnectionId` and `mssql.maxRecentConnections`; this extension has neither. Nothing connects on startup, so every session begins by picking a connection from a list ordered by neither recency nor preference. The workspace half is already half-built and is the argument the rest of it works: `.vscode/firebird.json` entries already honour `"default": true` (`isDefault` in `ConnectionOptions`), so the concept exists for folder-scoped connections and simply has no equivalent for the saved ones in `globalState`
 
 ### Onboarding & discoverability
 

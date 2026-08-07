@@ -15,7 +15,7 @@ export class FirebirdTreeDataProvider implements TreeDataProvider<FirebirdTree>,
   public _onDidChangeTreeData: EventEmitter<FirebirdTree | undefined> = new EventEmitter<FirebirdTree | undefined>();
   public readonly onDidChangeTreeData: Event<FirebirdTree | undefined> = this._onDidChangeTreeData.event;
 
-  private savedConnections: { [key: string]: ConnectionOptions } = {};
+  public savedConnections: { [key: string]: ConnectionOptions } = {};
 
   constructor(private context: ExtensionContext) {}
 

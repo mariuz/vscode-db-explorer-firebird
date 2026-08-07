@@ -156,6 +156,7 @@ export function activate(context: ExtensionContext) {
 
   /* initialise credential store with extension context for SecretStorage access */
   CredentialStore.setContext(context);
+  Global.context = context;
 
   /**
    * Drop stored passwords whose connection no longer exists.
@@ -191,14 +192,13 @@ export function activate(context: ExtensionContext) {
   const firebirdDatabaseWords = new KeywordsDb();
   const firebirdTreeDataProvider = new FirebirdTreeDataProvider(context);
 
-  /* Workspace-level connections (.vscode/firebird.json): auto-activate the one marked "default"
-     (or the only one, if there's exactly one and nothing else is active yet), and keep the tree
-     in sync whenever the file is created/edited/removed. */
-  void activateDefaultWorkspaceConnection();
+  /* Workspace-level or global-level connections: auto-activate the default one
+     and keep the tree in sync whenever the file is created/edited/removed. */
+  void activateDefaultConnection();
   context.subscriptions.push(
     workspace.onDidChangeWorkspaceFolders(() => {
       commands.executeCommand("firebird.explorer.refresh");
-      void activateDefaultWorkspaceConnection();
+      void activateDefaultConnection();
     })
   );
   const firebirdJsonWatcher = workspace.createFileSystemWatcher("**/.vscode/firebird.json");
@@ -215,15 +215,24 @@ export function activate(context: ExtensionContext) {
      rather than withheld. */
   context.subscriptions.push(
     workspace.onDidGrantWorkspaceTrust(() => {
-      void activateDefaultWorkspaceConnection();
+      void activateDefaultConnection();
       void commands.executeCommand("firebird.explorer.refresh");
     })
   );
 
-  async function activateDefaultWorkspaceConnection(): Promise<void> {
+  async function activateDefaultConnection(): Promise<void> {
     if (Global.activeConnection) { return; }
+    // 1. Try workspace default connection first
     const conns = await loadWorkspaceConnections();
-    const chosen = conns.find(c => c.isDefault) ?? (conns.length === 1 ? conns[0] : undefined);
+    let chosen = conns.find(c => c.isDefault) ?? (conns.length === 1 ? conns[0] : undefined);
+
+    // 2. Fall back to global saved default connection
+    if (!chosen) {
+      const saved = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey) ?? {};
+      const savedList = Object.keys(saved).map(id => ({ ...saved[id], id }));
+      chosen = savedList.find(c => c.isDefault);
+    }
+
     if (!chosen || Global.activeConnection) { return; }
     const password = await CredentialStore.getPassword(chosen.id);
     Global.activeConnection = { ...chosen, password: password ?? "" };
@@ -473,6 +482,12 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(
     commands.registerCommand("firebird.setActive", (databaseNode: NodeDatabase) => {
       databaseNode.setActive();
+    }),
+    commands.registerCommand("firebird.setDefaultConnection", (databaseNode: NodeDatabase) => {
+      databaseNode.setDefaultConnection(context, firebirdTreeDataProvider).catch(err => logger.error(err));
+    }),
+    commands.registerCommand("firebird.clearDefaultConnection", (databaseNode: NodeDatabase) => {
+      databaseNode.clearDefaultConnection(context, firebirdTreeDataProvider).catch(err => logger.error(err));
     })
   );
 

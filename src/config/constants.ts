@@ -7,6 +7,7 @@ export namespace Constants {
   export const Version: string = manifest.version;
   export const ConectionsKey: string = "firebird.connections";
   export const LastShownVersionKey: string = "firebird.lastShownVersion";
+  export const RecentConnectionsKey: string = "firebird.recentConnections";
 
   /* output channel */
   export const OutputChannel: string = DisplayName;

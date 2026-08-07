@@ -1,4 +1,4 @@
-import { StatusBarItem, StatusBarAlignment, ThemeColor, window, commands, ExtensionContext } from "vscode";
+import { StatusBarItem, StatusBarAlignment, ThemeColor, window, commands, ExtensionContext, workspace } from "vscode";
 import { ConnectionOptions } from "../interfaces";
 import { Constants } from "../config/constants";
 import { CredentialStore } from "./credential-store";
@@ -10,23 +10,35 @@ import { isConnectionLostError, isConnectionUnreachable, markConnectionUnreachab
 export class Global {
   private static _activeConnection: ConnectionOptions;
   private static firebirdStatusBarItem: StatusBarItem;
+  public static context: ExtensionContext;
 
   static get activeConnection(): ConnectionOptions {
     return this._activeConnection;
   }
 
   static set activeConnection(newActiveConnection: ConnectionOptions) {
-    if (!this._activeConnection) {
+    const isNew = !this._activeConnection || this._activeConnection.id !== newActiveConnection.id;
+    if (isNew) {
       this._activeConnection = newActiveConnection;
       this.updateStatusBarItems(newActiveConnection);
       logger.showInfo(this.getActiveDbNotifText(newActiveConnection));
-    } else {
-      if (this._activeConnection.id !== newActiveConnection.id) {
-        this._activeConnection = newActiveConnection;
-        this.updateStatusBarItems(newActiveConnection);
-        logger.showInfo(this.getActiveDbNotifText(newActiveConnection));
+      if (newActiveConnection.id) {
+        void this.addToRecent(newActiveConnection.id);
       }
     }
+  }
+
+  private static async addToRecent(id: string): Promise<void> {
+    if (!id || !this.context) { return; }
+    const key = Constants.RecentConnectionsKey;
+    let recent = this.context.globalState.get<string[]>(key, []);
+    recent = recent.filter(r => r !== id);
+    recent.unshift(id);
+    const maxRecent = workspace.getConfiguration("firebird").get<number>("maxRecentConnections", 5);
+    if (recent.length > maxRecent) {
+      recent = recent.slice(0, maxRecent);
+    }
+    await this.context.globalState.update(key, recent);
   }
 
   /**

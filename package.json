@@ -134,6 +134,16 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.setDefaultConnection",
+        "title": "Set Connection as Default",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.clearDefaultConnection",
+        "title": "Clear Default Connection",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.mockData",
         "title": "Generate Mock Data",
         "category": "Firebird"
@@ -868,6 +878,11 @@
           "default": 10,
           "description": "The maximum table count shown in the tree view. Use 0 to show all tables."
         },
+        "firebird.maxRecentConnections": {
+          "type": "integer",
+          "default": 5,
+          "description": "The maximum number of recent connections to display at the top of the connection picker."
+        },
         "firebird.recordsPerPage": {
           "type": "string",
           "enum": [
@@ -1067,57 +1082,67 @@
         },
         {
           "command": "firebird.showDatabaseInfo",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "first@0"
         },
         {
           "command": "firebird.setActive",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "first@1"
         },
         {
-          "command": "firebird.newQuery",
+          "command": "firebird.setDefaultConnection",
           "when": "view == firebird-explorer && viewItem == database",
+          "group": "first@1.5"
+        },
+        {
+          "command": "firebird.clearDefaultConnection",
+          "when": "view == firebird-explorer && viewItem == databaseDefault",
+          "group": "first@1.5"
+        },
+        {
+          "command": "firebird.newQuery",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "first@2"
         },
         {
           "command": "firebird.schemaVisualizer.open",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "first@4"
         },
         {
           "command": "firebird.terminal.connectIsql",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "first@5"
         },
         {
           "command": "firebird.removeDatabase",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@0"
         },
         {
           "command": "firebird.database.renameDatabase",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@1"
         },
         {
           "command": "firebird.database.editConnection",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@2"
         },
         {
           "command": "firebird.database.dropDatabase",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@3"
         },
         {
           "command": "firebird.schemaDiff",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@4"
         },
         {
           "command": "firebird.schemaDiff.generateMigrationScript",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@5"
         },
         {

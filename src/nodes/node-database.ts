@@ -72,10 +72,10 @@ export class NodeDatabase implements FirebirdTree {
     // cleared the moment a subsequent expand succeeds (see NodeCategoryFolder.getChildren()).
     const unreachable = isConnectionUnreachable(this.dbDetails.id);
     return {
-      label: getDatabaseFileName(this.dbDetails.database),
+      label: getDatabaseFileName(this.dbDetails.database) + (this.dbDetails.isDefault ? " ★" : ""),
       description: unreachable ? "⚠ connection lost" : undefined,
       collapsibleState: TreeItemCollapsibleState.Collapsed,
-      contextValue: "database",
+      contextValue: this.dbDetails.isDefault ? "databaseDefault" : "database",
       tooltip: (this.dbDetails.workspace
         ? `[DATABASE] ${this.dbDetails.database}\nFrom this workspace's .vscode/firebird.json`
         : `[DATABASE] ${this.dbDetails.database}`
@@ -459,6 +459,43 @@ export class NodeDatabase implements FirebirdTree {
     if (Global.activeConnection?.id === this.dbDetails.id) {
       Global.patchActiveConnection({ [field]: value });
     }
+  }
+
+  public async setDefaultConnection(context: ExtensionContext, firebirdTreeDataProvider: FirebirdTreeDataProvider): Promise<void> {
+    if (this.dbDetails.workspace) {
+      logger.showInfo("This connection comes from this workspace's .vscode/firebird.json — set it as default there instead.");
+      return;
+    }
+
+    const connections = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey) ?? {};
+    const id = this.dbDetails.id;
+    if (!connections[id]) { return; }
+
+    for (const key of Object.keys(connections)) {
+      connections[key].isDefault = (key === id);
+    }
+
+    await context.globalState.update(Constants.ConectionsKey, connections);
+    firebirdTreeDataProvider.savedConnections = connections;
+    firebirdTreeDataProvider.refresh();
+    logger.showInfo(`Connection '${getDatabaseFileName(this.dbDetails.database)}' set as default connection.`);
+  }
+
+  public async clearDefaultConnection(context: ExtensionContext, firebirdTreeDataProvider: FirebirdTreeDataProvider): Promise<void> {
+    if (this.dbDetails.workspace) {
+      return;
+    }
+
+    const connections = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey) ?? {};
+    const id = this.dbDetails.id;
+    if (!connections[id]) { return; }
+
+    connections[id].isDefault = false;
+
+    await context.globalState.update(Constants.ConectionsKey, connections);
+    firebirdTreeDataProvider.savedConnections = connections;
+    firebirdTreeDataProvider.refresh();
+    logger.showInfo(`Connection '${getDatabaseFileName(this.dbDetails.database)}' cleared from default connection.`);
   }
 
   /**

@@ -209,6 +209,12 @@ export const env = {
   openExternal: (_uri: any) => Promise.resolve(true),
 };
 
+// ── QuickPickItemKind ─────────────────────────────────────────────────────────
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
+}
+
 // ── CompletionItemKind ────────────────────────────────────────────────────────
 export enum CompletionItemKind {
   Text = 0,
