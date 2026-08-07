@@ -209,6 +209,45 @@ export function activate(context: ExtensionContext) {
     firebirdJsonWatcher.onDidDelete(() => commands.executeCommand("firebird.explorer.refresh"))
   );
 
+  /* Per-editor connection binding (firebird.newEditorConnectionBehavior):
+     When the user switches focus to a different .sql / .fbnb editor tab,
+     refresh the status bar so it shows that tab's own bound connection (or
+     the global fallback if the tab has never had one set).
+     When a document is closed, drop its per-editor connection slot so memory
+     doesn't grow unbounded across a long session. */
+  context.subscriptions.push(
+    window.onDidChangeActiveTextEditor(() => {
+      Global.refreshStatusBarForActiveEditor();
+
+      // newEditorConnectionBehavior: when opening a new sql file, apply the
+      // configured connection strategy if the editor has no binding yet.
+      const activeEditor = window.activeTextEditor;
+      if (!activeEditor) { return; }
+      const uri = activeEditor.document.uri.toString();
+      const lang = activeEditor.document.languageId;
+      if (lang !== "sql" && lang !== "firebird") { return; }
+      if (Global.hasEditorConnection(uri)) { return; }
+
+      const behavior = workspace.getConfiguration("firebird").get<string>("newEditorConnectionBehavior", "transferActive");
+      if (behavior === "none") {
+        Global.setEditorConnection(uri, null); // explicitly no connection
+      } else if (behavior === "defaultConnection") {
+        const defaultId = workspace.getConfiguration("firebird").get<string>("defaultConnectionId", "");
+        if (defaultId) {
+          Global.getConnectionById(defaultId).then(conn => {
+            if (conn) { Global.setEditorConnection(uri, conn); Global.refreshStatusBarForActiveEditor(); }
+          }).catch(() => { /* ignore */ });
+        }
+      } else {
+        // "transferActive": inherit whatever the global active connection is (no explicit binding
+        // needed — activeConnection getter falls through to _globalActiveConnection already).
+      }
+    }),
+    workspace.onDidCloseTextDocument(doc => {
+      Global.removeEditorConnection(doc.uri.toString());
+    })
+  );
+
   /* Workspace connections are withheld in an untrusted folder (see loadWorkspaceConnections()).
      Granting trust does not reload the window, so without this the tree would keep showing the
      folder's connections as absent until the user restarted — looking like the file was broken

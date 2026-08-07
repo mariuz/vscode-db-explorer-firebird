@@ -81,9 +81,18 @@ suite('connection-sharing – listConnections()', function () {
 });
 
 suite('connection-sharing – getActiveConnection()', function () {
-  // Runs first, deliberately, before any other test in this file sets Global.activeConnection —
-  // it's a private static with no reset hook, so this is the only reliable way to observe the
-  // "nothing active yet" state within this process.
+  // Reset both the global active connection and the editor-connections map before each test in
+  // this suite so that state leaked from listConnections() tests doesn't affect ordering-sensitive
+  // assertions.
+  suiteSetup(function () {
+    (Global as any)._globalActiveConnection = undefined;
+    (Global as any).editorConnections = new Map();
+  });
+  suiteTeardown(function () {
+    (Global as any)._globalActiveConnection = undefined;
+    (Global as any).editorConnections = new Map();
+  });
+
   test('returns undefined when nothing is active yet', function () {
     assert.strictEqual(getActiveConnection(), undefined);
   });

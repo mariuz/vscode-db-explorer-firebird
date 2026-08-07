@@ -29,6 +29,15 @@ export function forgetNotebookConnection(notebook: NotebookDocument): void {
   boundConnections.delete(notebook.uri.toString());
 }
 
+/**
+ * Synchronises an externally chosen connection into the notebook's bound-connections map so that
+ * the next cell execution uses the new connection without re-prompting.  Called by Global's
+ * `activeConnection` setter (lazily required to avoid a circular-import chain).
+ */
+export function syncNotebookConnection(notebookUri: string, conn: ConnectionOptions): void {
+  boundConnections.set(notebookUri, conn);
+}
+
 let executionOrder = 0;
 
 export function createSqlNotebookController(context: ExtensionContext): NotebookController {

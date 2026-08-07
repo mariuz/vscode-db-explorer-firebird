@@ -1,4 +1,5 @@
 import { StatusBarItem, StatusBarAlignment, ThemeColor, window, commands, ExtensionContext, workspace } from "vscode";
+import { loadWorkspaceConnections } from "./workspace-config";
 import { ConnectionOptions } from "../interfaces";
 import { Constants } from "../config/constants";
 import { CredentialStore } from "./credential-store";
@@ -8,23 +9,83 @@ import { themeColorIdFor } from "./connection-color";
 import { isConnectionLostError, isConnectionUnreachable, markConnectionUnreachable, markConnectionReachable } from "./connection-health";
 
 export class Global {
-  private static _activeConnection: ConnectionOptions;
+  private static _globalActiveConnection: ConnectionOptions | undefined;
+  private static editorConnections = new Map<string, ConnectionOptions | null>();
   private static firebirdStatusBarItem: StatusBarItem;
   public static context: ExtensionContext;
 
-  static get activeConnection(): ConnectionOptions {
-    return this._activeConnection;
+  public static getActiveUri(): string | undefined {
+    try {
+      const activeNotebook = (window as any).activeNotebookEditor;
+      if (activeNotebook && activeNotebook.notebookUri) {
+        return activeNotebook.notebookUri.toString();
+      }
+      const activeText = window.activeTextEditor;
+      if (activeText) {
+        if (activeText.document.uri.scheme === 'vscode-notebook-cell') {
+          const notebook = (workspace as any).notebookDocuments?.find((nb: any) =>
+            nb.getCells?.().some((cell: any) => cell.document.uri.toString() === activeText.document.uri.toString())
+          );
+          if (notebook && notebook.uri) {
+            return notebook.uri.toString();
+          }
+        }
+        return activeText.document.uri.toString();
+      }
+    } catch (e) {
+      // ignore
+    }
+    return undefined;
   }
 
-  static set activeConnection(newActiveConnection: ConnectionOptions) {
-    const isNew = !this._activeConnection || this._activeConnection.id !== newActiveConnection.id;
-    if (isNew) {
-      this._activeConnection = newActiveConnection;
-      this.updateStatusBarItems(newActiveConnection);
+  public static hasEditorConnection(uri: string): boolean {
+    return this.editorConnections.has(uri);
+  }
+
+  public static setEditorConnection(uri: string, conn: ConnectionOptions | null): void {
+    this.editorConnections.set(uri, conn);
+  }
+
+  public static removeEditorConnection(uri: string): void {
+    this.editorConnections.delete(uri);
+  }
+
+  static get activeConnection(): ConnectionOptions | undefined {
+    const activeUri = this.getActiveUri();
+    if (activeUri) {
+      if (this.editorConnections.has(activeUri)) {
+        const val = this.editorConnections.get(activeUri);
+        return val === null ? undefined : val;
+      }
+    }
+    return this._globalActiveConnection;
+  }
+
+  static set activeConnection(newActiveConnection: ConnectionOptions | undefined) {
+    const activeUri = this.getActiveUri();
+    if (activeUri && newActiveConnection) {
+      this.editorConnections.set(activeUri, newActiveConnection);
+      try {
+        const { syncNotebookConnection } = require("../sql-notebook/controller");
+        syncNotebookConnection(activeUri, newActiveConnection);
+      } catch (e) {
+        // ignore
+      }
+    }
+    const isNew = !this._globalActiveConnection || this._globalActiveConnection.id !== newActiveConnection?.id;
+    if (isNew && newActiveConnection) {
+      this._globalActiveConnection = newActiveConnection;
       logger.showInfo(this.getActiveDbNotifText(newActiveConnection));
       if (newActiveConnection.id) {
         void this.addToRecent(newActiveConnection.id);
       }
+    } else if (!newActiveConnection) {
+      this._globalActiveConnection = undefined;
+    }
+    if (newActiveConnection) {
+      this.updateStatusBarItems(newActiveConnection);
+    } else {
+      this.clearStatusBarItem();
     }
   }
 
@@ -41,25 +102,43 @@ export class Global {
     await this.context.globalState.update(key, recent);
   }
 
-  /**
-   * Patches fields (color, group, a renamed database path, ...) on the currently active
-   * connection in place and refreshes the status bar — distinct from the `activeConnection`
-   * setter above, which only reacts to the active connection's *identity* changing (a different
-   * `id`) and is a no-op for same-id field edits like these.
-   */
   public static patchActiveConnection(patch: Partial<ConnectionOptions>): void {
-    if (!this._activeConnection) { return; }
-    this._activeConnection = { ...this._activeConnection, ...patch };
-    this.updateStatusBarItems(this._activeConnection);
+    const active = this.activeConnection;
+    if (active) {
+      const updated = { ...active, ...patch };
+      const activeUri = this.getActiveUri();
+      if (activeUri) {
+        this.editorConnections.set(activeUri, updated);
+      }
+      if (this._globalActiveConnection?.id === active.id) {
+        this._globalActiveConnection = { ...this._globalActiveConnection, ...patch };
+      }
+      this.updateStatusBarItems(updated);
+    } else if (this._globalActiveConnection) {
+      this._globalActiveConnection = { ...this._globalActiveConnection, ...patch };
+      this.updateStatusBarItems(this._globalActiveConnection);
+    }
+  }
+
+  public static async getConnectionById(id: string): Promise<ConnectionOptions | undefined> {
+    if (!this.context) { return undefined; }
+    const connections = this.context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey) ?? {};
+    if (connections[id]) {
+      const conn = { ...connections[id] };
+      conn.password = (await CredentialStore.getPassword(id)) ?? "";
+      return conn;
+    }
+    const workspaceConnections = await loadWorkspaceConnections();
+    const workspaceFound = workspaceConnections.find(c => c.id === id);
+    if (workspaceFound) {
+      return { ...workspaceFound };
+    }
+    return undefined;
   }
 
   public static async setActiveConnectionById(context: ExtensionContext, id: string): Promise<void> {
-    const connections = context.globalState.get<{ [key: string]: ConnectionOptions }>(Constants.ConectionsKey);
-    if (!connections) { return; }
-    if (Object.keys(connections).indexOf(id) > -1) {
-      const conn = { ...connections[id] };
-      /* populate password from SecretStorage so queries work immediately */
-      conn.password = (await CredentialStore.getPassword(id)) ?? "";
+    const conn = await this.getConnectionById(id);
+    if (conn) {
       this.activeConnection = conn;
     }
   }
@@ -96,6 +175,29 @@ export class Global {
     this.firebirdStatusBarItem.command = "firebird.chooseActive";
   }
 
+  public static clearStatusBarItem(): void {
+    if (this.firebirdStatusBarItem) {
+      this.firebirdStatusBarItem.text = "FIREBIRD: No active database.";
+      this.firebirdStatusBarItem.tooltip = "Firebird: No active database. Click to set active database.";
+      this.firebirdStatusBarItem.color = undefined;
+      this.firebirdStatusBarItem.backgroundColor = undefined;
+      this.firebirdStatusBarItem.command = "firebird.chooseActive";
+    }
+  }
+
+  /**
+   * Called when the active text editor changes — refreshes the status bar to show whichever
+   * connection is bound to the newly focused editor (or the global fallback if none is bound).
+   */
+  public static refreshStatusBarForActiveEditor(): void {
+    const conn = this.activeConnection;
+    if (conn) {
+      this.updateStatusBarItems(conn);
+    } else {
+      this.clearStatusBarItem();
+    }
+  }
+
   /**
    * Single entry point for both the SQL-execution path (Driver.runQuery()/runBatch()) and the
    * tree-expansion path (NodeCategoryFolder.getChildren()) to report a query outcome for a given
@@ -113,8 +215,12 @@ export class Global {
       : markConnectionReachable(connectionId);
     if (!changed) { return; }
 
-    if (this._activeConnection?.id === connectionId) {
-      this.updateStatusBarItems(this._activeConnection);
+    if (this._globalActiveConnection?.id === connectionId) {
+      this.updateStatusBarItems(this._globalActiveConnection);
+    }
+    const current = this.activeConnection;
+    if (current?.id === connectionId) {
+      this.updateStatusBarItems(current);
     }
     commands.executeCommand("firebird.explorer.refresh");
   }

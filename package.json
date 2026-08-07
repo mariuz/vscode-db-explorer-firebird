@@ -883,6 +883,22 @@
           "default": 5,
           "description": "The maximum number of recent connections to display at the top of the connection picker."
         },
+        "firebird.newEditorConnectionBehavior": {
+          "type": "string",
+          "enum": ["none", "transferActive", "defaultConnection"],
+          "enumDescriptions": [
+            "New SQL editors open with no connection bound — you must pick one explicitly.",
+            "New SQL editors inherit the connection from the previously active editor (default, preserves existing behaviour).",
+            "New SQL editors automatically connect using the connection specified in firebird.defaultConnectionId."
+          ],
+          "default": "transferActive",
+          "markdownDescription": "Controls which connection a newly opened `.sql` editor gets. Mirrors `mssql.newEditorConnectionBehavior`."
+        },
+        "firebird.defaultConnectionId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The saved-connection ID to auto-apply when `#firebird.newEditorConnectionBehavior#` is set to `defaultConnection`. Copy the ID from the connection tree's right-click menu."
+        },
         "firebird.recordsPerPage": {
           "type": "string",
           "enum": [
