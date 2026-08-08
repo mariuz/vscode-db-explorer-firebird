@@ -578,6 +578,12 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.schemaDiff.knexMigration",
+        "title": "Generate Knex Migration...",
+        "icon": "$(file-code)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.schemaVisualizer.open",
         "title": "Visualize Schema",
         "category": "Firebird"
@@ -1171,6 +1177,11 @@
           "command": "firebird.schemaDiff.markdownPreview",
           "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@6"
+        },
+        {
+          "command": "firebird.schemaDiff.knexMigration",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
+          "group": "second@7"
         },
         {
           "command": "firebird.mockData",

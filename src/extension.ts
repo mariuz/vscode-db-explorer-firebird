@@ -39,6 +39,7 @@ import {
 import {SqlLinter} from "./shared/sql-linter";
 import {BookmarkProvider, BookmarkItem} from "./bookmarks/bookmark-provider";
 import {fetchSchemaSnapshot, diffSchemas, renderDiffReport, renderDiffMarkdown} from "./schema-diff/schema-diff";
+import {renderKnexMigration, knexMigrationTimestamp} from "./schema-diff/knex-migration";
 import {QueryHistoryProvider, QueryHistoryItem} from "./query-history/query-history-provider";
 import {TaskTracker} from "./task-panel/task-tracker";
 import {registerCopilotChatParticipant} from "./copilot/copilot-chat-participant";
@@ -2088,6 +2089,95 @@ export function activate(context: ExtensionContext) {
       } catch (err: any) {
         logger.error(err?.message ?? err);
         logger.showError("Schema Diff Markdown Preview failed. Check logs for details.", ["Show Logs"]).then(sel => {
+          if (sel === "Show Logs") { logger.showOutput(); }
+        });
+      }
+    })
+  );
+
+  /* COMMAND: generate a Knex migration file from two live connections */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.schemaDiff.knexMigration", async () => {
+      const { fetchProjectSnapshot } = await import("./database-projects");
+      const { diffProjects } = await import("./database-projects/publish-model");
+      const { CredentialStore } = await import("./shared/credential-store");
+
+      const connections = context.globalState.get<{ [key: string]: import('./interfaces').ConnectionOptions }>(Constants.ConectionsKey);
+      if (!connections || Object.keys(connections).length < 2) {
+        logger.showError("You need at least two saved connections to generate a Knex migration.");
+        return;
+      }
+
+      const items = Object.values(connections).map(c => ({
+        label: c.embedded ? `[embedded] ${c.database}` : `${c.host}: ${c.database}`,
+        detail: c.id,
+        conn: c,
+      }));
+
+      const sourcePick = await window.showQuickPick(items, { placeHolder: "Select SOURCE database (the schema to migrate FROM)" });
+      if (!sourcePick) { return; }
+
+      const targetItems = items.filter(i => i.detail !== sourcePick.detail);
+      const targetPick = await window.showQuickPick(targetItems, { placeHolder: "Select TARGET database (the schema to bring in line with source)" });
+      if (!targetPick) { return; }
+
+      const langPick = await window.showQuickPick(
+        [
+          { label: "JavaScript (.js)", description: "CommonJS — drop directly into migrations/", value: "js" as const },
+          { label: "TypeScript (.ts)", description: "Uses import type { Knex } — for TS-based Knex projects", value: "ts" as const },
+        ],
+        { placeHolder: "Output language" }
+      );
+      if (!langPick) { return; }
+
+      const includeDropsPick = await window.showQuickPick(
+        [
+          { label: "No", description: "Only additive/modifying changes (default, safer)" },
+          { label: "Yes", description: "Also DROP objects present in target but not in source — DESTRUCTIVE" },
+        ],
+        { placeHolder: "Include DROP statements for objects only in the target database?" }
+      );
+      if (!includeDropsPick) { return; }
+
+      try {
+        await window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "Generating Knex migration…", cancellable: false },
+          async () => {
+            const [sourcePassword, targetPassword] = await Promise.all([
+              CredentialStore.getPassword(sourcePick.conn.id),
+              CredentialStore.getPassword(targetPick.conn.id),
+            ]);
+            const src = { ...sourcePick.conn, password: sourcePassword ?? "" };
+            const tgt = { ...targetPick.conn, password: targetPassword ?? "" };
+
+            const [sourceSnapshot, targetSnapshot] = await Promise.all([
+              fetchProjectSnapshot(src),
+              fetchProjectSnapshot(tgt),
+            ]);
+
+            const diff = diffProjects(sourceSnapshot, targetSnapshot);
+            const now = new Date();
+            const migration = renderKnexMigration(diff, sourcePick.label, targetPick.label, {
+              includeDrops: includeDropsPick.label === "Yes",
+              language: langPick.value,
+              generatedAt: now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC'),
+            });
+
+            const lang = langPick.value === "ts" ? "typescript" : "javascript";
+            const doc = await workspace.openTextDocument({ content: migration, language: lang });
+            await window.showTextDocument(doc, vscode.ViewColumn.Beside);
+
+            const ts = knexMigrationTimestamp(now);
+            logger.showInfo(
+              `Knex migration generated: ${sourcePick.label} → ${targetPick.label}. ` +
+              `Save as migrations/${ts}_firebird_migration.${langPick.value} in your project. ` +
+              `Review it carefully before running knex migrate:latest.`
+            );
+          }
+        );
+      } catch (err: any) {
+        logger.error(err?.message ?? err);
+        logger.showError("Knex migration generation failed. Check logs for details.", ["Show Logs"]).then(sel => {
           if (sel === "Show Logs") { logger.showOutput(); }
         });
       }
