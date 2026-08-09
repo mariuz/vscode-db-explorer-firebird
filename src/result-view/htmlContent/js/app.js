@@ -396,13 +396,13 @@ $(() => {
     // Same disclosure as the batch view: a trimmed result must say so rather than look complete.
     const note = truncationNote(data.truncatedFrom, (data.tableBody || []).length, data.moreRows);
     if (note) { $target.append($("<div>").addClass("result-message").text(note)); }
-    buildEditableTable($target, "query-results", data.tableHeader, data.tableBody, data.recordsPerPage, data.editableTable, undefined, data.paging);
+    buildEditableTable($target, "query-results", data.tableHeader, data.tableBody, data.recordsPerPage, data.editableTable, undefined, data.paging, data.autoEdit);
     $("body").addClass("loaded");
   }
 
   // ── Editable result table (shared by both single and batch views) ────────
 
-  function buildEditableTable($container, tableId, headers, tableBody, recordsPerPage, editableTable, sql, paging) {
+  function buildEditableTable($container, tableId, headers, tableBody, recordsPerPage, editableTable, sql, paging, autoEdit) {
     const $wrapper = $("<div>").addClass("container batch-table-wrapper");
 
     const $editToolbar = $("<div>").addClass("edit-toolbar");
@@ -1039,6 +1039,7 @@ $(() => {
       copyIn: () => $copyInClause.trigger("click"),
     };
     if (!activeTableId) { activeTableId = tableId; }
+    if (autoEdit) { $toggleEdit.trigger("click"); }
   }
 
   // ── Shared helpers ────────────────────────────────────────────────────────

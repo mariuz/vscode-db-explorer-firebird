@@ -57,6 +57,7 @@ import {runQuery, runWriteQuery} from "./connection-sharing/run-query";
 import {editConnectionSharingPermissions} from "./connection-sharing/permissions";
 import {runBuildProject, runPublishProject, runGenerateMigrationScript} from "./database-projects";
 import {runContainerProvisionWizard} from "./container-provisioning";
+import {runObjectSearch} from "./object-search";
 
 /**
  * Inline input-box validation for names the user is *creating* (a new index, a new column, ...).
@@ -1223,6 +1224,30 @@ export function activate(context: ExtensionContext) {
           probedForMore: true,
         });
       });
+    })
+  );
+
+  /* COMMAND table node: edit data in interactive grid */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.table.editData", (tableNode: NodeTable) => {
+      tableNode.selectAllRecords().then(result => {
+        firebirdQueryResults.displayEditable(result, config.recordsPerPage, tableNode.getTableName(), {
+          sql: tableNode.getSelectAllSql(),
+          probedForMore: true,
+        });
+      });
+    })
+  );
+
+  /* COMMAND global object search */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.globalSearch", async (databaseNode?: NodeDatabase) => {
+      const activeConn = databaseNode?.dbDetails ?? getActiveConnection();
+      if (!activeConn) {
+        vscode.window.showErrorMessage("No active Firebird connection selected. Connect to a database or select a database node in Object Explorer.");
+        return;
+      }
+      await runObjectSearch(activeConn, firebirdQueryResults);
     })
   );
 

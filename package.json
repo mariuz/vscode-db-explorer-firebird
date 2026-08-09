@@ -301,6 +301,18 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.table.editData",
+        "title": "Edit Data",
+        "icon": "$(edit)",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.globalSearch",
+        "title": "Global Object Search...",
+        "icon": "$(search)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.table.dropTable",
         "title": "Drop Table",
         "category": "Firebird"
@@ -1015,6 +1027,11 @@
         "key": "ctrl+alt+shift+e",
         "mac": "cmd+alt+shift+e",
         "when": "editorTextFocus && editorLangId == sql"
+      },
+      {
+        "command": "firebird.globalSearch",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o"
       }
     ],
     "menus": {
@@ -1184,19 +1201,29 @@
           "group": "second@7"
         },
         {
-          "command": "firebird.mockData",
+          "command": "firebird.globalSearch",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
+          "group": "second@8"
+        },
+        {
+          "command": "firebird.table.editData",
           "when": "view == firebird-explorer && viewItem == table",
           "group": "firebird@0"
         },
         {
-          "command": "firebird.showTableInfo",
+          "command": "firebird.mockData",
           "when": "view == firebird-explorer && viewItem == table",
           "group": "firebird@1"
         },
         {
-          "command": "firebird.selectAllRecords",
+          "command": "firebird.showTableInfo",
           "when": "view == firebird-explorer && viewItem == table",
           "group": "firebird@2"
+        },
+        {
+          "command": "firebird.selectAllRecords",
+          "when": "view == firebird-explorer && viewItem == table",
+          "group": "firebird@3"
         },
         {
           "command": "firebird.table.dropTable",

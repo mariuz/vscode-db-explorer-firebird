@@ -131,6 +131,11 @@ export default class ResultView extends QueryResultsView implements Disposable {
   /** Whether a failed statement's line can be clicked back to its source — see {@link displayBatch}. */
   private revealable = false;
   private recordsPerPage!: string;
+  /**
+   * When true the webview will automatically enable edit mode as soon as the data loads.
+   * Set by {@link displayEditable} (the "Edit Data" entry point); cleared on every other display().
+   */
+  private autoEdit = false;
   /** Keyed by statement SQL text, so switching back to an already-viewed "Query Plan" tab (or
    *  another statement that happens to share identical SQL) doesn't re-fetch. Cleared on every
    *  new display()/displayBatch() — a fresh set of results means any cached plan is stale. */
@@ -176,9 +181,27 @@ export default class ResultView extends QueryResultsView implements Disposable {
     this.probedForMore = source?.probedForMore === true;
     this.batchResults = undefined;
     this.recordsPerPage = recordsPerPage;
+    this.autoEdit = false;
     this.planCache.clear();
     this.actualPlanCache.clear();
     this.show(join(this.extensionPath, "src", "result-view", "htmlContent", "index.html"));
+  }
+
+  /**
+   * Like {@link display}, but opens the grid with row-editing already enabled.
+   *
+   * Used by the "Edit Data" tree-context command (`firebird.table.editData`). The webview receives
+   * `autoEdit: true` in the `message` payload and simulates a click on the "Enable Editing" button
+   * as soon as the data renders, so the user lands in edit mode without an extra click.
+   */
+  displayEditable(
+    resultSet: any,
+    recordsPerPage: string,
+    tableName: string,
+    source?: { sql?: string; probedForMore?: boolean }
+  ) {
+    this.display(resultSet, recordsPerPage, tableName, source);
+    this.autoEdit = true;
   }
 
   /**
@@ -307,6 +330,7 @@ export default class ResultView extends QueryResultsView implements Disposable {
       data: {
         ...prepared,
         editableTable: this.resultTableName,
+        autoEdit: this.autoEdit,
         shortcuts,
         resultsFontSize,
         resultsFontFamily,
