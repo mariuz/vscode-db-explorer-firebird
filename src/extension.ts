@@ -29,6 +29,7 @@ import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamV
 import {formatSQL} from "./shared/sql-formatter";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
 import {showObjectProperties} from "./object-properties";
+import {showVisualBackupRestoreWizard} from "./backup-restore-wizard";
 import {probeGbak, probeIsql} from "./shared/executable-probe";
 import {
   applySelectedText,
@@ -1735,6 +1736,13 @@ export function activate(context: ExtensionContext) {
         return;
       }
       databaseNode.restoreDatabase(taskTracker, gbak).catch(err => logger.error(err));
+    })
+  );
+
+  /* DB: visual backup and restore wizard */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.visualBackupRestoreWizard", (databaseNode?: NodeDatabase) => {
+      showVisualBackupRestoreWizard(databaseNode, context, taskTracker);
     })
   );
 

@@ -276,6 +276,10 @@ export class NodeDatabase implements FirebirdTree {
     return this.filterRows(users, "users", u => u.USER_NAME).map<NodeUser>(user => new NodeUser(user.USER_NAME, this.dbDetails));
   }
 
+  public getDbDetails(): ConnectionOptions {
+    return this.dbDetails;
+  }
+
   //  run predefined sql query
   public async showDatabaseInfo() {
     logger.info("Custom query: Show Database Info");

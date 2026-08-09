@@ -188,7 +188,7 @@ Reviewed against [vscode-mssql](https://github.com/microsoft/vscode-mssql)'s act
 - [x] **GitHub Copilot Slash Commands for `@firebird`** — added named slash commands `/connect`, `/schema`, `/explain`, `/optimize`, `/mock` to the `@firebird` chat participant in Copilot Chat (`copilot-chat-participant.ts`).
 - [x] **SQL Notebooks — GA Polish** — IntelliSense autocompletion (`vscode-notebook-cell`) inside notebook cells, direct export of cell results to CSV, JSON, and Excel (.xlsx/TSV), and inline execution error reporting in output blocks.
 - [x] **Object Properties Side Panel** — inspect DDL source, column definitions, index details, constraints, and grants for any tree object in a dedicated side-panel webview (`firebird.objectProperties`, `src/object-properties/index.ts`).
-- [ ] **Visual Backup & Restore Wizard (`gbak`/`nbackup`)** — visual wizard dialog for database backups and restores with output options and live progress tracking.
+- [x] **Visual Backup & Restore Wizard (`gbak`/`nbackup`)** — visual wizard dialog for database backups and restores with custom options (transportable, metadata-only, statistics, garbage collection), live output streaming, and cancellation (`firebird.database.visualBackupRestoreWizard`, `src/backup-restore-wizard/index.ts`).
 
 ---
 
