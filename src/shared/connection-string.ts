@@ -80,21 +80,68 @@ export function parseConnectionString(input: string): Partial<ConnectionOptions>
   return result;
 }
 
+export type ConnectionStringFormat = 'url' | 'native' | 'jdbc' | 'node';
+
+export function buildFirebirdUrlString(options: ConnectionOptions): string {
+  if (options.embedded) {
+    const db = options.database.startsWith('/') ? options.database : `/${options.database}`;
+    return `firebird://${db}`;
+  }
+  const userPart = options.user ? `${encodeURIComponent(options.user)}@` : '';
+  const portPart = options.port ? `:${options.port}` : '';
+  const roleParam = options.role ? `?role=${encodeURIComponent(options.role)}` : '';
+  return `firebird://${userPart}${options.host}${portPart}/${options.database}${roleParam}`;
+}
+
+export function buildJdbcUrlString(options: ConnectionOptions): string {
+  if (options.embedded) {
+    return `jdbc:firebirdsql:embedded:${options.database}`;
+  }
+  const portPart = options.port ? `:${options.port}` : '';
+  const params: string[] = [];
+  if (options.user) { params.push(`user=${encodeURIComponent(options.user)}`); }
+  if (options.role) { params.push(`roleName=${encodeURIComponent(options.role)}`); }
+  const queryStr = params.length > 0 ? `?${params.join('&')}` : '';
+  return `jdbc:firebirdsql://${options.host}${portPart}/${options.database}${queryStr}`;
+}
+
+export function buildNodeFirebirdConfigString(options: ConnectionOptions): string {
+  const configObj: Record<string, any> = {
+    host: options.host || 'localhost',
+    port: options.port || 3050,
+    database: options.database,
+    user: options.user || 'SYSDBA',
+    password: '<password>',
+  };
+  if (options.role) {
+    configObj.role = options.role;
+  }
+  if (options.lowercase_keys) {
+    configObj.lowercase_keys = true;
+  }
+  return JSON.stringify(configObj, null, 2);
+}
+
 /**
- * "Copy Connection String" (docs/roadmap/connection-management-enhancements.md, phase 2). Not the
- * inverse of parseConnectionString() above — that firebird:// scheme requires a hostname and has
- * no representation for an embedded (local-file, no host) connection at all, which this needs to
- * handle too. Uses Firebird's own native DSN shape instead (`host/port:database`, or a bare
- * `database` path for embedded — the same shape `isql -c`/JDBC/ODBC connection strings use, minus
- * their own scheme prefixes), which every Firebird user already recognizes and which naturally
- * covers both cases without inventing a new format. Deliberately never includes the password
- * (matching this repo's "password never leaves SecretStorage casually" posture) — callers that
- * want a full one-line credential dump should not use this.
+ * "Copy Connection String" (docs/roadmap/connection-management-enhancements.md, phase 2).
+ * Supports Firebird URL (`firebird://`), native DSN (`host/port:database`), JDBC URL (`jdbc:firebirdsql://`),
+ * or node-firebird config object.
  */
-export function buildConnectionString(options: ConnectionOptions): string {
-  const dsn = options.embedded
-    ? options.database
-    : `${options.host}${options.port ? `/${options.port}` : ""}:${options.database}`;
-  const userLine = options.user ? `\n-- User: ${options.user}` : "";
-  return `${dsn}${userLine}\n-- Password not included; set it separately.`;
+export function buildConnectionString(options: ConnectionOptions, format: ConnectionStringFormat = 'native'): string {
+  switch (format) {
+    case 'url':
+      return buildFirebirdUrlString(options);
+    case 'jdbc':
+      return buildJdbcUrlString(options);
+    case 'node':
+      return buildNodeFirebirdConfigString(options);
+    case 'native':
+    default: {
+      const dsn = options.embedded
+        ? options.database
+        : `${options.host}${options.port ? `/${options.port}` : ""}:${options.database}`;
+      const userLine = options.user ? `\n-- User: ${options.user}` : "";
+      return `${dsn}${userLine}\n-- Password not included; set it separately.`;
+    }
+  }
 }

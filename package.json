@@ -1492,7 +1492,7 @@
         },
         {
           "command": "firebird.database.copyConnectionString",
-          "when": "view == firebird-explorer && viewItem == database",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "manage@8"
         },
         {

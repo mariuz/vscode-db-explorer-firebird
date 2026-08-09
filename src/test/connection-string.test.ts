@@ -126,4 +126,23 @@ suite('connection-string – buildConnectionString() (docs/roadmap/connection-ma
     const text = buildConnectionString(conn({}));
     assert.ok(text.includes('Password not included'), text);
   });
+
+  test('builds a Firebird URL format (firebird://)', function () {
+    const text = buildConnectionString(conn({ user: 'sysdba', host: 'db.example.com', port: 3050, database: 'sales' }), 'url');
+    assert.strictEqual(text, 'firebird://sysdba@db.example.com:3050/sales');
+  });
+
+  test('builds a JDBC URL format (jdbc:firebirdsql://)', function () {
+    const text = buildConnectionString(conn({ user: 'sysdba', host: 'localhost', port: 3050, database: 'test.fdb' }), 'jdbc');
+    assert.strictEqual(text, 'jdbc:firebirdsql://localhost:3050/test.fdb?user=sysdba');
+  });
+
+  test('builds a node-firebird JS config format', function () {
+    const text = buildConnectionString(conn({ user: 'SYSDBA', host: 'localhost', port: 3050, database: 'employee' }), 'node');
+    const parsed = JSON.parse(text);
+    assert.strictEqual(parsed.host, 'localhost');
+    assert.strictEqual(parsed.port, 3050);
+    assert.strictEqual(parsed.database, 'employee');
+    assert.strictEqual(parsed.user, 'SYSDBA');
+  });
 });

@@ -13,7 +13,7 @@ import {supportsSchemas} from "../shared/schema-support";
 import {logger} from "../logger/logger";
 import {getDatabaseFileName} from "../shared/utils";
 import {getObjectFilter, matchesObjectFilter} from "../shared/object-explorer-filter";
-import {buildConnectionString} from "../shared/connection-string";
+import {buildConnectionString, ConnectionStringFormat} from "../shared/connection-string";
 import {connectionWizard} from "../shared/connection-wizard";
 import {TaskTracker} from "../task-panel/task-tracker";
 import {buildBackupFlags, BackupFlagChoices, buildRestoreArgs, renderGbakCommand, RestoreFlagChoices, RestoreMode, RESTORE_PAGE_SIZES, buildParallelFlag, parseMaxParallelWorkers, buildMultiFileTargets, isValidVolumeSize} from "../shared/gbak-options";
@@ -743,9 +743,45 @@ export class NodeDatabase implements FirebirdTree {
    * "Copy Connection String" (docs/roadmap/connection-management-enhancements.md, phase 2).
    * Never includes the password — see buildConnectionString()'s own doc comment for why.
    */
-  public async copyConnectionString(): Promise<void> {
-    await env.clipboard.writeText(buildConnectionString(this.dbDetails));
-    logger.showInfo("Connection string copied to clipboard (password not included).");
+  public async copyConnectionString(format?: ConnectionStringFormat): Promise<void> {
+    let chosenFormat: ConnectionStringFormat | undefined = format;
+    if (!chosenFormat) {
+      const items: (QuickPickItem & { format: ConnectionStringFormat })[] = [
+        {
+          label: "$(link) Firebird URL",
+          description: buildConnectionString(this.dbDetails, "url"),
+          detail: "firebird://user@host:port/database",
+          format: "url",
+        },
+        {
+          label: "$(terminal) Native DSN",
+          description: buildConnectionString(this.dbDetails, "native").split("\n")[0],
+          detail: "host/port:database (isql / DSQL format)",
+          format: "native",
+        },
+        {
+          label: "$(database) JDBC URL",
+          description: buildConnectionString(this.dbDetails, "jdbc"),
+          detail: "jdbc:firebirdsql://host:port/database",
+          format: "jdbc",
+        },
+        {
+          label: "$(json) node-firebird Config Object",
+          description: "JSON config snippet",
+          detail: "{ host, port, database, user }",
+          format: "node",
+        },
+      ];
+      const selected = await window.showQuickPick(items, {
+        title: `Copy Connection String (${getDatabaseFileName(this.dbDetails.database)})`,
+        placeHolder: "Select connection string format to copy to clipboard",
+      });
+      if (!selected) { return; }
+      chosenFormat = selected.format;
+    }
+    const text = buildConnectionString(this.dbDetails, chosenFormat);
+    await env.clipboard.writeText(text);
+    logger.showInfo(`Connection string (${chosenFormat}) copied to clipboard (password not included).`);
   }
 
   /**
