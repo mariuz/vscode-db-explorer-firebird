@@ -1583,6 +1583,12 @@ export function activate(context: ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    commands.registerCommand("firebird.database.performanceDashboard", async (databaseNode?: NodeDatabase) => {
+      return commands.executeCommand("firebird.database.monitorDatabase", databaseNode);
+    })
+  );
+
   /* DB: guided flat-file (CSV/TSV/JSON) import wizard */
   context.subscriptions.push(
     commands.registerCommand("firebird.database.importFlatFile", (databaseNode: NodeDatabase) => {

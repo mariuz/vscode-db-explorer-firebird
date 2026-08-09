@@ -313,6 +313,18 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.database.performanceDashboard",
+        "title": "Performance Dashboard (MON$)",
+        "icon": "$(pulse)",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.database.monitorDatabase",
+        "title": "Live Profiler",
+        "icon": "$(pulse)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.table.dropTable",
         "title": "Drop Table",
         "category": "Firebird"
@@ -1204,6 +1216,11 @@
           "command": "firebird.globalSearch",
           "when": "view == firebird-explorer && viewItem =~ /^database/",
           "group": "second@8"
+        },
+        {
+          "command": "firebird.database.performanceDashboard",
+          "when": "view == firebird-explorer && viewItem =~ /^database/",
+          "group": "second@9"
         },
         {
           "command": "firebird.table.editData",

@@ -180,6 +180,16 @@ Reviewed against [vscode-mssql](https://github.com/microsoft/vscode-mssql)'s act
 - [x] **Nightly VS Code Insiders run** of the extension-host suite — a 03:00 UTC `schedule` trigger tests against Insiders while pushes and pull requests keep testing stable, plus a `workflow_dispatch` input to pick either manually. A scheduled run cannot block a merge, which is the intent: it reports, it does not gate
 - [x] **Declare and test Workspace Trust** — now `{ supported: "limited" }`. It began as `supported: false` (an explicit, stated version of the behaviour a missing declaration already produced), which meant the extension did not load at all in an untrusted folder — hiding your own saved connections along with the folder's. It now loads, withholding only what the folder controls: its executable-path settings (`firebird.isqlPath`/`gbakPath`/`dockerPath`, ignored via `restrictedConfigurations` — lighter than machine scope, which would forbid a legitimate per-project `isql` even in a folder you trust) and its `.vscode/firebird.json` connections, since that file cannot carry a password and a malicious entry would instead prompt for one. Verified by manifest tests plus a Playwright spec that runs in a real Restricted Mode window — which only became possible once the extension loaded there at all
 
+## Next Round Roadmap (2026)
+
+- [x] **Performance Dashboard (`MON$` Visual Metrics)** — visual performance dashboard launched from a right-click on any active database connection. Uses Firebird's native `MON$` tables (`MON$STATEMENTS`, `MON$ATTACHMENTS`, `MON$RECORD_STATS`, `MON$TRANSACTIONS`) to chart active connections, CPU/IO load, slowest queries, and lock wait chains in real time (`firebird.database.performanceDashboard`).
+- [ ] **Schema-Aware "New Query"** — right-click a table or schema in Object Explorer → New Query opens a `.sql` editor pre-filled with `SELECT * FROM <table>` and bound to that connection.
+- [ ] **Copy Connection String** — right-click connection profile in Object Explorer → Copy Connection String puts the Firebird URL / JDBC / node-firebird config snippet on the clipboard.
+- [ ] **GitHub Copilot Slash Commands for `@firebird`** — add named slash commands `/connect`, `/schema`, `/explain`, `/optimize`, `/mock` to the `@firebird` chat participant.
+- [ ] **SQL Notebooks — GA Polish** — IntelliSense autocompletion inside notebook cells, direct export of cell results to CSV/JSON/Excel, inline error output formatting.
+- [ ] **Object Properties Side Panel** — inspect DDL source, column definitions, index details, constraints, grants, and row security for any tree object in a dedicated side-panel peek view.
+- [ ] **Visual Backup & Restore Wizard (`gbak`/`nbackup`)** — visual wizard dialog for database backups and restores with output options and live progress tracking.
+
 ---
 
 > **Note**: This roadmap is subject to change based on community feedback and contributions. Feature requests and suggestions are welcome via [GitHub Issues](https://github.com/mariuz/vscode-firebird-studio/issues).
