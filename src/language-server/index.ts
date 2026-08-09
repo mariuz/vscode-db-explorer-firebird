@@ -31,8 +31,12 @@ export default class LanguageServer implements Disposable {
         this.schemaHandler ? this.schemaHandler(doc) : Promise.resolve({} as Schema.Database),
     });
 
-    // enable completion for both saved and unsaved sql files
-    const documentSelector = [{ scheme: "file", language: "sql" }, { scheme: "untitled", language: "sql" }];
+    // enable completion, hover, symbols, definition for file, untitled, and notebook cells
+    const documentSelector = [
+      { scheme: "file", language: "sql" },
+      { scheme: "untitled", language: "sql" },
+      { scheme: "vscode-notebook-cell", language: "sql" },
+    ];
     this.subscriptions.push(languages.registerCompletionItemProvider(documentSelector, this.completionProvider, "*", "."));
     this.subscriptions.push(languages.registerHoverProvider(documentSelector, this.hoverProvider));
     // Needs no schema and no connection — pure text analysis over the statement splitter.

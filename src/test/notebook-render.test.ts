@@ -136,3 +136,17 @@ suite('notebook-render – rowsToResultTable()', function () {
     assert.strictEqual(table.truncated, true);
   });
 });
+
+suite('notebook-render – resultTableToExcel()', function () {
+  test('formats headers and rows as tab-separated values', function () {
+    const { resultTableToExcel } = require('../shared/notebook-render');
+    const excel = resultTableToExcel(['ID', 'NAME'], [['1', 'Alice'], ['2', 'Bob']]);
+    assert.strictEqual(excel, 'ID\tNAME\n1\tAlice\n2\tBob');
+  });
+
+  test('handles null values as empty string', function () {
+    const { resultTableToExcel } = require('../shared/notebook-render');
+    const excel = resultTableToExcel(['ID', 'NOTE'], [['1', null]]);
+    assert.strictEqual(excel, 'ID\tNOTE\n1\t');
+  });
+});

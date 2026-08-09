@@ -103,7 +103,11 @@ export function resultToOutputItems(result: BatchResult): NotebookCellOutputItem
     // it would only restate that the cell failed.
     const at = result.errorPosition;
     const prefix = at && (at.line > 1 || at.column > 1) ? `${describePosition(at)}: ` : "";
-    return [NotebookCellOutputItem.error(new Error(`${prefix}${result.error}`))];
+    const errorMsg = `${prefix}${result.error}`;
+    return [
+      NotebookCellOutputItem.error(new Error(errorMsg)),
+      NotebookCellOutputItem.text(`Error: ${errorMsg}`, "text/plain"),
+    ];
   }
   if (result.rows) {
     return [

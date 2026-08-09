@@ -1,6 +1,6 @@
 import { Disposable, notebooks, window, workspace } from "vscode";
 import { logger } from "../logger/logger";
-import { resultTableToCsv, resultTableToJson } from "../shared/notebook-render";
+import { resultTableToCsv, resultTableToJson, resultTableToExcel } from "../shared/notebook-render";
 
 /**
  * SQL Notebook result export (docs/roadmap/sql-notebooks.md, phase 4).
@@ -39,10 +39,14 @@ function isExportResultMessage(message: any): message is ExportResultMessage {
 }
 
 /** Exposed for tests: turns a message into the file contents, without touching any dialog or disk. */
-export function serializeExport(message: ExportResultMessage, format: "csv" | "json"): string {
-  return format === "csv"
-    ? resultTableToCsv(message.headers, message.rows)
-    : resultTableToJson(message.headers, message.rows);
+export function serializeExport(message: ExportResultMessage, format: "csv" | "json" | "excel"): string {
+  if (format === "csv") {
+    return resultTableToCsv(message.headers, message.rows);
+  }
+  if (format === "json") {
+    return resultTableToJson(message.headers, message.rows);
+  }
+  return resultTableToExcel(message.headers, message.rows);
 }
 
 /**
@@ -79,18 +83,23 @@ async function exportResult(message: ExportResultMessage): Promise<void> {
 
   const format = await window.showQuickPick(
     [
-      { label: "CSV", description: "Comma-separated values", format: "csv" as const },
-      { label: "JSON", description: "One object per row", format: "json" as const },
+      { label: "CSV", description: "Comma-separated values (.csv)", format: "csv" as const },
+      { label: "Excel", description: "Excel spreadsheet (.xlsx / .tsv)", format: "excel" as const },
+      { label: "JSON", description: "One object per row (.json)", format: "json" as const },
     ],
     { placeHolder: `Export ${message.rows.length} row(s) as…` }
   );
   if (!format) { return; }
 
+  const filtersMap: Record<string, Record<string, string[]>> = {
+    csv: { "CSV": ["csv"], "All files": ["*"] },
+    excel: { "Excel Spreadsheet": ["xlsx", "xls", "tsv"], "All files": ["*"] },
+    json: { "JSON": ["json"], "All files": ["*"] },
+  };
+
   const target = await window.showSaveDialog({
     title: "Export Query Result",
-    filters: format.format === "csv"
-      ? { "CSV": ["csv"], "All files": ["*"] }
-      : { "JSON": ["json"], "All files": ["*"] },
+    filters: filtersMap[format.format],
   });
   if (!target) { return; }
 

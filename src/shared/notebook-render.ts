@@ -111,6 +111,20 @@ export function resultTableToCsv(headers: string[], rows: (string | null)[][]): 
   return lines.join("\n");
 }
 
+export function excelCellValue(value: string | null): string {
+  if (value === null) {
+    return "";
+  }
+  const s = String(value);
+  return /["\t\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function resultTableToExcel(headers: string[], rows: (string | null)[][]): string {
+  const lines = [headers.map(excelCellValue).join("\t")];
+  rows.forEach(row => lines.push(row.map(excelCellValue).join("\t")));
+  return lines.join("\n");
+}
+
 export function resultTableToJson(headers: string[], rows: (string | null)[][]): string {
   return JSON.stringify(
     rows.map(row => {
