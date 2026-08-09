@@ -187,7 +187,7 @@ Reviewed against [vscode-mssql](https://github.com/microsoft/vscode-mssql)'s act
 - [x] **Copy Connection String** — right-click connection profile in Object Explorer → Copy Connection String copies the Firebird URL (`firebird://`), native DSN (`host/port:database`), JDBC URL (`jdbc:firebirdsql://`), or `node-firebird` config object straight to clipboard with an interactive format picker (`firebird.database.copyConnectionString`).
 - [x] **GitHub Copilot Slash Commands for `@firebird`** — added named slash commands `/connect`, `/schema`, `/explain`, `/optimize`, `/mock` to the `@firebird` chat participant in Copilot Chat (`copilot-chat-participant.ts`).
 - [x] **SQL Notebooks — GA Polish** — IntelliSense autocompletion (`vscode-notebook-cell`) inside notebook cells, direct export of cell results to CSV, JSON, and Excel (.xlsx/TSV), and inline execution error reporting in output blocks.
-- [ ] **Object Properties Side Panel** — inspect DDL source, column definitions, index details, constraints, grants, and row security for any tree object in a dedicated side-panel peek view.
+- [x] **Object Properties Side Panel** — inspect DDL source, column definitions, index details, constraints, and grants for any tree object in a dedicated side-panel webview (`firebird.objectProperties`, `src/object-properties/index.ts`).
 - [ ] **Visual Backup & Restore Wizard (`gbak`/`nbackup`)** — visual wizard dialog for database backups and restores with output options and live progress tracking.
 
 ---

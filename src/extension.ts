@@ -28,6 +28,7 @@ import {extractChangelogEntry, summarizeChangelogEntry} from "./shared/changelog
 import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue, ParamType} from "./shared/parameterized-query";
 import {formatSQL} from "./shared/sql-formatter";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
+import {showObjectProperties} from "./object-properties";
 import {probeGbak, probeIsql} from "./shared/executable-probe";
 import {
   applySelectedText,
@@ -1312,6 +1313,13 @@ export function activate(context: ExtensionContext) {
         if (details) { Global.activeConnection = details; }
         await Driver.createSQLTextDocument(`-- Schema: ${schemaNode.getSchemaName()}\nSET PATH ${schemaNode.getSchemaName()};\n\n`);
       }
+    })
+  );
+
+  /* COMMAND object properties side panel */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.objectProperties", async (node?: any) => {
+      await showObjectProperties(node, context);
     })
   );
 

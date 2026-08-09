@@ -343,6 +343,12 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.objectProperties",
+        "title": "Object Properties",
+        "icon": "$(info)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.table.dropTable",
         "title": "Drop Table",
         "category": "Firebird"
@@ -1264,6 +1270,11 @@
           "command": "firebird.table.newQuery",
           "when": "view == firebird-explorer && viewItem == table",
           "group": "firebird@4"
+        },
+        {
+          "command": "firebird.objectProperties",
+          "when": "view == firebird-explorer && (viewItem == table || viewItem == view || viewItem == procedure || viewItem == trigger || viewItem == generator || viewItem == domain || viewItem == role || viewItem == exception)",
+          "group": "firebird@1"
         },
         {
           "command": "firebird.view.newQuery",
