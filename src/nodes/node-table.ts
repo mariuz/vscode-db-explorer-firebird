@@ -40,6 +40,10 @@ export class NodeTable implements FirebirdTree {
     return this.table.trim();
   }
 
+  public getDbDetails(): ConnectionOptions {
+    return this.dbDetails;
+  }
+
   public getDragIdentifier(): string {
     return this.getTableName();
   }

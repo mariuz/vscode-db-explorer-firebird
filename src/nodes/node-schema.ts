@@ -28,6 +28,10 @@ export class NodeSchema implements FirebirdTree {
     return this.schemaName;
   }
 
+  public getDbDetails(): ConnectionOptions | undefined {
+    return this.dbDetails;
+  }
+
   public getTreeItem(_context: ExtensionContext): TreeItem {
     return {
       label: this.schemaName,

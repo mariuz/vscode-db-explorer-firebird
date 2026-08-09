@@ -30,6 +30,10 @@ export class NodeView implements FirebirdTree {
     return this.viewName.trim();
   }
 
+  public getDbDetails(): ConnectionOptions {
+    return this.dbDetails;
+  }
+
   public getDragIdentifier(): string {
     return this.getViewName();
   }

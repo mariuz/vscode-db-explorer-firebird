@@ -1239,6 +1239,16 @@ export function activate(context: ExtensionContext) {
     })
   );
 
+  /* COMMAND table node: new query pre-populated with table SELECT */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.table.newQuery", async (tableNode: NodeTable) => {
+      if (tableNode) {
+        Global.activeConnection = tableNode.getDbDetails();
+        await Driver.createSQLTextDocument(`SELECT * FROM ${tableNode.getTableName()};\n`);
+      }
+    })
+  );
+
   /* COMMAND global object search */
   context.subscriptions.push(
     commands.registerCommand("firebird.globalSearch", async (databaseNode?: NodeDatabase) => {
@@ -1281,6 +1291,27 @@ export function activate(context: ExtensionContext) {
           probedForMore: true,
         });
       });
+    })
+  );
+
+  /* COMMAND view node: new query pre-populated with view SELECT */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.view.newQuery", async (viewNode: NodeView) => {
+      if (viewNode) {
+        Global.activeConnection = viewNode.getDbDetails();
+        await Driver.createSQLTextDocument(`SELECT * FROM ${viewNode.getViewName()};\n`);
+      }
+    })
+  );
+
+  /* COMMAND schema node: new query pre-populated with schema search path */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.schema.newQuery", async (schemaNode: NodeSchema) => {
+      if (schemaNode) {
+        const details = schemaNode.getDbDetails();
+        if (details) { Global.activeConnection = details; }
+        await Driver.createSQLTextDocument(`-- Schema: ${schemaNode.getSchemaName()}\nSET PATH ${schemaNode.getSchemaName()};\n\n`);
+      }
     })
   );
 

@@ -1,5 +1,7 @@
 import * as assert from 'assert';
 import ResultView from '../result-view';
+import { NodeTable, NodeView, NodeSchema } from '../nodes';
+import { ConnectionOptions } from '../interfaces';
 
 suite('Edit Data & Global Search Integration', function () {
   test('ResultView displayEditable sets autoEdit to true in sent message', async function () {
@@ -46,5 +48,20 @@ suite('Edit Data & Global Search Integration', function () {
     assert.strictEqual(sentMessages.length, 1);
     assert.strictEqual(sentMessages[0].command, 'message');
     assert.strictEqual(sentMessages[0].data.autoEdit, false);
+  });
+
+  test('NodeTable, NodeView, and NodeSchema expose getDbDetails()', function () {
+    const conn: ConnectionOptions = {
+      id: 'conn-1', host: 'localhost', port: 3050, database: 'test.fdb', user: 'sysdba', role: null
+    };
+
+    const tableNode = new NodeTable(conn, 'CUSTOMERS');
+    assert.strictEqual(tableNode.getDbDetails(), conn);
+
+    const viewNode = new NodeView(conn, 'V_CUSTOMERS');
+    assert.strictEqual(viewNode.getDbDetails(), conn);
+
+    const schemaNode = new NodeSchema('SALES', () => [], conn);
+    assert.strictEqual(schemaNode.getDbDetails(), conn);
   });
 });

@@ -325,6 +325,24 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.table.newQuery",
+        "title": "New Query",
+        "icon": "$(new-file)",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.view.newQuery",
+        "title": "New Query",
+        "icon": "$(new-file)",
+        "category": "Firebird"
+      },
+      {
+        "command": "firebird.schema.newQuery",
+        "title": "New Query in Schema",
+        "icon": "$(new-file)",
+        "category": "Firebird"
+      },
+      {
         "command": "firebird.table.dropTable",
         "title": "Drop Table",
         "category": "Firebird"
@@ -1241,6 +1259,21 @@
           "command": "firebird.selectAllRecords",
           "when": "view == firebird-explorer && viewItem == table",
           "group": "firebird@3"
+        },
+        {
+          "command": "firebird.table.newQuery",
+          "when": "view == firebird-explorer && viewItem == table",
+          "group": "firebird@4"
+        },
+        {
+          "command": "firebird.view.newQuery",
+          "when": "view == firebird-explorer && viewItem == view",
+          "group": "firebird@2"
+        },
+        {
+          "command": "firebird.schema.newQuery",
+          "when": "view == firebird-explorer && viewItem == schema",
+          "group": "firebird@0"
         },
         {
           "command": "firebird.table.dropTable",
