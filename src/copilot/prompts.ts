@@ -123,3 +123,39 @@ export function buildAnalyzePlanMessages(
         ),
     ];
 }
+
+export function buildConnectMessages(target: string, schemaBlock: string): vscode.LanguageModelChatMessage[] {
+    return [
+        vscode.LanguageModelChatMessage.User(systemPrompt(schemaBlock)),
+        vscode.LanguageModelChatMessage.User(
+            `The user wants to connect or switch to the database '${target || "active"}'. ` +
+            'Provide guidance on connecting to this database in VS Code Firebird Studio, including host, port, alias/path, and user credentials. ' +
+            'If connection details are available in the schema context below, summarize them.\n\n' +
+            (target ? `Requested connection target: ${target}` : 'No target specified.')
+        ),
+    ];
+}
+
+export function buildSchemaPromptMessages(tableName: string, schemaBlock: string): vscode.LanguageModelChatMessage[] {
+    const target = tableName.trim() ? `for table '${tableName}'` : 'for the active database schema';
+    return [
+        vscode.LanguageModelChatMessage.User(systemPrompt(schemaBlock)),
+        vscode.LanguageModelChatMessage.User(
+            `Generate the complete DDL definition and ER representation ${target} in Firebird SQL format. ` +
+            'Include CREATE TABLE, PRIMARY KEY, FOREIGN KEY constraints, and INDEX definitions inside a fenced ```sql block, followed by a brief structural summary.' +
+            (tableName.trim() ? `\n\nTarget table: ${tableName.trim()}` : '')
+        ),
+    ];
+}
+
+export function buildMockMessages(tableName: string, schemaBlock: string): vscode.LanguageModelChatMessage[] {
+    const target = tableName.trim() || 'the target table';
+    return [
+        vscode.LanguageModelChatMessage.User(systemPrompt(schemaBlock)),
+        vscode.LanguageModelChatMessage.User(
+            `Generate realistic Firebird SQL INSERT INTO statements with mock data for ${target}. ` +
+            'Output 5 to 10 sample row INSERT statements wrapped in a fenced ```sql code block, adhering to appropriate Firebird data types and constraints.' +
+            (tableName.trim() ? `\n\nTarget table: ${tableName.trim()}` : '')
+        ),
+    ];
+}

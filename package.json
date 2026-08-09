@@ -1920,16 +1920,28 @@
         "isSticky": true,
         "commands": [
           {
-            "name": "query",
-            "description": "Generate Firebird SQL from a natural-language description"
+            "name": "connect",
+            "description": "Switch or connect to a saved Firebird database"
           },
           {
-            "name": "optimize",
-            "description": "Suggest optimizations for a SQL query"
+            "name": "schema",
+            "description": "Generate ER snippet or table DDL for a given table or schema"
           },
           {
             "name": "explain",
-            "description": "Explain what a SQL query does in plain English"
+            "description": "Analyze and explain SQL query execution plans"
+          },
+          {
+            "name": "optimize",
+            "description": "Suggest PSQL and index optimizations for SQL queries"
+          },
+          {
+            "name": "mock",
+            "description": "Generate mock data INSERT scripts for a table"
+          },
+          {
+            "name": "query",
+            "description": "Generate Firebird SQL from a natural-language description"
           },
           {
             "name": "designSchema",

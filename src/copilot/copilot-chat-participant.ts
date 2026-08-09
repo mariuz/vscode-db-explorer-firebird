@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { KeywordsDb } from '../language-server/db-words.provider';
 import { buildSchemaContext } from './schema-context';
-import { systemPrompt, buildOptimizeMessages, buildExplainMessages, buildMigrateMessages } from './prompts';
+import { systemPrompt, buildOptimizeMessages, buildExplainMessages, buildMigrateMessages, buildConnectMessages, buildSchemaPromptMessages, buildMockMessages } from './prompts';
 import { logger } from '../logger/logger';
 
 const PARTICIPANT_ID = 'firebird-db-explorer.firebird';
@@ -35,6 +35,12 @@ export function registerCopilotChatParticipant(
         }
 
         switch (request.command) {
+            case 'connect':
+                return handleConnect(request, schema, stream, token);
+            case 'schema':
+                return handleSchema(request, schema, stream, token);
+            case 'mock':
+                return handleMock(request, schema, stream, token);
             case 'query': {
                 const messages: vscode.LanguageModelChatMessage[] = [vscode.LanguageModelChatMessage.User(systemPrompt(schema))];
                 return handleQuery(request, messages, stream, token);
@@ -61,6 +67,48 @@ export function registerCopilotChatParticipant(
 
     context.subscriptions.push(participant);
     logger.info('Copilot chat participant @firebird registered.');
+}
+
+/* ------------------------------------------------------------------ */
+/*  /connect – switch or connect to a saved database                  */
+/* ------------------------------------------------------------------ */
+async function handleConnect(
+    request: vscode.ChatRequest,
+    schema: string,
+    stream: vscode.ChatResponseStream,
+    token: vscode.CancellationToken
+): Promise<vscode.ChatResult> {
+    stream.progress('Analyzing connection request…');
+    const messages = buildConnectMessages(request.prompt.trim(), schema);
+    return streamModelResponse(request, messages, stream, token);
+}
+
+/* ------------------------------------------------------------------ */
+/*  /schema <table> – generate ER snippet or table DDL                */
+/* ------------------------------------------------------------------ */
+async function handleSchema(
+    request: vscode.ChatRequest,
+    schema: string,
+    stream: vscode.ChatResponseStream,
+    token: vscode.CancellationToken
+): Promise<vscode.ChatResult> {
+    stream.progress('Generating DDL and schema definition…');
+    const messages = buildSchemaPromptMessages(request.prompt.trim(), schema);
+    return streamModelResponse(request, messages, stream, token);
+}
+
+/* ------------------------------------------------------------------ */
+/*  /mock <table> – generate mock data INSERT scripts                */
+/* ------------------------------------------------------------------ */
+async function handleMock(
+    request: vscode.ChatRequest,
+    schema: string,
+    stream: vscode.ChatResponseStream,
+    token: vscode.CancellationToken
+): Promise<vscode.ChatResult> {
+    stream.progress('Generating mock data INSERT script…');
+    const messages = buildMockMessages(request.prompt.trim(), schema);
+    return streamModelResponse(request, messages, stream, token);
 }
 
 /* ------------------------------------------------------------------ */
@@ -202,9 +250,12 @@ async function handleDefault(
     if (!request.prompt.trim()) {
         stream.markdown(
             'Hi! I\'m the **Firebird SQL** assistant. You can ask me anything about Firebird databases, or use one of the slash commands:\n\n' +
+            '- `/connect` — Switch or connect to a saved database\n' +
+            '- `/schema <table>` — Generate ER snippet or table DDL\n' +
+            '- `/explain` — Explain what a SQL query or execution plan does\n' +
+            '- `/optimize` — Suggest PSQL and index optimizations\n' +
+            '- `/mock <table>` — Generate mock data INSERT scripts\n' +
             '- `/query` — Generate SQL from a natural-language description\n' +
-            '- `/optimize` — Get optimization suggestions for a SQL query\n' +
-            '- `/explain` — Explain what a SQL query does\n' +
             '- `/designSchema` — Infer a Firebird table schema from sample data\n' +
             '- `/migrate` — Convert DDL from another database system to Firebird SQL\n'
         );
