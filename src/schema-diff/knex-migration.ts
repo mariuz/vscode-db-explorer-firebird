@@ -409,19 +409,22 @@ export function renderKnexMigration(
       if (diff.droppedTriggers.length > 0) {
         lines.push(...section('Drop triggers', indent));
         for (const t of diff.droppedTriggers) {
-          lines.push(...raw(`DROP TRIGGER ${t.name};`, indent));
+          const name = typeof t === "string" ? t : (t as any).name;
+          lines.push(...raw(`DROP TRIGGER ${name};`, indent));
         }
       }
       if (diff.droppedViews.length > 0) {
         lines.push(...section('Drop views', indent));
         for (const v of diff.droppedViews) {
-          lines.push(...raw(`DROP VIEW ${v.name};`, indent));
+          const name = typeof v === "string" ? v : (v as any).name;
+          lines.push(...raw(`DROP VIEW ${name};`, indent));
         }
       }
       if (diff.droppedProcedures.length > 0) {
         lines.push(...section('Drop stored procedures', indent));
         for (const p of diff.droppedProcedures) {
-          lines.push(...raw(`DROP PROCEDURE ${p.name};`, indent));
+          const name = typeof p === "string" ? p : (p as any).name;
+          lines.push(...raw(`DROP PROCEDURE ${name};`, indent));
         }
       }
       if (diff.droppedTables.length > 0) {

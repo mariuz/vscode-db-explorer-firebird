@@ -13,11 +13,11 @@ suite('Edit Data & Global Search Integration', function () {
         super(__dirname);
       }
       // Override send to capture payload
-      protected send(msg: any) {
+      public send(msg: any) {
         sentMessages.push(msg);
       }
       // Override show to avoid loading actual html file
-      protected show() {}
+      public show() {}
     })();
 
     // Call displayEditable

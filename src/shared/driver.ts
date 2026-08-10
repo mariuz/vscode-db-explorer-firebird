@@ -365,6 +365,9 @@ export class Driver {
     }
 
     connectionOptions = connectionOptions ? connectionOptions : Global.activeConnection;
+    if (!connectionOptions) {
+      return Promise.reject({ notify: true, message: "No active Firebird connection selected." });
+    }
     connectionOptions = await this.resolvePassword(connectionOptions);
 
     logger.info("Executing Firebird query...");
@@ -440,6 +443,9 @@ export class Driver {
       }
     }
     connectionOptions = connectionOptions ?? Global.activeConnection;
+    if (!connectionOptions) {
+      throw { notify: true, message: "No active Firebird connection selected." };
+    }
     connectionOptions = await this.resolvePassword(connectionOptions);
     return { sql, connectionOptions };
   }

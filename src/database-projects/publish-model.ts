@@ -55,13 +55,13 @@ export interface PublishDiff {
   droppedDomains: string[];
   newViews: ViewSource[];
   changedViews: ViewSource[];
-  droppedViews: string[];
+  droppedViews: (string | { name: string; source?: string })[];
   newProcedures: ProcedureSource[];
   changedProcedures: ProcedureSource[];
-  droppedProcedures: string[];
+  droppedProcedures: (string | { name: string; source?: string })[];
   newTriggers: TriggerSource[];
   changedTriggers: TriggerSource[];
-  droppedTriggers: string[];
+  droppedTriggers: (string | { name: string; source?: string })[];
   newGenerators: string[];
   droppedGenerators: string[];
   newExceptions: ExceptionSource[];

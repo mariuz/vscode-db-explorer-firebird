@@ -38,6 +38,8 @@ export interface ConnectionOptions {
   group?: string;
   /** Optional color tag for quick visual identification in the tree icon and status bar. */
   color?: ConnectionColor;
+  /** Lowercase column names in query results (node-firebird option). */
+  lowercase_keys?: boolean;
   /** Explicit opt-in: exposes this connection's schema (never its password) to the firebird.mcp MCP server, if enabled. Defaults to false/unset — an MCP client sees nothing unless a connection opts in. */
   mcpExposed?: boolean;
   /** Explicit, separate opt-in on top of mcpExposed: lets the MCP server's run_write_query tool run a single INSERT/UPDATE/DELETE against this connection, not just read it. Defaults to false/unset. Toggling mcpExposed off also clears this — see NodeDatabase.toggleMcpExposure(), so re-enabling exposure later never silently reactivates write access without its own confirmation. */
