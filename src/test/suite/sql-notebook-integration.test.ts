@@ -149,10 +149,42 @@ suite('SQL Notebooks – connection-binding persistence (extension host)', funct
       assert.deepStrictEqual(table, { headers: [], rows: [], truncated: false, totalRowCount: 0 });
     });
 
-    test('an error result produces a single error output item, no rich/markdown items', async function () {
+    // Two items, not one: the error item is what VS Code renders, and the text/plain item is an
+    // alternative representation of the same failure for anything that cannot render the error
+    // mime (Copy Cell Output, a plain-text export). They are alternatives within one output, so
+    // only one of them is ever shown -- this is not a duplicated message in the cell.
+    test('an error result produces an error output item plus a plain-text alternative, no rich/markdown items', async function () {
       const items = resultToOutputItems({ sql: 'bad sql', durationMs: 1, error: 'table not found' });
-      assert.strictEqual(items.length, 1);
+      assert.strictEqual(items.length, 2);
       assert.strictEqual(items[0].mime, 'application/vnd.code.notebook.error');
+      assert.strictEqual(items[1].mime, 'text/plain');
+      const parsed = JSON.parse(await itemText(items[0]));
+      assert.strictEqual(parsed.message, 'table not found');
+      assert.strictEqual(await itemText(items[1]), 'Error: table not found');
+    });
+
+    test('an error carrying a position inside the cell is headed with that position', async function () {
+      const items = resultToOutputItems({
+        sql: 'select 1;\nbad sql',
+        durationMs: 1,
+        error: 'Token unknown - line 2, column 5',
+        errorPosition: { line: 2, column: 5 },
+      });
+      assert.strictEqual(items.length, 2);
+      const parsed = JSON.parse(await itemText(items[0]));
+      assert.strictEqual(parsed.message, 'Line 2, column 5: Token unknown - line 2, column 5');
+      assert.strictEqual(await itemText(items[1]), 'Error: Line 2, column 5: Token unknown - line 2, column 5');
+    });
+
+    // The position is suppressed at the very start of the cell, where it would only restate that
+    // the cell failed -- so the message is the server's, unprefixed.
+    test('an error positioned at the start of the cell is not prefixed with a position', async function () {
+      const items = resultToOutputItems({
+        sql: 'bad sql',
+        durationMs: 1,
+        error: 'table not found',
+        errorPosition: { line: 1, column: 1 },
+      });
       const parsed = JSON.parse(await itemText(items[0]));
       assert.strictEqual(parsed.message, 'table not found');
     });
