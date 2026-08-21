@@ -11,6 +11,7 @@ import {
   buildViewCreateDDL, buildProcedureCreateDDL, buildTriggerCreateDDL,
   buildGeneratorCreateDDL, buildDomainCreateDDL, buildExceptionCreateDDL, buildRoleCreateDDL
 } from "../database-projects/project-model";
+import { normalizeDefault } from "../schema-designer/schema-graph";
 import { logger } from "../logger/logger";
 
 export interface ObjectPropertiesTarget {
@@ -68,7 +69,7 @@ export async function showObjectProperties(
   }
 }
 
-function resolveTarget(node: any): ObjectPropertiesTarget | undefined {
+export function resolveTarget(node: any): ObjectPropertiesTarget | undefined {
   if (!node) return undefined;
 
   // Table Node
@@ -139,7 +140,7 @@ function resolveTarget(node: any): ObjectPropertiesTarget | undefined {
   return undefined;
 }
 
-interface FetchedMetadata {
+export interface FetchedMetadata {
   columns: any[];
   privileges: any[];
   ddl: string;
@@ -219,20 +220,26 @@ async function fetchObjectMetadata(target: ObjectPropertiesTarget): Promise<Fetc
   return { columns, privileges, ddl, indexes };
 }
 
-function generateTableDDL(tableName: string, columns: any[]): string {
+export function generateTableDDL(tableName: string, columns: any[]): string {
   if (!columns || columns.length === 0) {
     return `CREATE TABLE ${tableName} (\n  -- No column metadata found\n);`;
   }
   const lines = columns.map(c => {
     const typeStr = `${c.FIELD_TYPE}${c.FIELD_LENGTH ? `(${c.FIELD_LENGTH})` : ""}`;
     const notNullStr = c.NOT_NULL ? " NOT NULL" : "";
-    const dfltStr = c.DFLT_VALUE ? ` DEFAULT ${c.DFLT_VALUE.trim()}` : "";
+    // RDB$DEFAULT_SOURCE -- which is what tableInfoQuery() selects as DFLT_VALUE -- already
+    // *includes* the DEFAULT keyword ("DEFAULT 0"), so prefixing another one produced
+    // `DEFAULT DEFAULT 0`: invalid DDL, shown in the DDL Source tab and handed out by Copy DDL.
+    // normalizeDefault() is the same helper script-as/ddl-builders.ts already applies to this
+    // exact column, and every other DDL builder in the codebase goes through it.
+    const dflt = normalizeDefault(c.DFLT_VALUE);
+    const dfltStr = dflt ? ` DEFAULT ${dflt}` : "";
     return `  ${c.FIELD_NAME} ${typeStr}${dfltStr}${notNullStr}`;
   });
   return `CREATE TABLE ${tableName} (\n${lines.join(",\n")}\n);`;
 }
 
-function getLoadingHtml(name: string, type: string): string {
+export function getLoadingHtml(name: string, type: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -243,12 +250,12 @@ function getLoadingHtml(name: string, type: string): string {
 </style>
 </head>
 <body>
-  <h2><span class="spinner"></span> Loading properties for ${name} (${type.toUpperCase()})...</h2>
+  <h2><span class="spinner"></span> Loading properties for ${escapeHtml(name)} (${escapeHtml(type).toUpperCase()})...</h2>
 </body>
 </html>`;
 }
 
-function getErrorHtml(name: string, error: string): string {
+export function getErrorHtml(name: string, error: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -258,13 +265,13 @@ function getErrorHtml(name: string, error: string): string {
 </style>
 </head>
 <body>
-  <h2>Object Properties: ${name}</h2>
-  <div class="error"><strong>Error loading metadata:</strong> ${error}</div>
+  <h2>Object Properties: ${escapeHtml(name)}</h2>
+  <div class="error"><strong>Error loading metadata:</strong> ${escapeHtml(error)}</div>
 </body>
 </html>`;
 }
 
-function buildPropertiesHtml(target: ObjectPropertiesTarget, data: FetchedMetadata): string {
+export function buildPropertiesHtml(target: ObjectPropertiesTarget, data: FetchedMetadata): string {
   const columnsRows = data.columns.map(c => `
     <tr>
       <td><strong>${escapeHtml(c.FIELD_NAME || "")}</strong></td>
@@ -404,7 +411,7 @@ function buildPropertiesHtml(target: ObjectPropertiesTarget, data: FetchedMetada
 </html>`;
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
