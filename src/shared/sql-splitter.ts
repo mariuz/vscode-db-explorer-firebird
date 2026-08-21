@@ -215,3 +215,43 @@ export function splitStatementsWithOffsets(sql: string): SqlStatementRange[] {
 export function splitStatements(sql: string): string[] {
   return splitStatementsWithOffsets(sql).map(statement => statement.text);
 }
+
+/** Where the text that produced no statements came from, which changes what to tell the user. */
+export type BatchTextOrigin = "selection" | "document" | "cell";
+
+const ORIGIN_NOUN: Record<BatchTextOrigin, string> = {
+  selection: "The selection",
+  document: "This file",
+  cell: "This cell",
+};
+
+/**
+ * Why splitting produced nothing, phrased for the user.
+ *
+ * Running an empty editor used to end at `runBatch()`'s `{ notify: false }` throw, which the
+ * command's catch reported as "Oops! Something went wrong. Check the log output for more details!"
+ * -- a message that describes a crash, offers a log to read, and is wrong on both counts: nothing
+ * went wrong, there was simply nothing to run. mssql closed the same gap in #22682 ("Notify when
+ * query text is empty").
+ *
+ * The three cases are distinguished because they need different answers. Comments specifically:
+ * the splitter drops them, so a file of nothing but `--` lines is indistinguishable from an empty
+ * one by statement count alone, while to the person looking at it the file is obviously not empty.
+ */
+export function describeEmptyBatch(text: string, origin: BatchTextOrigin = "document"): string {
+  const noun = ORIGIN_NOUN[origin];
+  if (!text.trim()) {
+    return `Nothing to run — ${noun.toLowerCase()} is empty.`;
+  }
+  // Strip what the splitter itself discards; whatever is left is what it saw.
+  const withoutComments = text
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n]*/g, " ");
+  if (!withoutComments.trim()) {
+    return `Nothing to run — ${noun.toLowerCase()} contains only comments.`;
+  }
+  if (!withoutComments.replace(/;/g, "").trim()) {
+    return `Nothing to run — ${noun.toLowerCase()} contains no statements, only semicolons.`;
+  }
+  return `Nothing to run — no complete SQL statement was found in ${noun.toLowerCase()}.`;
+}

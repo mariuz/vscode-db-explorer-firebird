@@ -42,7 +42,9 @@ export async function showObjectProperties(
       "firebirdObjectProperties",
       title,
       ViewColumn.Beside,
-      { enableScripts: true, retainContextWhenHidden: true }
+      // Ctrl+F: this panel is mostly a DDL listing and a grants table, which is exactly the
+      // kind of content someone searches rather than scrolls.
+      { enableScripts: true, retainContextWhenHidden: true, enableFindWidget: true }
     );
     currentPanel.onDidDispose(() => {
       currentPanel = undefined;

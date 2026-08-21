@@ -27,6 +27,7 @@ import * as path from 'node:path';
 import {extractChangelogEntry, summarizeChangelogEntry} from "./shared/changelog-notice";
 import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue, ParamType} from "./shared/parameterized-query";
 import {formatSQL} from "./shared/sql-formatter";
+import {describeEmptyBatch} from "./shared/sql-splitter";
 import {buildFormatOptions} from "./language-server/format-model";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
 import {showObjectProperties} from "./object-properties";
@@ -988,6 +989,15 @@ export function activate(context: ExtensionContext) {
       })
       .catch(error => {
         logger.error(error.message ?? error);
+        if (error.empty) {
+          // Not a failure: there was simply nothing to run. Reported as a warning rather than an
+          // error, and phrased for whichever of a selection or the whole file was actually empty
+          // — only this layer knows which, since the driver falls back to the active editor.
+          const editor = window.activeTextEditor;
+          const origin = editor && !editor.selection.isEmpty ? "selection" : "document";
+          logger.showWarn(describeEmptyBatch(error.sql ?? "", origin));
+          return;
+        }
         if (error.notify) {
           logger.showError(error.message, error.options || []).then(selected => {
             if (selected === "New SQL Document") {

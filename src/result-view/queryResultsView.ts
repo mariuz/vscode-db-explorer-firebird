@@ -27,6 +27,28 @@ export interface Message {
  * migrated. That is also why this class hosts *either* — everything below the `webview` accessor is
  * written against the `Webview` both hosts expose, and only the plumbing above it differs.
  */
+/**
+ * Panel options shared by every webview this base class hosts.
+ *
+ * `enableFindWidget` gives Ctrl+F inside the webview. VS Code has always had it; it simply
+ * defaults to false, so the reflex that works in every editor did nothing in a result grid, a
+ * query plan, a schema diagram or the profiler — all four read-heavy panels where looking for a
+ * name is the obvious thing to want, and all four share this class.
+ *
+ * Two limits worth knowing, neither fixable here. It is a `WebviewPanelOptions` flag, so it does
+ * **not** reach the bottom-Panel host (`firebird.queryResultsLocation: "panel"`) — a `WebviewView`
+ * has no equivalent in the API as of 1.134. And it searches the *rendered DOM*, so it finds what
+ * the grid is currently showing: with paging on that is the page on screen, not the whole result
+ * set, which is what the grid's own filter is for.
+ *
+ * Exported so the extension-host tier can assert both halves — that we ask for it, and that the
+ * VS Code we run against still honours it. A silently-ignored option is the failure mode a
+ * declarative flag actually has.
+ */
+export const RESULTS_PANEL_OPTIONS: WebviewPanelOptions = {
+  enableFindWidget: true,
+};
+
 export type WebviewLocation = "editor" | "panel";
 
 export class QueryResultsView extends EventEmitter implements Disposable, WebviewViewProvider {
@@ -152,6 +174,7 @@ export class QueryResultsView extends EventEmitter implements Disposable, Webvie
     const subscriptions = [];
 
     const options: WebviewPanelOptions & WebviewOptions = {
+      ...RESULTS_PANEL_OPTIONS,
       enableScripts: true,
       retainContextWhenHidden: false, // we dont need to keep the state
       // localResourceRoots: [Uri.parse(this.resourcesPath).with({ scheme: "vscode-resource" })]

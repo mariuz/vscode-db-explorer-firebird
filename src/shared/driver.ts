@@ -7,7 +7,7 @@ import type { Attachment, Client, ResultSet} from 'node-firebird-driver-native';
 import { TransactionIsolation, TransactionOptions as NativeTransactionOptions, ConnectOptions as NativeConnectOptions } from 'node-firebird-driver';
 import {simpleCallbackToPromise, getConnectionLabel} from './utils';
 import {CredentialStore} from './credential-store';
-import {splitStatementsWithOffsets} from './sql-splitter';
+import {splitStatementsWithOffsets, describeEmptyBatch} from './sql-splitter';
 import {SourcePosition, positionAt, offsetAt, parseServerPosition, shiftPosition} from './statement-position';
 import {extractTableNames as extractTableNamesImpl, buildIndexMetadataQuery, renderIndexMetadataPlan, validateReadOnlyStatement} from './sql-analysis';
 import {PooledClient, ConnectionPoolOptions} from './connection-pool';
@@ -467,7 +467,17 @@ export class Driver {
     const statements = splitStatementsWithOffsets(resolved.sql);
 
     if (statements.length === 0) {
-      throw { notify: false, message: "No valid SQL commands found!" };
+      // `empty` marks this apart from a real failure: the command's catch used to report it as
+      // "Oops! Something went wrong. Check the log output for more details!", which describes a
+      // crash and offers a log holding nothing useful. The text is carried so the caller — which
+      // is the only thing that knows whether this was a selection, a whole file or a notebook
+      // cell — can say which of them was empty.
+      throw {
+        notify: false,
+        empty: true,
+        sql: resolved.sql,
+        message: describeEmptyBatch(resolved.sql),
+      };
     }
 
     logger.info(`Batch: executing ${statements.length} statement(s)...`);

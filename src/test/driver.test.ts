@@ -663,13 +663,44 @@ suite('Driver.runBatch() (fake client, no live database)', function () {
     );
   });
 
-  test('rejects when the SQL contains no valid statements', async function () {
+  // The rejection carries three things the caller needs, not just a message: `empty` marks it
+  // apart from a real failure (it used to be reported as "Oops! Something went wrong", which
+  // describes a crash), and `sql` lets the caller re-describe it knowing whether it was a
+  // selection, a file or a notebook cell — which the driver cannot know, since it is what falls
+  // back to the active editor.
+  test('rejects when the SQL contains no valid statements, marked as empty rather than failed', async function () {
     Driver.client = new FakeClient(() => []);
     await assert.rejects(
       Driver.runBatch('   ;  ;  ', baseConnectionOptions()),
       (err: any) => {
         assert.strictEqual(err.notify, false);
-        assert.match(err.message, /No valid SQL commands found/);
+        assert.strictEqual(err.empty, true);
+        assert.strictEqual(err.sql, '   ;  ;  ');
+        assert.match(err.message, /^Nothing to run — /);
+        return true;
+      }
+    );
+  });
+
+  test('an entirely empty batch is described as empty, not as unparseable', async function () {
+    Driver.client = new FakeClient(() => []);
+    await assert.rejects(
+      Driver.runBatch('   ', baseConnectionOptions()),
+      (err: any) => {
+        assert.strictEqual(err.empty, true);
+        assert.match(err.message, /is empty\.$/);
+        return true;
+      }
+    );
+  });
+
+  test('a comment-only batch says so, rather than claiming the text is empty', async function () {
+    Driver.client = new FakeClient(() => []);
+    await assert.rejects(
+      Driver.runBatch('-- TODO: write this\n', baseConnectionOptions()),
+      (err: any) => {
+        assert.strictEqual(err.empty, true);
+        assert.match(err.message, /only comments\.$/);
         return true;
       }
     );

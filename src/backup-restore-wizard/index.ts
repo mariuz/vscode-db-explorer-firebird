@@ -116,7 +116,9 @@ export function showVisualBackupRestoreWizard(
     "firebirdBackupRestoreWizard",
     `Backup & Restore Wizard ${dbDetails ? `(${getDatabaseFileName(dbDetails.database)})` : ""}`,
     ViewColumn.One,
-    { enableScripts: true, retainContextWhenHidden: true }
+    // Ctrl+F: the output pane streams gbak's whole log, which is where a "did it warn about
+    // anything?" search actually pays off.
+    { enableScripts: true, retainContextWhenHidden: true, enableFindWidget: true }
   );
 
   let activeChildProcess: cp.ChildProcess | undefined;
