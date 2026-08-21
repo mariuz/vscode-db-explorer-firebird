@@ -360,7 +360,10 @@ export class Driver {
         sql = activeTextEditor!.document.getText(selection);
       }
       if (!sql) {
-        return Promise.reject({notify: false, message: "No valid SQL commands found!"});
+        // Same marker the post-split guard carries, for the same reason — see runBatch(). This is
+        // the guard an *entirely* empty document hits, which is the commonest case of all: the
+        // post-split one only sees text that had something in it to split.
+        return Promise.reject({ notify: false, empty: true, sql: "", message: describeEmptyBatch("") });
       }
     }
 
@@ -439,7 +442,7 @@ export class Driver {
     if (!sql) {
       sql = activeEditorSql()?.sql;
       if (!sql) {
-        throw { notify: false, message: "No valid SQL commands found!" };
+        throw { notify: false, empty: true, sql: "", message: describeEmptyBatch("") };
       }
     }
     connectionOptions = connectionOptions ?? Global.activeConnection;

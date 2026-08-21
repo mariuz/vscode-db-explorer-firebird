@@ -81,3 +81,54 @@ suite("describeEmptyBatch()", function () {
     }
   });
 });
+
+/**
+ * There are **two** empty guards, and the first pass only fixed the second one.
+ *
+ * `runBatch()`'s post-split guard fires when text was present but produced no statements
+ * (comments, bare semicolons). An *entirely* empty document never reaches it — it is caught
+ * earlier, by the `if (!sql)` check in `resolveSqlAndConnection()` — so the commonest case of all
+ * still reported "Oops! Something went wrong. Check the log output for more details!" after the
+ * change that was supposed to remove exactly that message. Both guards now carry the same marker.
+ */
+suite("Both empty guards report the same way", function () {
+  const { Driver } = require("../shared/driver");
+  const vscode = require("./mocks/vscode");
+
+  const conn = { id: "x", host: "h", port: 3050, database: "d", user: "u", password: "p", role: null };
+  let previousClient: any, previousEditor: any;
+
+  setup(function () {
+    previousClient = Driver.client;
+    previousEditor = vscode.window.activeTextEditor;
+    Driver.client = { createConnection: async () => ({}), detach: async () => { }, queryPromise: async () => [] };
+    vscode.window.activeTextEditor = {
+      selection: { isEmpty: true },
+      document: {
+        languageId: "sql", getText: () => "", uri: { toString: () => "f" },
+        positionAt: () => ({ line: 0, character: 0 }), offsetAt: () => 0, lineCount: 1,
+      },
+    };
+  });
+
+  teardown(function () {
+    Driver.client = previousClient;
+    vscode.window.activeTextEditor = previousEditor;
+  });
+
+  test("an entirely empty document is marked empty by runBatch, not reported as a failure", async function () {
+    await assert.rejects(Driver.runBatch(undefined, conn), (err: any) => {
+      assert.strictEqual(err.empty, true, "the pre-split guard must carry the same marker as the post-split one");
+      assert.match(err.message, /^Nothing to run — /);
+      return true;
+    });
+  });
+
+  test("runQuery's own guard reports it the same way", async function () {
+    await assert.rejects(Driver.runQuery(undefined, conn), (err: any) => {
+      assert.strictEqual(err.empty, true);
+      assert.match(err.message, /^Nothing to run — /);
+      return true;
+    });
+  });
+});
