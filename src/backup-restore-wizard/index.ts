@@ -8,10 +8,107 @@ import { logger } from "../logger/logger";
 import { getDatabaseFileName } from "../shared/utils";
 import { renderGbakCommand } from "../shared/gbak-options";
 
+/** The wizard's backup checkboxes, as the webview posts them. */
+export interface WizardBackupOptions {
+  backupPath?: string;
+  dbTarget?: string;
+  transportable?: boolean;
+  metadataOnly?: boolean;
+  includeStats?: boolean;
+  skipGarbageCollection?: boolean;
+  ignoreChecksums?: boolean;
+}
+
+/** The wizard's restore checkboxes, as the webview posts them. */
+export interface WizardRestoreOptions {
+  restorePath?: string;
+  targetDb?: string;
+  replaceExisting?: boolean;
+  oneAtATime?: boolean;
+  pageSize?: number | string;
+}
+
+/**
+ * `-ST` is not a bare flag: real gbak spells it `-ST(ATISTICS) TDRW` and *requires* a value naming
+ * which counters to report (T = time from start, D = delta time, R = page reads, W = page writes).
+ * Emitting a bare `-st` makes gbak read whatever argument follows as that value, which is how this
+ * wizard's "Include statistics" checkbox made every backup fail outright with
+ * `wrong char "-" at statistics parameter` — established by running the real binary, not read off
+ * the help text. All four counters are requested because the checkbox asks for statistics without
+ * offering a way to choose between them.
+ */
+export const GBAK_STATISTICS_SPEC = "TDRW";
+
+/**
+ * The complete gbak argument list for the wizard's backup. Split out of the webview message
+ * handler so the flags can be asserted without spawning anything — the same reason
+ * `buildRestoreArgs()` exists in `../shared/gbak-options`, and the same lesson as 0.1.96 and 0.2.2,
+ * both of which were bugs in argument-building code that no test could reach.
+ */
+export function buildWizardBackupArgs(
+  options: WizardBackupOptions,
+  dbDetails: ConnectionOptions | undefined
+): string[] {
+  const args: string[] = ["-b"];
+  if (options.transportable) { args.push("-t"); }
+  if (options.metadataOnly) { args.push("-m"); }
+  if (options.includeStats) { args.push("-st", GBAK_STATISTICS_SPEC); }
+  if (options.skipGarbageCollection) { args.push("-g"); }
+  if (options.ignoreChecksums) { args.push("-ig"); }
+  if (dbDetails) {
+    args.push("-user", dbDetails.user, "-password", dbDetails.password || "");
+  }
+  args.push(gbakTarget(options, dbDetails), options.backupPath ?? "");
+  return args;
+}
+
+/**
+ * The complete gbak argument list for the wizard's restore.
+ *
+ * There is deliberately no "deactivate triggers" flag here. The wizard used to emit
+ * `-inhibit_triggers`, which is not a gbak switch at all — a real gbak answers
+ * `unknown switch "INHIBIT_TRIGGERS"`, prints its usage and restores nothing, so that checkbox
+ * failed every restore it was ticked for. gbak has no restore-time trigger option to substitute:
+ * its only one, `-NODBTRIGGERS`, is rejected on restore with "option -NODBTRIGGERS is allowed only
+ * on backup". `-I(NACTIVE)` deactivates *indexes*, which is a different thing and not what the
+ * checkbox offered, so it is not silently swapped in.
+ */
+export function buildWizardRestoreArgs(
+  options: WizardRestoreOptions,
+  dbDetails: ConnectionOptions | undefined
+): string[] {
+  const args: string[] = [options.replaceExisting ? "-rep" : "-c"];
+  if (options.oneAtATime) { args.push("-one_at_a_time"); }
+  if (options.pageSize) { args.push("-page_size", String(options.pageSize)); }
+  if (dbDetails) {
+    args.push("-user", dbDetails.user, "-password", dbDetails.password || "");
+  }
+  args.push(options.restorePath ?? "", restoreTarget(options, dbDetails));
+  return args;
+}
+
+/** `host/port:database`, as gbak wants it — or whatever the user typed, when there is no node. */
+function gbakTarget(options: WizardBackupOptions, dbDetails: ConnectionOptions | undefined): string {
+  return dbDetails ? `${dbDetails.host}/${dbDetails.port || 3050}:${dbDetails.database}` : (options.dbTarget ?? "");
+}
+
+/** The restore's target database — an explicit one wins over the connected node's. */
+export function restoreTarget(options: WizardRestoreOptions, dbDetails: ConnectionOptions | undefined): string {
+  if (options.targetDb) { return options.targetDb; }
+  return dbDetails ? `${dbDetails.host}/${dbDetails.port || 3050}:${dbDetails.database}` : "";
+}
+
 export function showVisualBackupRestoreWizard(
   databaseNode?: any,
   context?: ExtensionContext,
-  taskTracker?: TaskTracker
+  taskTracker?: TaskTracker,
+  /**
+   * The gbak to run, already resolved by the caller through `resolveGbakExecutable()` — the same
+   * way `firebird.database.backupDatabase` and `restoreDatabase` receive theirs. This used to be
+   * the bare string "gbak", which ignored the `firebird.gbakPath` setting entirely, so a wizard
+   * run could only ever work when gbak happened to be on PATH.
+   */
+  gbakPath: string = "gbak"
 ): void {
   const dbDetails: ConnectionOptions | undefined = databaseNode?.getDbDetails ? databaseNode.getDbDetails() : databaseNode?.dbDetails;
   
@@ -55,19 +152,8 @@ export function showVisualBackupRestoreWizard(
           return;
         }
 
-        const gbakExecutable = "gbak";
-        const hostPort = dbDetails ? `${dbDetails.host}/${dbDetails.port || 3050}:${dbDetails.database}` : options.dbTarget;
-        
-        const args: string[] = ["-b"];
-        if (options.transportable) args.push("-t");
-        if (options.metadataOnly) args.push("-m");
-        if (options.includeStats) args.push("-st");
-        if (options.skipGarbageCollection) args.push("-g");
-        if (options.ignoreChecksums) args.push("-ig");
-        if (dbDetails) {
-          args.push("-user", dbDetails.user, "-password", dbDetails.password || "");
-        }
-        args.push(hostPort, backupPath);
+        const gbakExecutable = gbakPath;
+        const args = buildWizardBackupArgs(options, dbDetails);
 
         panel.webview.postMessage({ command: "executionStarted", type: "Backup" });
         logger.info(`Wizard Backup starting: ${renderGbakCommand(gbakExecutable, args)}`);
@@ -104,22 +190,15 @@ export function showVisualBackupRestoreWizard(
       case "startRestore": {
         const options = msg.options;
         const restorePath = options.restorePath;
-        const targetDb = options.targetDb || (dbDetails ? `${dbDetails.host}/${dbDetails.port || 3050}:${dbDetails.database}` : "");
+        const targetDb = restoreTarget(options, dbDetails);
         
         if (!restorePath || !targetDb) {
           window.showErrorMessage("Please select both a backup source file and a target database.");
           return;
         }
 
-        const gbakExecutable = "gbak";
-        const args: string[] = [options.replaceExisting ? "-rep" : "-c"];
-        if (options.deactivateTriggers) args.push("-inhibit_triggers");
-        if (options.oneAtATime) args.push("-one_at_a_time");
-        if (options.pageSize) args.push("-page_size", String(options.pageSize));
-        if (dbDetails) {
-          args.push("-user", dbDetails.user, "-password", dbDetails.password || "");
-        }
-        args.push(restorePath, targetDb);
+        const gbakExecutable = gbakPath;
+        const args = buildWizardRestoreArgs(options, dbDetails);
 
         panel.webview.postMessage({ command: "executionStarted", type: "Restore" });
         logger.info(`Wizard Restore starting: ${renderGbakCommand(gbakExecutable, args)}`);
@@ -227,7 +306,7 @@ function buildWizardHtml(dbDetails?: ConnectionOptions): string {
       <div class="checkbox-grid">
         <label class="checkbox-label"><input type="checkbox" id="chkTransportable" checked> 🚚 Transportable format (-t)</label>
         <label class="checkbox-label"><input type="checkbox" id="chkMetadataOnly"> 📄 Metadata Only (-m)</label>
-        <label class="checkbox-label"><input type="checkbox" id="chkIncludeStats" checked> 📊 Include Statistics (-st)</label>
+        <label class="checkbox-label"><input type="checkbox" id="chkIncludeStats" checked> 📊 Include Statistics (-st TDRW)</label>
         <label class="checkbox-label"><input type="checkbox" id="chkSkipGc"> 🧹 Skip Garbage Collection (-g)</label>
         <label class="checkbox-label"><input type="checkbox" id="chkIgnoreChecksums"> ⚠️ Ignore Checksums (-ig)</label>
       </div>
@@ -257,7 +336,6 @@ function buildWizardHtml(dbDetails?: ConnectionOptions): string {
       <label>Restore Options</label>
       <div class="checkbox-grid">
         <label class="checkbox-label"><input type="checkbox" id="chkReplaceExisting"> 🔄 Replace Existing (-rep)</label>
-        <label class="checkbox-label"><input type="checkbox" id="chkDeactivateTriggers"> 🚫 Deactivate Triggers (-inhibit_triggers)</label>
         <label class="checkbox-label"><input type="checkbox" id="chkOneAtATime"> 🔒 One Table at a Time (-one_at_a_time)</label>
       </div>
     </div>
@@ -323,7 +401,6 @@ function buildWizardHtml(dbDetails?: ConnectionOptions): string {
         restorePath: document.getElementById('restorePath').value,
         targetDb: document.getElementById('restoreTargetDb').value,
         replaceExisting: document.getElementById('chkReplaceExisting').checked,
-        deactivateTriggers: document.getElementById('chkDeactivateTriggers').checked,
         oneAtATime: document.getElementById('chkOneAtATime').checked,
         pageSize: document.getElementById('selPageSize').value,
       };

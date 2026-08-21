@@ -1741,8 +1741,15 @@ export function activate(context: ExtensionContext) {
 
   /* DB: visual backup and restore wizard */
   context.subscriptions.push(
-    commands.registerCommand("firebird.database.visualBackupRestoreWizard", (databaseNode?: NodeDatabase) => {
-      showVisualBackupRestoreWizard(databaseNode, context, taskTracker);
+    commands.registerCommand("firebird.database.visualBackupRestoreWizard", async (databaseNode?: NodeDatabase) => {
+      // Resolved here, exactly as backupDatabase/restoreDatabase above do it — the wizard used to
+      // hardcode "gbak", so the firebird.gbakPath setting did nothing for it.
+      const gbak = await resolveGbakExecutable(getOptions().gbakPath || undefined, checkGbakExecutable);
+      if (!gbak) {
+        logger.showError("Could not find the gbak executable. Install the Firebird server/client tools, or set the firebird.gbakPath setting.");
+        return;
+      }
+      showVisualBackupRestoreWizard(databaseNode, context, taskTracker, gbak);
     })
   );
 
