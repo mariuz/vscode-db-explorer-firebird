@@ -1,6 +1,6 @@
 import { window, workspace, ViewColumn, Uri, commands, ExtensionContext } from "vscode";
-import { mkdir, writeFile, readFile } from "fs/promises";
-import { join, dirname } from "path";
+import { mkdir, writeFile, readFile, rm, readdir } from "fs/promises";
+import { join, dirname, relative, sep } from "path";
 import { ConnectionOptions } from "../interfaces";
 import { Driver } from "../shared/driver";
 import {
@@ -12,6 +12,9 @@ import { getEngineMajorVersion } from "../shared/engine-version";
 import { supportsSchemas, schemaDisplayName, splitQualifiedName } from "../shared/schema-support";
 import { buildSchemaGraph, SchemaColumnRow, ForeignKeyRow, normalizeDefault } from "../schema-designer/schema-graph";
 import { buildProjectFiles, MANIFEST_FILE_NAME, ProjectInput, ProcedureParameter } from "./project-model";
+import {
+  parseObjectPath, buildObjectPath, requalifyDdl, applyMoveToManifestFiles, findReferencingFiles
+} from "./move-to-schema";
 import { diffProjects, buildPublishScript } from "./publish-model";
 import { logger } from "../logger/logger";
 import { CredentialStore } from "../shared/credential-store";
@@ -407,5 +410,153 @@ export async function runGenerateMigrationScript(context: ExtensionContext): Pro
   } catch (err: any) {
     logger.error(`Generate Migration Script failed: ${err?.message ?? err}`);
     logger.showError(`Could not generate the migration script: ${err?.message ?? err}`);
+  }
+}
+
+
+/** Walks up from `start` looking for the project manifest; returns the folder holding it. */
+async function findProjectRoot(start: string): Promise<string | undefined> {
+  let dir = start;
+  for (;;) {
+    try {
+      await readFile(join(dir, MANIFEST_FILE_NAME), "utf8");
+      return dir;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) {
+        return undefined;
+      }
+      dir = parent;
+    }
+  }
+}
+
+/** Every `.sql` file in the project, keyed by its project-relative, forward-slashed path. */
+async function readProjectSqlFiles(root: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  async function walk(dir: string): Promise<void> {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (entry.name.toLowerCase().endsWith(".sql")) {
+        found.set(relative(root, full).split(sep).join("/"), await readFile(full, "utf8"));
+      }
+    }
+  }
+  await walk(root);
+  return found;
+}
+
+/**
+ * Moves one object's `.sql` file into another schema's folder and requalifies its CREATE header,
+ * adapted from SQL Database Projects 1.7.0's Move to Schema.
+ *
+ * A Database Project is schema-as-code, so this is a declaration rather than an operation on a
+ * server: the object is recorded as belonging to the target schema, and Publish is what reconciles
+ * a live database against that. Said plainly in the confirmation, because "move" in a database
+ * context otherwise sounds like it relocates data.
+ */
+export async function runMoveToSchema(target?: Uri): Promise<void> {
+  const uri = target ?? window.activeTextEditor?.document.uri;
+  if (!uri || uri.scheme !== "file") {
+    logger.showError("Open the object's .sql file in a Database Project first, or right-click it in the Explorer.");
+    return;
+  }
+
+  const root = await findProjectRoot(dirname(uri.fsPath));
+  if (!root) {
+    logger.showError(`No ${MANIFEST_FILE_NAME} found above this file — Move to Schema works inside an extracted Database Project.`);
+    return;
+  }
+
+  const relativePath = relative(root, uri.fsPath).split(sep).join("/");
+  const parsed = parseObjectPath(relativePath);
+  if (!parsed) {
+    // Refusing loudly beats moving a role into a schema Firebird cannot put it in.
+    logger.showError(`${relativePath} is not a schema-scoped project object. Roles, users, the foreign-key script and the manifest are database-wide and cannot belong to a schema.`);
+    return;
+  }
+
+  // Offer the schemas the project already has, so a move usually needs no typing.
+  const contents = await readProjectSqlFiles(root);
+  const existing = [...new Set(
+    [...contents.keys()].map(p => parseObjectPath(p)?.schema).filter((x): x is string => !!x)
+  )].sort();
+
+  const DEFAULT_LABEL = "$(home) Default schema (no schemas/ folder)";
+  const NEW_LABEL = "$(add) New schema…";
+  const picked = await window.showQuickPick(
+    [
+      ...existing.filter(sc => sc !== parsed.schema).map(sc => ({ label: sc, description: `schemas/${sc}/${parsed.category}/` })),
+      ...(parsed.schema ? [{ label: DEFAULT_LABEL, description: `${parsed.category}/` }] : []),
+      { label: NEW_LABEL, description: "type a schema name" },
+    ],
+    { title: `Move ${parsed.name} to schema`, placeHolder: parsed.schema ? `Currently in ${parsed.schema}` : "Currently in the default schema" }
+  );
+  if (!picked) {
+    return;
+  }
+
+  let targetSchema: string | undefined;
+  if (picked.label === NEW_LABEL) {
+    const typed = await window.showInputBox({
+      title: "Target schema name",
+      prompt: `${parsed.name} will be recorded as belonging to this schema when the project is next published.`,
+      validateInput: v => (v.trim() ? undefined : "A schema name is required."),
+    });
+    if (!typed) {
+      return;
+    }
+    targetSchema = typed.trim();
+  } else if (picked.label !== DEFAULT_LABEL) {
+    targetSchema = picked.label;
+  }
+
+  const newRelative = buildObjectPath(parsed, targetSchema);
+  if (newRelative === relativePath) {
+    logger.showInfo(`${parsed.name} is already there.`);
+    return;
+  }
+
+  const newFull = join(root, ...newRelative.split("/"));
+  try {
+    await readFile(newFull, "utf8");
+    logger.showError(`${newRelative} already exists — move or delete it first.`);
+    return;
+  } catch {
+    // Nothing there, which is what we want.
+  }
+
+  try {
+    await mkdir(dirname(newFull), { recursive: true });
+    await writeFile(newFull, requalifyDdl(contents.get(relativePath) ?? "", parsed.category, targetSchema), "utf8");
+    await rm(uri.fsPath);
+
+    // Keep the manifest's order: Build concatenates in it, and that order is dependency-safe.
+    const manifestPath = join(root, MANIFEST_FILE_NAME);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (Array.isArray(manifest.files)) {
+      manifest.files = applyMoveToManifestFiles(manifest.files, relativePath, newRelative);
+      await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    }
+  } catch (err: any) {
+    logger.error(`Move to Schema failed: ${err?.message ?? err}`);
+    logger.showError(`Could not move ${parsed.name}: ${err?.message ?? err}`);
+    return;
+  }
+
+  await window.showTextDocument(Uri.file(newFull), { preview: false });
+
+  // References from other files are deliberately not rewritten, so say which ones to look at
+  // rather than letting the move look more complete than it is.
+  const referencing = findReferencingFiles(contents, parsed.name, relativePath);
+  const where = targetSchema ? `schema ${targetSchema}` : "the default schema";
+  if (referencing.length > 0) {
+    logger.showWarn(
+      `${parsed.name} now belongs to ${where}. ${referencing.length} other file(s) still refer to it by name and were not changed: ${referencing.slice(0, 5).join(", ")}${referencing.length > 5 ? ", …" : ""}`
+    );
+  } else {
+    logger.showInfo(`${parsed.name} now belongs to ${where}. Publish the project to apply it to a database.`);
   }
 }

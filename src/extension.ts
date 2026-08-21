@@ -58,7 +58,7 @@ import {registerLanguageModelTools} from "./copilot/lm-tools";
 import {listConnections, getActiveConnection} from "./connection-sharing";
 import {runQuery, runWriteQuery} from "./connection-sharing/run-query";
 import {editConnectionSharingPermissions} from "./connection-sharing/permissions";
-import {runBuildProject, runPublishProject, runGenerateMigrationScript} from "./database-projects";
+import {runBuildProject, runPublishProject, runGenerateMigrationScript, runMoveToSchema} from "./database-projects";
 import {runContainerProvisionWizard} from "./container-provisioning";
 import {runObjectSearch} from "./object-search";
 
@@ -1698,6 +1698,18 @@ export function activate(context: ExtensionContext) {
       runBuildProject().catch(err => {
         logger.error(err?.message ?? err);
         logger.showError("Database Project build failed. Check logs for details.", ["Show Logs"]).then(sel => {
+          if (sel === "Show Logs") { logger.showOutput(); }
+        });
+      });
+    })
+  );
+
+  /* Move one project object's .sql file into another schema's folder, requalifying its DDL */
+  context.subscriptions.push(
+    commands.registerCommand("firebird.project.moveToSchema", (target?: vscode.Uri) => {
+      runMoveToSchema(target).catch(err => {
+        logger.error(err?.message ?? err);
+        logger.showError("Move to Schema failed. Check logs for details.", ["Show Logs"]).then(sel => {
           if (sel === "Show Logs") { logger.showOutput(); }
         });
       });

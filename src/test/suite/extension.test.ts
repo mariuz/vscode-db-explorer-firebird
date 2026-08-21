@@ -73,7 +73,7 @@ suite('Extension Host – roadmap feature commands', function () {
       'firebird.connectionSharing.editPermissions',
     ],
     'data-api-builder.md': ['firebird.database.generateDataApiSpec', 'firebird.database.generateDataApiSpecWithCopilot'],
-    'database-projects.md': ['firebird.project.extract', 'firebird.project.build', 'firebird.project.publish'],
+    'database-projects.md': ['firebird.project.extract', 'firebird.project.build', 'firebird.project.publish', 'firebird.project.moveToSchema'],
     'flat-file-import-wizard.md': ['firebird.database.importFlatFile'],
     'live-profiler.md': ['firebird.database.monitorDatabase'],
     'mcp-server.md': ['firebird.database.toggleMcpExposure', 'firebird.database.toggleMcpWriteAccess', 'firebird.mcp.showWriteAuditLog'],

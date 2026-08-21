@@ -544,6 +544,12 @@
         "category": "Firebird"
       },
       {
+        "command": "firebird.project.moveToSchema",
+        "title": "Move to Schema...",
+        "category": "Firebird",
+        "icon": "$(symbol-namespace)"
+      },
+      {
         "command": "firebird.database.backupDatabase",
         "title": "Backup Database",
         "category": "Firebird"
@@ -1127,6 +1133,11 @@
           "command": "firebird.ai.optimizeSelection",
           "when": "editorLangId == sql",
           "group": "ai"
+        },
+        {
+          "command": "firebird.project.moveToSchema",
+          "when": "resourceExtname == .sql",
+          "group": "1_modification@10"
         }
       ],
       "view/title": [
@@ -1821,6 +1832,13 @@
           "command": "firebird.database.setDefaultSchema",
           "when": "view == firebird-explorer && viewItem == database",
           "group": "manage@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "firebird.project.moveToSchema",
+          "when": "resourceExtname == .sql",
+          "group": "7_modification"
         }
       ]
     },

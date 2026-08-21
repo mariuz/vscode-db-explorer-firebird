@@ -90,3 +90,45 @@ suite("SQL formatting provider (extension host)", function () {
     assert.strictEqual(prop.default, "upper");
   });
 });
+
+/**
+ * Move to Schema is contributed to two menus as well as the palette, and a `when` clause that
+ * never matches is silent — the item simply does not appear. Only a real host can read back what
+ * the manifest actually declares.
+ */
+suite("Database Projects – Move to Schema contribution (extension host)", function () {
+  this.timeout(20000);
+
+  function manifest(): any {
+    const extension = vscode.extensions.getExtension("AdrianMariusPopa.vscode-firebird-studio");
+    assert.ok(extension, "extension should be found by id");
+    return extension!.packageJSON;
+  }
+
+  test("the command is registered, not just declared", async function () {
+    const registered = await vscode.commands.getCommands(true);
+    assert.ok(registered.includes("firebird.project.moveToSchema"));
+  });
+
+  test("it is reachable from the Explorer and the editor, gated on a .sql file", function () {
+    const menus = manifest().contributes.menus;
+    for (const menu of ["explorer/context", "editor/context"]) {
+      const entry = (menus[menu] ?? []).find((m: any) => m.command === "firebird.project.moveToSchema");
+      assert.ok(entry, `no ${menu} entry`);
+      assert.strictEqual(entry.when, "resourceExtname == .sql", `${menu} when clause`);
+    }
+  });
+
+  test("every menu entry names a command the manifest also declares", function () {
+    // A menu entry pointing at an undeclared command renders as a blank item.
+    const pkg = manifest();
+    const declared = new Set(pkg.contributes.commands.map((c: any) => c.command));
+    for (const [menu, entries] of Object.entries(pkg.contributes.menus as Record<string, any[]>)) {
+      for (const entry of entries) {
+        if (entry.command) {
+          assert.ok(declared.has(entry.command), `${menu} names undeclared command ${entry.command}`);
+        }
+      }
+    }
+  });
+});
