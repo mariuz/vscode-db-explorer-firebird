@@ -3,6 +3,7 @@ import { CompletionProvider } from "./completionProvider";
 import { HoverProvider } from "./hoverProvider";
 import { SqlDocumentSymbolProvider } from "./documentSymbolProvider";
 import { SqlDefinitionProvider, DdlDocumentProvider } from "./definitionProvider";
+import { SqlFormattingProvider } from "./formattingProvider";
 import { DDL_SCHEME } from "./definition-model";
 import { FirebirdSchema, Schema } from "../interfaces";
 
@@ -49,6 +50,16 @@ export default class LanguageServer implements Disposable {
         this.schemaHandler ? this.schemaHandler(doc) : Promise.resolve({} as Schema.Database),
     })));
     this.subscriptions.push(workspace.registerTextDocumentContentProvider(DDL_SCHEME, new DdlDocumentProvider()));
+
+    // Formatting. Needs no schema and no connection either -- formatSQL() is pure text. Registered
+    // for both whole-document and range so Shift+Alt+F, Format Selection, format-on-save and
+    // format-on-type all work; the notebook-cell selector in the list above means a .fbnb cell
+    // formats too, which the firebird.formatSql command could never do.
+    const formattingProvider = new SqlFormattingProvider(
+      () => workspace.getConfiguration("firebird").get("format.keywordCase")
+    );
+    this.subscriptions.push(languages.registerDocumentFormattingEditProvider(documentSelector, formattingProvider));
+    this.subscriptions.push(languages.registerDocumentRangeFormattingEditProvider(documentSelector, formattingProvider));
   }
 
   setSchemaHandler(schemaHandler: (doc: TextDocument) => Thenable<FirebirdSchema>) {

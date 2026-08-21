@@ -1027,6 +1027,21 @@
             },
             "additionalProperties": false
           }
+        },
+        "firebird.format.keywordCase": {
+          "type": "string",
+          "enum": [
+            "upper",
+            "lower",
+            "preserve"
+          ],
+          "enumDescriptions": [
+            "Uppercase every keyword Firebird Studio recognises (SELECT, FROM, LEFT JOIN, ...).",
+            "Lowercase them.",
+            "Leave keywords exactly as they were typed, and only change layout."
+          ],
+          "default": "upper",
+          "description": "How SQL keywords are cased when a .sql file or notebook cell is formatted. Indentation is not set here -- formatting follows the editor's own indentation (editor.tabSize / editor.insertSpaces) so that a formatted file matches what the editor is already showing."
         }
       }
     },

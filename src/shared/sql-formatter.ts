@@ -33,13 +33,41 @@ const ALL_KEYWORDS = [
 /** Sort longer phrases first to avoid partial matches (e.g. "LEFT OUTER JOIN" before "LEFT JOIN") */
 const SORTED_KEYWORDS = [...new Set([...ALL_KEYWORDS])].sort((a, b) => b.length - a.length);
 
+/** How keywords are cased. `preserve` leaves whatever the author typed alone. */
+export type KeywordCase = "upper" | "lower" | "preserve";
+
+export interface FormatOptions {
+  /** Default `upper`, which is what this formatter has always done. */
+  keywordCase?: KeywordCase;
+  /**
+   * One indent level, as the literal string to emit — spaces or a tab. Taken from the editor's
+   * own `FormattingOptions` by the formatting provider, so a file formats to the indentation the
+   * editor is already showing rather than to a second, private setting. Defaults to the four
+   * spaces this formatter hardcoded before it took options at all.
+   */
+  indent?: string;
+}
+
+const DEFAULT_OPTIONS: Required<FormatOptions> = { keywordCase: "upper", indent: "    " };
+
+/** Applies the configured casing to a keyword this formatter recognises. */
+function caseKeyword(keyword: string, keywordCase: KeywordCase): string {
+  if (keywordCase === "lower") { return keyword.toLowerCase(); }
+  if (keywordCase === "upper") { return keyword.toUpperCase(); }
+  return keyword;
+}
+
 /**
  * Formats a SQL string:
- * - Uppercases SQL keywords
+ * - Cases SQL keywords per `options.keywordCase`
  * - Places major clauses on new lines
- * - Indents column lists after SELECT
+ * - Indents column lists after SELECT by `options.indent`
+ *
+ * Called with no options it behaves exactly as it always has, which is what keeps the
+ * `firebird.formatSql` command and every existing test unchanged.
  */
-export function formatSQL(sql: string): string {
+export function formatSQL(sql: string, options: FormatOptions = {}): string {
+  const { keywordCase, indent } = { ...DEFAULT_OPTIONS, ...options };
   if (!sql || !sql.trim()) {
     return sql;
   }
@@ -69,26 +97,33 @@ export function formatSQL(sql: string): string {
     return `\x00BLK${idx}\x00`;
   });
 
-  // Uppercase all SQL keywords (case-insensitive match)
-  for (const kw of SORTED_KEYWORDS) {
-    const pattern = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-    processed = processed.replace(pattern, kw);
+  // Case all SQL keywords (case-insensitive match). `preserve` skips the pass entirely rather
+  // than rewriting each keyword to what it already was.
+  if (keywordCase !== "preserve") {
+    for (const kw of SORTED_KEYWORDS) {
+      const pattern = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+      processed = processed.replace(pattern, caseKeyword(kw, keywordCase));
+    }
   }
 
   // Insert newlines before major clauses
   for (const kw of NEWLINE_KEYWORDS) {
     const pattern = new RegExp(`(?<![\\x00])(\\s*)\\b(${kw.replace(/\s+/g, '\\s+')})\\b`, 'gi');
-    processed = processed.replace(pattern, (_match, _space, keyword) => `\n${keyword.toUpperCase()}`);
+    processed = processed.replace(pattern, (_match, _space, keyword) => `\n${caseKeyword(keyword, keywordCase)}`);
   }
 
   // Indent SELECT column list: columns separated by commas on their own lines
-  processed = processed.replace(/\bSELECT\b([\s\S]*?)\bFROM\b/gi, (_match, cols) => {
+  // Both keywords are captured rather than re-emitted from a literal: under `preserve` the
+  // author's own spelling has to survive this rewrite too.
+  processed = processed.replace(/\b(SELECT)\b([\s\S]*?)\b(FROM)\b/gi, (_match, selectKw, cols, fromKw) => {
     const trimmed = cols.trim();
+    const SELECT = caseKeyword(selectKw, keywordCase);
+    const FROM = caseKeyword(fromKw, keywordCase);
     if (!trimmed || trimmed === '*') {
-      return `SELECT ${trimmed}\nFROM`;
+      return `${SELECT} ${trimmed}\n${FROM}`;
     }
-    const columns = trimmed.split(',').map((c: string) => `    ${c.trim()}`).join(',\n');
-    return `SELECT\n${columns}\nFROM`;
+    const columns = trimmed.split(',').map((c: string) => `${indent}${c.trim()}`).join(',\n');
+    return `${SELECT}\n${columns}\n${FROM}`;
   });
 
   // Clean up excessive blank lines and normalize line endings

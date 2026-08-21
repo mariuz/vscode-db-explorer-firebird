@@ -61,6 +61,7 @@
     "src/language-server/hover-model.ts",
     "src/language-server/symbol-model.ts",
     "src/language-server/definition-model.ts",
+    "src/language-server/format-model.ts",
     "src/object-properties/index.ts",
     "src/backup-restore-wizard/index.ts",
     "src/interfaces/**/*.ts",

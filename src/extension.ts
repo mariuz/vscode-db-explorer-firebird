@@ -27,6 +27,7 @@ import * as path from 'node:path';
 import {extractChangelogEntry, summarizeChangelogEntry} from "./shared/changelog-notice";
 import {extractNamedParameters, rewriteNamedParametersToPositional, coerceParamValue, ParamType} from "./shared/parameterized-query";
 import {formatSQL} from "./shared/sql-formatter";
+import {buildFormatOptions} from "./language-server/format-model";
 import {splitStatementsWithOffsets} from "./shared/sql-splitter";
 import {showObjectProperties} from "./object-properties";
 import {showVisualBackupRestoreWizard} from "./backup-restore-wizard";
@@ -1808,7 +1809,16 @@ export function activate(context: ExtensionContext) {
       }
       const document = editor.document;
       const text = document.getText();
-      const formatted = formatSQL(text);
+      // Same options the formatting provider builds, so this command and Shift+Alt+F cannot
+      // format the same file two different ways. The editor's own tabSize/insertSpaces are on
+      // the editor rather than in settings, because detectIndentation may have overridden both.
+      const formatted = formatSQL(text, buildFormatOptions(
+        {
+          tabSize: typeof editor.options.tabSize === "number" ? editor.options.tabSize : 4,
+          insertSpaces: editor.options.insertSpaces !== false,
+        },
+        workspace.getConfiguration("firebird").get("format.keywordCase")
+      ));
       if (formatted === text) {
         logger.showInfo("SQL document is already formatted.");
         return;
