@@ -1,7 +1,8 @@
-import {CompletionItemProvider, TextDocument, CompletionItem, CompletionItemKind, MarkdownString, Position, CompletionContext, Range} from "vscode";
+import {CompletionItemProvider, TextDocument, CompletionItem, CompletionItemKind, MarkdownString, Position, CompletionContext, Range, CancellationToken} from "vscode";
 import {Schema, FirebirdSchema, FirebirdReserved} from "../interfaces";
 import { schemaDisplayName, schemaQualifiedName, effectiveSearchPath, searchPathRank } from "../shared/schema-support";
 import {firebirdReserved, firebirdPsqlKeywords, firebirdBuiltinFunctions} from "./firebird-reserved";
+import { withTimeout, resolveCompletionTimeoutMs } from "./completion-budget";
 
 interface SchemaProvider {
   provideSchema: (doc: TextDocument) => Thenable<FirebirdSchema>;
@@ -67,19 +68,39 @@ const ddlObjectTypes: FirebirdReserved[] = [
 ];
 
 export class CompletionProvider implements CompletionItemProvider {
-  constructor(private schemaProvider: SchemaProvider) {}
+  /**
+   * @param getTimeoutMs Reads `firebird.intelliSense.completionTimeoutMs` at call time, so a
+   *   change to the setting applies to the next keystroke rather than the next window.
+   */
+  constructor(
+    private schemaProvider: SchemaProvider,
+    private getTimeoutMs: () => unknown = () => undefined
+  ) {}
 
-  provideCompletionItems(document: TextDocument, position: Position, _token: unknown, context: CompletionContext) {
-    return this.schemaProvider.provideSchema(document).then(schema => {
-      return this.getCompletionItems(
+  provideCompletionItems(document: TextDocument, position: Position, token: CancellationToken, context: CompletionContext) {
+    // Keywords alone, which is what a completion falls back to when the schema is slow, is
+    // cancelled, or fails. Returning something beats returning nothing: the reserved-word list is
+    // useful on its own, and the schema build keeps running and populates the cache, so the very
+    // next keystroke has table names.
+    const withoutSchema = () => this.getCompletionItems(document, position, context, firebirdReserved, undefined, undefined);
+
+    const work = this.schemaProvider.provideSchema(document).then(schema =>
+      this.getCompletionItems(
         document,
         position,
         context,
         schema?.reservedKeywords ? firebirdReserved : undefined,
         schema?.tables?.length > 0 ? schema.tables : undefined,
         schema?.searchPath,
-      );
-    });
+      )
+    );
+
+    // The token was previously ignored outright (the parameter was named `_token`), so typing
+    // another character left the abandoned request still running to completion.
+    if (token?.isCancellationRequested) {
+      return withoutSchema();
+    }
+    return withTimeout(work, resolveCompletionTimeoutMs(this.getTimeoutMs()), withoutSchema);
   }
 
   private getCompletionItems(document: TextDocument, position: Position, context: CompletionContext, reservedWords?: FirebirdReserved[], tables?: Schema.Table[], connectionSearchPath?: string[]) {

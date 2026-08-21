@@ -9,8 +9,51 @@ import { supportsSchemas, connectionSearchPath } from "../shared/schema-support"
 
 type ResultSet = Array<any>;
 
+/**
+ * How long a built schema stays usable before it is rebuilt.
+ *
+ * There was no cache at all before this, which is worth stating plainly because both CLAUDE.md and
+ * the roadmap referred to "the completion provider's schema cache" as though one existed. Measured
+ * against a live server on a *ten-table* database, three consecutive completions opened three
+ * connections and issued six catalogue queries — every keystroke that triggered completion paid a
+ * fresh connection plus `getTablesQuery()` plus `fieldsQuery()`, the latter naming every table in
+ * the database. The hover provider shares this handler, so hovering paid it too.
+ *
+ * Thirty seconds is a deliberate middle: long enough that typing never rebuilds, short enough that
+ * a table created outside this extension appears without a restart. Anything done *through* the
+ * extension does not wait for it — `invalidate()` is called when the tree is refreshed or the
+ * active connection changes.
+ */
+export const SCHEMA_CACHE_TTL_MS = 30_000;
+
+/**
+ * What a cached schema is keyed by. Not the connection id alone: the default schema changes what
+ * the catalogue queries return (Firebird 6 search path), and the three completion settings change
+ * the shape of what is built, so a change to any of them must not be served a stale answer.
+ * Exported for testing.
+ */
+export function schemaCacheKey(
+    connection: Pick<ConnectionOptions, "id" | "defaultSchema">,
+    options: { codeCompletionKeywords: boolean; codeCompletionDatabase: boolean; maxTablesCount: number }
+): string {
+    return [
+        connection.id,
+        connection.defaultSchema ?? "",
+        options.codeCompletionKeywords ? "kw" : "-",
+        options.codeCompletionDatabase ? "db" : "-",
+        options.maxTablesCount,
+    ].join("::");
+}
+
 export class KeywordsDb {
-    public async getSchema(): Promise<Schema.Database> {
+    private cached?: { key: string; builtAt: number; schema: Schema.Database };
+
+    /** Drops the cached schema so the next completion rebuilds it. */
+    public invalidate(): void {
+        this.cached = undefined;
+    }
+
+    public async getSchema(now: number = Date.now()): Promise<Schema.Database> {
         try {
             // No active connection means there's nothing to query regardless of the
             // codeCompletionDatabase setting — without this check, build() below would be called
@@ -18,8 +61,17 @@ export class KeywordsDb {
             if (!Global.activeConnection || !getOptions().codeCompletionDatabase) {
                 return { reservedKeywords: getOptions().codeCompletionKeywords, path: "", tables: [] };
             }
-            const schema = await this.build(Global.activeConnection, getOptions().codeCompletionKeywords, getOptions().maxTablesCount);
-            return schema ?? { reservedKeywords: getOptions().codeCompletionKeywords, path: "", tables: [] };
+            const options = getOptions();
+            const key = schemaCacheKey(Global.activeConnection, options);
+            if (this.cached && this.cached.key === key && now - this.cached.builtAt < SCHEMA_CACHE_TTL_MS) {
+                return this.cached.schema;
+            }
+            const schema = await this.build(Global.activeConnection, options.codeCompletionKeywords, options.maxTablesCount);
+            const resolved = schema ?? { reservedKeywords: options.codeCompletionKeywords, path: "", tables: [] };
+            // A database with no tables caches too: build() returns undefined for that, and
+            // re-asking the server every keystroke to be told "still nothing" is the same waste.
+            this.cached = { key, builtAt: now, schema: resolved };
+            return resolved;
         } catch (err) {
             logger.error(err);
             return { reservedKeywords: getOptions().codeCompletionKeywords, path: "", tables: [] };
@@ -35,6 +87,20 @@ export class KeywordsDb {
         const tableNames: string[] = [];
 
         const connection = await Driver.client.createConnection(await Driver.resolvePassword(conOptions));
+        try {
+            return await this.buildFrom(connection, conOptions, schema, tableNames, maxTablesCount);
+        } finally {
+            // Every other path through Driver detaches in a finally; this one never did, so each
+            // completion leaked a connection — three completions, three attachments, measured.
+            // With pooling on, detach() is what returns it to the pool rather than closing it.
+            await Driver.client.detach(connection).catch(() => { /* already gone */ });
+        }
+    }
+
+    private async buildFrom(
+        connection: any, conOptions: ConnectionOptions, schema: Schema.Database, tableNames: string[],
+        maxTablesCount: number
+    ): Promise<Schema.Database | undefined> {
         // Firebird 6 keeps every object in a schema. Without asking, two same-named tables from
         // different schemas produce two identical completion entries and there is no way to tell
         // which is which — or to insert the one you meant.

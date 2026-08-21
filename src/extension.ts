@@ -512,6 +512,10 @@ export function activate(context: ExtensionContext) {
   /* EXPLORER TOOLBAR: refresh explorer view items */
   context.subscriptions.push(
     commands.registerCommand("firebird.explorer.refresh", (node: FirebirdTree) => {
+      // The completion/hover schema is cached for SCHEMA_CACHE_TTL_MS; a refresh is the user
+      // saying the database changed, so it should not be the one thing still showing the old
+      // tables. Cheap: the next completion rebuilds it, the rest of the time it is a no-op.
+      firebirdDatabaseWords.invalidate();
       firebirdTreeDataProvider.refresh(node);
     })
   );

@@ -1048,6 +1048,12 @@
           ],
           "default": "upper",
           "description": "How SQL keywords are cased when a .sql file or notebook cell is formatted. Indentation is not set here -- formatting follows the editor's own indentation (editor.tabSize / editor.insertSpaces) so that a formatted file matches what the editor is already showing."
+        },
+        "firebird.intelliSense.completionTimeoutMs": {
+          "type": "number",
+          "minimum": 0,
+          "default": 3000,
+          "markdownDescription": "How long autocompletion waits for the database schema before offering Firebird keywords on their own, in milliseconds. The schema keeps loading in the background, so table and column names appear on the next keystroke. Set to `0` to wait as long as it takes."
         }
       }
     },

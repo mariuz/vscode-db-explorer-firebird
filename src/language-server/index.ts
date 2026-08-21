@@ -16,15 +16,19 @@ export default class LanguageServer implements Disposable {
   constructor() {
     this.subscriptions = [];
 
-    this.completionProvider = new CompletionProvider({
-      provideSchema: doc => {
-        if (this.schemaHandler) {
-          return this.schemaHandler(doc);
-        } else {
-          return Promise.resolve({} as Schema.Database);
+    this.completionProvider = new CompletionProvider(
+      {
+        provideSchema: doc => {
+          if (this.schemaHandler) {
+            return this.schemaHandler(doc);
+          } else {
+            return Promise.resolve({} as Schema.Database);
+          }
         }
-      }
-    });
+      },
+      // Read per call, so changing the setting applies to the next keystroke.
+      () => workspace.getConfiguration("firebird").get("intelliSense.completionTimeoutMs")
+    );
 
     // Shares the completion provider's schema handler: one cache, two providers, no extra queries.
     this.hoverProvider = new HoverProvider({
