@@ -21,7 +21,7 @@
   "reports-dir": "coverage/unit",
   "temp-directory": "coverage/.tmp-unit",
   "statements": 71,
-  "branches": 91,
-  "functions": 62,
+  "branches": 88,
+  "functions": 64,
   "lines": 71
 }
