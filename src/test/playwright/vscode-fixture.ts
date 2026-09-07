@@ -202,21 +202,22 @@ let coverageFileCounter = 0;
  */
 export async function runCommand(page: Page, command: string): Promise<void> {
   const input = page.locator(".quick-input-widget .input");
-  // Opening the palette is retried rather than awaited once. The widget exists in the DOM whether
-  // or not it is open, so a Control+Shift+P that never took effect — swallowed before the
-  // workbench was listening, or undone by something else taking focus — shows up as an input that
-  // resolves and then is not visible when filled, 30 seconds later. Reopening is the only recovery,
-  // and this tier is slow enough that a spurious failure costs more than a retry.
+  // Opening the palette is retried rather than awaited once. The quick-input widget also backs
+  // extension-owned prompts, not just the palette, so always dismiss any already-open quick input
+  // first and then reopen the palette explicitly.
   await expectFromBase(async () => {
-    if (!(await input.isVisible())) {
-      await page.keyboard.press("Control+Shift+P");
+    if (await input.isVisible()) {
+      await page.keyboard.press("Escape");
+      await input.waitFor({ state: "hidden", timeout: 5_000 });
     }
+    await page.keyboard.press("Control+Shift+P");
+    await input.waitFor({ state: "visible", timeout: 5_000 });
     await input.fill(`>${command}`, { timeout: 5_000 });
+    // Let the palette filter before committing — pressing Enter too early runs whatever was
+    // highlighted for the previous keystroke.
+    await page.locator(".quick-input-list .monaco-list-row").first().waitFor({ timeout: 5_000 });
+    await page.keyboard.press("Enter");
   }).toPass({ timeout: 60_000 });
-  // Let the palette filter before committing — pressing Enter too early runs whatever was
-  // highlighted for the previous keystroke.
-  await page.locator(".quick-input-list .monaco-list-row").first().waitFor({ timeout: 30_000 });
-  await page.keyboard.press("Enter");
 }
 
 /**
